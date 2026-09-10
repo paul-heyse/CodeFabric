@@ -110,7 +110,7 @@ impl super::SelectedQueryOutput {
             })
         })
         .collect::<Result<Vec<_>, RelationalProgramError>>()?;
-        append_order(&mut self.program.root, &order);
+        super::result_order::append(&mut self.program.root, &order);
         self.program_result_binding = Some(SupplementalProgramRelationBinding::try_new(
             self.relation_id.clone(),
             binding.table_reference().clone(),
@@ -210,17 +210,4 @@ fn node_projection(
         ));
     }
     Ok(columns)
-}
-
-fn append_order(root: &mut R, order: &[SortExpression]) {
-    match root {
-        R::Limit { input, .. } => append_order(input, order),
-        R::Sort { expressions, .. } => expressions.extend_from_slice(order),
-        _ => {
-            *root = R::Sort {
-                input: Box::new(root.clone()),
-                expressions: order.to_vec(),
-            };
-        }
-    }
 }

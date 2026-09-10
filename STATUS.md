@@ -46,7 +46,50 @@ The call-query continuation present at session start was preserved, exercised an
 originally stopped at the diagnostic checkpoint. The subsequent user instruction resumes execution
 of the cross-cutting packages in §3.3 of the detailed plan.
 
-## P03 in progress: block composition and first-four completion
+## P03 first-release query boundary delivered; P04 next
+
+The plan corpus is committed in `47b0c225`; the shared native schema-identity correction is
+committed in `445bcbda`. The final mixed installed run passes both cases in 418.109 s
+(`/tmp/codefabric-p03-related-and-corpus-final.log`): the source-authored plan corpus takes
+190.916 s and related-occurrence/relationship/source/reopen acceptance takes 227.189 s.
+
+Related source contexts use native joins over canonical calls, references and imports. A distinct
+capability role and anchor meaning preserve selection through resolution/replay. Output retains
+the requested anchor separately from the actual occurrence, with relationship, resolution and
+unknown reason. Descriptor union/deduplication precedes the exact byte-buffer join. Authorized
+boundaries apply to returned files; in-file lexical occurrences remain visible when outside callers
+are excluded. Bounded native descriptor lookup narrows fully known explicit anchor language/context
+sets while keeping incoming occurrence files broad. Unknown/excluded/disjoint anchors preserve
+conservative coverage. Native Python reference and Rust lexical/reference gaps stay visible.
+
+The installed case verifies repeated subjects, typed prior reuse, source-location equivalence,
+exact bytes, requested boundaries, scoped processing and exact reopen. Arrow IPC metadata confirms
+that the returned occurrence has the reusable public-identity role; the anchor has a separate role.
+Disclosure/snapshot-bound source handles are validated and compared separately from canonical
+facts and bytes. Neither empty subsets nor absent exhaustion observations assert complete absence.
+
+The plan's `pragmatic_cpg/workspace` and `expectations.json` now drive the `first-release-queries`
+case: all four forms, Python/Rust declaration names, independently constructed primitive type IDs,
+imports, resolved and unknown calls, definition bytes/positions and canonical/processing equality
+on exact reopen. `just golden --case first-release-queries` selects it; the measured run used the
+same exact nextest selector inside the delegated user-systemd fixture. All 40 product-harness tests
+pass (`/tmp/codefabric-p03-corpus-harness.log`), with focused Python lint/format checks clean.
+
+Fourteen compiler/metadata tests and 64 affected session/catalog/compiler/source tests pass.
+Seven source-scope cases, including incomplete/disjoint anchor selection, also pass in
+`/tmp/codefabric-p03-related-and-corpus.log`. That earlier combined run failed only because its
+new corpus test assumed optional `additional_rows` was present; the corrected final run passes.
+Default/featureless checks pass in `/tmp/codefabric-p03-related-anchor-context-check.log`;
+changed-line Clippy is clean in `/tmp/codefabric-p03-related-final-clippy.jsonl`. The final native
+outline/revocation and walk-metadata regressions pass (two tests, 118.586 s) in
+`/tmp/codefabric-p03-native-metadata-regression.log`.
+Global baseline lint/format issues remain separate; no full CI or doctest closure is claimed.
+
+This delivers P03's first-release query integration boundary. Full first-four meanings/subject roles
+continue with their P06/P10 producers; target/family convergence and explicit historical query
+selection remain in P04/P11. P04 is next: retained source/provider state, exact invalidation and
+unchanged-version reuse under the existing owned coordinator. P05 still owns the assembled edit/
+clean/restart first-useful-release boundary. No outcome from 4 through 8 is complete.
 
 Named traversal stops are committed in `f0a70a03`. The P03 syntax-outline slice now passes validation.
 A new source-context capability role advertises outline anchors only on supporting snapshots.
@@ -87,8 +130,8 @@ four-file/462-byte initial snapshot measured 30.872 s for source relational exec
 small-workload observations for P04/P12/P14, not representative optimization evidence. Earlier
 failures remain attributable in `/tmp/codefabric-p03-outline-*.log`.
 
-The next work is related occurrence contexts, followed by the remaining P03 meanings, reusable
-roles and precise dependency scope. P04–P14 remain open.
+That outline checkpoint continued into the accepted related-occurrence and plan-corpus work above.
+P04–P14 remain open; broader meanings and roles follow their producers in P06/P10.
 
 The bounded-call slice is committed in `69beaec3`. The next P03 slice adds named stopping
 conditions through the existing canonical name selector and native DataFusion left anti joins.
@@ -1889,12 +1932,12 @@ Raw provider coverage is not complete canonical-family coverage.
 |---|---|---|
 | FindEntities | Canonical declarations, modules, call/reference/import occurrences and complete admitted syntax nodes; reusable IDs/priors, literal names, text properties, captured path bounds and source context selection | Remaining kinds, configured context defaults, broader boundaries, ambiguity and directives |
 | RetrieveFacts | Canonical declarations, syntax properties and initial module/import/reference/type/diagnostic families; typed entity priors and literal subjects; native semi joins preserve occurrence identity | Full signatures/members/arguments, point filters, broad family expansion and fact/instance subjects |
-| FollowRelationships | Python/Rust one-step calls, semantic references/imports, syntax parent links and Python lexical references; both directions, typed entity priors and scoped unknowns | Full distance/stop/filter behavior, remaining endpoint roles and dependency scope |
-| RetrieveSourceContext | Exact declaration, module, occurrence and syntax-node spans; function definitions/bodies and surrounding lines; independent disclosure, original-byte/UTF-8/UTF-16 coordinates, truncation and retained revocation | Source-location/fact/instance subjects, outlines, related contexts and full history selection |
+| FollowRelationships | Python/Rust calls through eight steps with named stops and edge filters, semantic references/imports, syntax parent links and Python lexical references; both directions, typed entity priors and scoped unknowns | Further distance/stop/filter meanings, remaining endpoint roles and dependency scope |
+| RetrieveSourceContext | Exact declaration, module, occurrence and syntax-node spans; source-location subjects, function definitions/bodies, surrounding lines, syntax outlines and direct semantic-anchor related occurrences; independent disclosure, original-byte/UTF-8/UTF-16 coordinates, truncation and retained revocation | Fact/instance subjects, broader related-context meanings and full history selection |
 
-Unsupported subject meanings are explicitly rejected; they do not fall back to names. The generalized
-pragmatic expectation corpus is not fully connected to all public forms. The static four-form mixed-language
-acceptance and the live first-useful-release acceptance are both still open.
+Unsupported subject meanings are explicitly rejected; they do not fall back to names. The static
+plan-authored corpus now passes all four forms with independent Python/Rust expectations and exact
+reopen. The broader edit corpus and live first-useful-release acceptance remain open in P04/P05.
 
 ## Outcome 5: processing, incomplete scope and freshness
 

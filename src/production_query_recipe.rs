@@ -72,6 +72,7 @@ pub(crate) const RELEASE_SELECTION_MAXIMUM_VALUES: usize = 64;
 pub(crate) const SOURCE_OCCURRENCES_ROLE: &str = "canonical.source-context.occurrences.v1";
 pub(crate) const SOURCE_SYNTAX_ROLE: &str = "canonical.source-context.syntax.v1";
 pub(crate) const SOURCE_OUTLINES_ROLE: &str = "canonical.source-context.outlines.v1";
+pub(crate) const SOURCE_RELATED_ROLE: &str = "canonical.source-context.related.v1";
 
 pub(crate) const CANONICAL_OCCURRENCE_SELECTOR_ROLE: &str =
     "canonical.entity-selector.occurrences.v1";

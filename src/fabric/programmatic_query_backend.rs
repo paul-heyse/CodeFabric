@@ -1446,15 +1446,30 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 maximum_source_bytes,
                 line_window,
             };
-            let outline = validated.ingress().selections.iter().any(|selection| {
-                selection.query_id == *query_id
+            let source_context = validated.ingress().selections.iter().find_map(|selection| {
+                if selection.query_id == *query_id
                     && selection.selection_id.as_ref() == "selection.context"
-                    && matches!(&selection.value, SemanticClauseValue::Text(value) if value.as_ref() == "syntax outline")
+                    && let SemanticClauseValue::Text(value) = &selection.value
+                {
+                    Some(value.as_ref())
+                } else {
+                    None
+                }
             });
-            let materialized = if outline {
+            let materialized = if source_context == Some("syntax outline") {
                 output
                     .clone()
                     .with_syntax_outline(authority.epoch(), parameters)
+            } else if source_context == Some("related occurrence") {
+                output
+                    .clone()
+                    .with_related_occurrences(authority.epoch())
+                    .and_then(|output| {
+                        output.with_source_boundaries(&source_boundaries).map_err(
+                            crate::relational_program::RelationalProgramError::InvalidProgram,
+                        )
+                    })
+                    .and_then(|output| output.with_source_context(parameters))
             } else {
                 output.clone().with_source_context(parameters)
             };
@@ -1498,6 +1513,10 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     output.relation_id().as_str(),
                 );
                 let source_context = output.relation_id().as_str() == "query.result.source-context";
+                let related_source_context = source_context && validated.ingress().selections.iter().any(|selection| {
+                    selection.query_id == *query_id && selection.selection_id.as_ref() == "selection.context"
+                        && matches!(&selection.value, SemanticClauseValue::Text(value) if value.as_ref() == "related occurrence")
+                });
                 let declarations = source_context
                     || output.relation_id().as_str() == "query.result.declaration-facts";
                 let calls = output.relation_id().as_str() == "query.result.call-facts"
@@ -1604,6 +1623,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                             crate::production_query_recipe::SOURCE_OCCURRENCES_ROLE
                                 | crate::production_query_recipe::SOURCE_SYNTAX_ROLE
                                 | crate::production_query_recipe::SOURCE_OUTLINES_ROLE
+                                | crate::production_query_recipe::SOURCE_RELATED_ROLE
                         )
                     );
                     scope = match scope.for_source_subjects(
@@ -1615,6 +1635,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                             Some(
                                 crate::production_query_recipe::SOURCE_SYNTAX_ROLE
                                     | crate::production_query_recipe::SOURCE_OUTLINES_ROLE
+                                    | crate::production_query_recipe::SOURCE_RELATED_ROLE
                             )
                         ),
                     ) {
@@ -1641,9 +1662,26 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     .queries
                     .iter()
                     .find(|clause| clause.query_id() == query_id.as_ref())
-                    && let Err(error) = scope
-                        .narrow_location_files(clause)
-                        .and_then(|()| processing.select_subject_owners(&mut scope, clause))
+                    && let Err(error) = if related_source_context {
+                        if authorization
+                            .table_relations()
+                            .any(|id| id.as_str() == "fact.code_source_context")
+                        {
+                            processing
+                                .select_related_subject_contexts(
+                                    authority.epoch(),
+                                    &mut scope,
+                                    clause,
+                                )
+                                .await
+                        } else {
+                            Err("related source descriptor lookup is not authorized".into())
+                        }
+                    } else {
+                        scope
+                            .narrow_location_files(clause)
+                            .and_then(|()| processing.select_subject_owners(&mut scope, clause))
+                    }
                 {
                     return failed(&artifacts, "processing_scope", error);
                 }

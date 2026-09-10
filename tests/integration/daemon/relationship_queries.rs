@@ -1,8 +1,9 @@
 use super::block_queries::{block_rows, resource_bytes};
 use super::*;
 
-mod scopes;
 mod distance;
+mod related;
+mod scopes;
 
 fn occurrence_id(row: &Value, field: &str, kind: &str) -> String {
     let value = row[field].as_str().unwrap();
@@ -482,6 +483,7 @@ fn pragmatic_semantic_relationships_through_installed_clients_and_reopen() {
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
     let selected = wait_for_semantic_activation_with_timeout(&fixture, Duration::from_secs(180));
     let scoped = scopes::run(&fixture, &stack, "initial");
+    let related = related::run(&fixture, &stack, "initial");
     relationships(&fixture, &stack, "initial");
     find_occurrences(&fixture, &stack, "initial");
     supervisor.stop();
@@ -493,5 +495,6 @@ fn pragmatic_semantic_relationships_through_installed_clients_and_reopen() {
     relationships(&fixture, &stack, "reopened");
     find_occurrences(&fixture, &stack, "reopened");
     assert_eq!(scoped, scopes::run(&fixture, &stack, "reopened"));
+    assert_eq!(related, related::run(&fixture, &stack, "reopened"));
     supervisor.stop();
 }

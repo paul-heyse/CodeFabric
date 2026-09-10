@@ -174,6 +174,27 @@ pub(crate) struct EntityQueryScope {
 }
 
 impl EntityQueryScope {
+    fn select_related_contexts(
+        &mut self,
+        subjects: &BTreeSet<[u8; 16]>,
+        found: &BTreeSet<[u8; 16]>,
+        languages: &BTreeSet<String>,
+        contexts: BTreeSet<[u8; 16]>,
+    ) {
+        if found == subjects
+            && !self.languages.is_disjoint(languages)
+            && (self.contexts.is_empty() || !self.contexts.is_disjoint(&contexts))
+        {
+            self.languages
+                .retain(|language| languages.contains(language));
+            if self.contexts.is_empty() {
+                self.contexts = contexts;
+            } else {
+                self.contexts.retain(|context| contexts.contains(context));
+            }
+        }
+    }
+
     pub(crate) fn with_families(
         mut self,
         families: BTreeSet<&'static str>,
@@ -568,6 +589,91 @@ impl EntityProcessingSnapshot {
         if found == selected {
             scope.owners = Some(selected);
         }
+        Ok(())
+    }
+
+    /// Resolve explicit source anchors in the authorized descriptor relation. Incoming witnesses
+    /// remain broad across files; only a fully observed anchor language/context set narrows them.
+    pub(crate) async fn select_related_subject_contexts(
+        &self,
+        epoch: &ProgrammaticFabricEpoch,
+        scope: &mut EntityQueryScope,
+        clause: &crate::semantic_query_contract::SemanticQueryClause,
+    ) -> Result<(), String> {
+        use datafusion::common::ScalarValue;
+        use datafusion::logical_expr::{col, lit};
+        let Some(subjects) = source::explicit_subjects(clause)? else {
+            return Ok(());
+        };
+        if self.epoch != *epoch.identity() {
+            return Err("related processing lookup belongs to another epoch".into());
+        }
+        let relation = epoch
+            .relation(&ProgrammaticRelationId::new("fact.code_source_context"))
+            .ok_or("related source descriptors are unavailable")?;
+        let frame = epoch
+            .context()
+            .table(relation.table_reference.clone())
+            .await
+            .map_err(|e| e.to_string())?;
+        let values = subjects
+            .iter()
+            .map(|id| lit(ScalarValue::FixedSizeBinary(16, Some(id.to_vec()))))
+            .collect();
+        // Filter and project metadata natively before streaming; no source byte buffers are read.
+        let mut stream = frame
+            .filter(
+                col("entity_id")
+                    .in_list(values, false)
+                    .and(col("context_kind").eq(lit("related occurrence")))
+                    .and(col("source_generation").eq(lit(self.generation)))
+                    .and(scope.boundaries.native_predicate(&col("relative_path"))),
+            )
+            .and_then(|frame| frame.select_columns(&["entity_id", "language", "context_id"]))
+            .and_then(datafusion::dataframe::DataFrame::distinct)
+            .and_then(|frame| frame.limit(0, Some(subjects.len() + 1)))
+            .map_err(|e| e.to_string())?
+            .execute_stream()
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut found = BTreeSet::new();
+        let mut selected_languages = BTreeSet::new();
+        let mut selected_contexts = BTreeSet::new();
+        let mut count = 0;
+        while let Some(batch) = stream.next().await {
+            let batch = batch.map_err(|e| e.to_string())?;
+            count += batch.num_rows();
+            if count > subjects.len() {
+                return Ok(());
+            }
+            let ids = batch
+                .column_by_name("entity_id")
+                .and_then(|a| a.as_any().downcast_ref::<FixedSizeBinaryArray>())
+                .ok_or("invalid related entity identity")?;
+            let languages = strings(&batch, "language")?;
+            let contexts = batch
+                .column_by_name("context_id")
+                .and_then(|a| a.as_any().downcast_ref::<FixedSizeBinaryArray>())
+                .ok_or("invalid related context")?;
+            for row in 0..batch.num_rows() {
+                if ids.is_null(row) || contexts.is_null(row) || languages.is_null(row) {
+                    continue;
+                }
+                found.insert(
+                    ids.value(row)
+                        .try_into()
+                        .map_err(|_| "invalid related identity width")?,
+                );
+                selected_languages.insert(languages.value(row).to_owned());
+                selected_contexts.insert(
+                    contexts
+                        .value(row)
+                        .try_into()
+                        .map_err(|_| "invalid related context width")?,
+                );
+            }
+        }
+        scope.select_related_contexts(&subjects, &found, &selected_languages, selected_contexts);
         Ok(())
     }
 

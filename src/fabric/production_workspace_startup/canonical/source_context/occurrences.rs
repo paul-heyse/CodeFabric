@@ -189,5 +189,6 @@ fn descriptor(
     Ok(LogicalPlanBuilder::from(branch("exact source span")?)
         .union(branch("surrounding lines")?)?
         .union(branch("syntax outline")?)?
+        .union(branch("related occurrence")?)?
         .build()?)
 }

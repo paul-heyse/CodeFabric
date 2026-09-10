@@ -55,6 +55,7 @@ pub(super) fn build(
                 "declaration-line-anchor",
             )?)?
             .union(exact(inputs, "syntax outline", "declaration-span")?)?
+            .union(exact(inputs, "related occurrence", "declaration-span")?)?
             .build()?;
     if python {
         result = LogicalPlanBuilder::from(result)

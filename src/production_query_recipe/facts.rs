@@ -175,6 +175,22 @@ fn subject_facts(
                     .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
                         detail: error.to_string(),
                     })?
+                    == Some(super::SOURCE_RELATED_ROLE)
+                {
+                    &[
+                        "exact source span",
+                        "function definition",
+                        "function body",
+                        "surrounding lines",
+                        "syntax outline",
+                        "related occurrence",
+                    ]
+                } else if source
+                    .contract
+                    .relation_semantic_role(SchemaRole::Logical)
+                    .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+                        detail: error.to_string(),
+                    })?
                     == Some(super::SOURCE_OUTLINES_ROLE)
                 {
                     &[

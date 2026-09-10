@@ -72,6 +72,8 @@ pub(crate) mod source_boundary;
 mod source_location;
 #[cfg(feature = "daemon")]
 mod source_outline;
+#[cfg(feature = "daemon")]
+mod source_related;
 
 impl RelationalQueryAuthorization {
     /// Construct a bounded authorization input without selecting an epoch.

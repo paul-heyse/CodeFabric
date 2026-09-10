@@ -4,6 +4,32 @@ use super::{BTreeSet, EntityQueryScope};
 use crate::relational_semantic_query::{EpochBoundSelectionRow, SemanticClauseValue};
 use crate::semantic_query_contract::{SemanticQueryClause, SemanticReference};
 
+// Unknown or composed anchors retain their previously resolved dependency closure.
+pub(super) fn explicit_subjects(
+    clause: &SemanticQueryClause,
+) -> Result<Option<BTreeSet<[u8; 16]>>, String> {
+    let SemanticQueryClause::RetrieveSourceContext { for_inputs, .. } = clause else {
+        return Ok(None);
+    };
+    if for_inputs.is_empty() || for_inputs.len() > 4096 {
+        return Ok(None);
+    }
+    let mut subjects = BTreeSet::new();
+    for subject in for_inputs {
+        let SemanticReference::Entity { entity_id } = subject else {
+            return Ok(None);
+        };
+        subjects.insert(
+            crate::identity::decode_public_id_any_kind(
+                crate::identity::IdentityDomain::Entity,
+                entity_id,
+            )
+            .map_err(|e| e.to_string())?,
+        );
+    }
+    Ok(Some(subjects))
+}
+
 impl EntityQueryScope {
     /// Find/source scopes need the addressed files; incoming relationships and context-wide facts
     /// retain their broader dependency scope until their own families prove a narrower selection.
@@ -253,6 +279,16 @@ impl EntityQueryScope {
             );
         }
         let mut scope = self.with_families(families)?;
+        if resolved(clause.query_id(), "selection.context") == Some("related occurrence") {
+            scope.families.extend([
+                "call-targets",
+                "lexical-references",
+                "semantic-references",
+                "imports",
+            ]);
+            // Incoming witnesses may live in any authorized file, independently of the anchor.
+            scope.owners = None;
+        }
         if resolved(clause.query_id(), "selection.context") == Some("syntax outline") {
             scope.families.insert("syntax-nodes");
             if scope.families.contains("function-declarations") {
@@ -285,6 +321,46 @@ mod tests {
             languages: BTreeSet::from(["python".into(), "rust".into()]),
             contexts: BTreeSet::from([[1; 16]]),
             owners: None,
+        }
+    }
+
+    #[test]
+    fn related_contexts_require_all_anchors_and_preserve_disjoint_requested_scope() {
+        let requested = BTreeSet::from([[1; 16], [2; 16]]);
+        for (found, contexts, narrow) in [
+            (requested.clone(), BTreeSet::new(), true),
+            (BTreeSet::from([[1; 16]]), BTreeSet::new(), false),
+            (requested.clone(), BTreeSet::from([[9; 16]]), false),
+        ] {
+            let mut selected = scope();
+            selected.contexts.clone_from(&contexts);
+            let original_languages = selected.languages.clone();
+            selected.select_related_contexts(
+                &requested,
+                &found,
+                &BTreeSet::from(["python".into()]),
+                BTreeSet::from([[3; 16]]),
+            );
+            assert!(
+                selected.owners.is_none(),
+                "incoming occurrences remain file-wide"
+            );
+            assert_eq!(
+                selected.languages,
+                if narrow {
+                    BTreeSet::from(["python".into()])
+                } else {
+                    original_languages
+                }
+            );
+            assert_eq!(
+                selected.contexts,
+                if narrow {
+                    BTreeSet::from([[3; 16]])
+                } else {
+                    contexts
+                }
+            );
         }
     }
     fn clause(subjects: Vec<SemanticReference>) -> SemanticQueryClause {
