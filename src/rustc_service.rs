@@ -343,55 +343,108 @@ pub struct RustcProviderRunResult {
     result: ProviderRunResult,
 }
 
+fn diagnostic_capture_complete(compilation: &TrustQualifiedRustcCompilation) -> bool {
+    let mut observed = false;
+    for relation in compilation
+        .accepted()
+        .owners
+        .iter()
+        .flat_map(|owner| &owner.relations)
+    {
+        if relation.relation != RustcRelation::Coverage {
+            continue;
+        }
+        let strings = |name| {
+            relation
+                .batch
+                .column_by_name(name)?
+                .as_any()
+                .downcast_ref::<arrow_array::StringArray>()
+        };
+        let (Some(families), Some(states)) = (strings("fact_family"), strings("completeness"))
+        else {
+            return false;
+        };
+        for (family, state) in families.iter().zip(states.iter()) {
+            if family == Some(RustcRelation::Diagnostic.relation_id()) {
+                observed = true;
+                if state != Some("complete") {
+                    return false;
+                }
+            }
+        }
+    }
+    observed
+}
+
+fn collect_compiler_relation_batches(
+    job: &ProviderJob,
+    compilations: &[TrustQualifiedRustcCompilation],
+) -> Result<BTreeMap<String, Vec<RecordBatch>>, RustcProviderLifecycleError> {
+    let mut batches = BTreeMap::<String, Vec<RecordBatch>>::new();
+    for compilation in compilations {
+        compilation.validate()?;
+        validate_job_admission(job, &compilation.accepted().admission)
+            .map_err(RustcProviderLifecycleError::Protocol)?;
+        let header = &compilation.accepted().control.header;
+        if &header.run != job.run().identity()
+            || &header.source != job.source().identity()
+            || &header.context != job.context().identity()
+            || &header.protocol != job.protocol()
+            || &header.compiler_build != job.provenance().provider_build()
+        {
+            return Err(RustcProviderLifecycleError::Protocol(
+                Status::failed_precondition(
+                    "rustc result control pins differ from the provider job",
+                ),
+            ));
+        }
+        for owner in &compilation.accepted().owners {
+            for relation in &owner.relations {
+                batches
+                    .entry(relation.relation.relation_id().to_owned())
+                    .or_default()
+                    .push(relation.batch.clone());
+            }
+        }
+    }
+    Ok(batches)
+}
+
 impl RustcProviderRunResult {
     fn try_new(
         job: &ProviderJob,
         compilations: Vec<TrustQualifiedRustcCompilation>,
     ) -> Result<Self, RustcProviderLifecycleError> {
-        let mut batches = BTreeMap::<String, Vec<RecordBatch>>::new();
-        for compilation in &compilations {
-            compilation.validate()?;
-            validate_job_admission(job, &compilation.accepted().admission)
-                .map_err(RustcProviderLifecycleError::Protocol)?;
-            let header = &compilation.accepted().control.header;
-            if &header.run != job.run().identity()
-                || &header.source != job.source().identity()
-                || &header.context != job.context().identity()
-                || &header.protocol != job.protocol()
-                || &header.compiler_build != job.provenance().provider_build()
-            {
-                return Err(RustcProviderLifecycleError::Protocol(
-                    Status::failed_precondition(
-                        "rustc result control pins differ from the provider job",
-                    ),
-                ));
-            }
-            for owner in &compilation.accepted().owners {
-                for relation in &owner.relations {
-                    batches
-                        .entry(relation.relation.relation_id().to_owned())
-                        .or_default()
-                        .push(relation.batch.clone());
-                }
-            }
-        }
+        // A failed Cargo invocation can have both successful units and closed diagnostic-only
+        // units. Preserve their positive observations without claiming the requested target closed.
+        let compilation_failed = compilations.iter().any(|compilation| {
+            compilation.trust_proof().terminal().terminal_state
+                == crate::rust_compilation_trust::RustCompilationTerminalState::CompilerFailed
+        });
+        let mut batches = collect_compiler_relation_batches(job, &compilations)?;
 
         let mut relations = Vec::with_capacity(job.requests().len());
         let mut coverage = Vec::with_capacity(job.requests().len());
         let mut gaps = Vec::new();
         for request in job.requests() {
             let Some(relation_batches) = batches.remove(request.relation().as_str()) else {
+                let cause = if compilation_failed {
+                    ProviderUnknownCause::ProviderFailure
+                } else {
+                    ProviderUnknownCause::MissingOutput
+                };
                 coverage.push(ProviderCoverage::new(
                     request.family().clone(),
                     ProviderCoverageState::Unknown {
                         completed_units: 0,
-                        cause: ProviderUnknownCause::MissingOutput,
+                        cause,
                     },
                 ));
                 gaps.push(ProviderGap::try_new(
                     request.family().clone(),
-                    ProviderUnknownCause::MissingOutput,
-                    "compiler completed without this requested native relation; inspect compiler coverage and remainders",
+                    cause,
+                    "compiler invocation closed without this requested native relation; inspect compiler diagnostics, coverage and remainders",
                 )?);
                 continue;
             };
@@ -402,19 +455,50 @@ impl RustcProviderRunResult {
                 relation_batches,
                 job.resource_budget(),
             )?);
-            coverage.push(ProviderCoverage::new(
-                request.family().clone(),
-                ProviderCoverageState::Complete {
-                    completed_units: request.requested_units(),
-                },
-            ));
+            let incomplete_capture = request.relation().as_str()
+                == RustcRelation::Diagnostic.relation_id()
+                && !compilations.iter().all(diagnostic_capture_complete);
+            if compilation_failed || incomplete_capture {
+                let (cause, detail) = if compilation_failed {
+                    (
+                        ProviderUnknownCause::ProviderFailure,
+                        "contained compilation failed; closed positive observations survive, but missing target facts remain unknown",
+                    )
+                } else {
+                    (
+                        ProviderUnknownCause::MissingOutput,
+                        "structured diagnostic capture did not cover the entire compiler invocation",
+                    )
+                };
+                coverage.push(ProviderCoverage::new(
+                    request.family().clone(),
+                    ProviderCoverageState::Unknown {
+                        completed_units: 0,
+                        cause,
+                    },
+                ));
+                gaps.push(ProviderGap::try_new(
+                    request.family().clone(),
+                    cause,
+                    detail,
+                )?);
+            } else {
+                coverage.push(ProviderCoverage::new(
+                    request.family().clone(),
+                    ProviderCoverageState::Complete {
+                        completed_units: request.requested_units(),
+                    },
+                ));
+            }
         }
         if let Some(unrequested) = batches.into_keys().next() {
             return Err(RustcProviderLifecycleError::UnrequestedRelation(
                 unrequested,
             ));
         }
-        let terminal = if gaps.is_empty() {
+        let terminal = if compilation_failed {
+            ProviderTerminalStatus::Failed
+        } else if gaps.is_empty() {
             ProviderTerminalStatus::Complete
         } else {
             ProviderTerminalStatus::Unknown
@@ -513,8 +597,8 @@ impl TrustQualifiedRustcCompilation {
     ///
     /// # Errors
     ///
-    /// Rejects a receipt from another plan/run or a compiler terminal that is not the contained
-    /// successful terminal required for semantic registration.
+    /// Rejects a receipt from another plan/run or a compiler terminal inconsistent with its
+    /// independently observed, fully closed contained invocation.
     pub fn try_new(
         accepted: AcceptedRustcCompilation,
         trust_proof: RustCompilationAdmissionProof,
@@ -533,7 +617,7 @@ impl TrustQualifiedRustcCompilation {
     /// # Errors
     ///
     /// Rejects changed protocol pins, a receipt/proof detached from its plan, or either terminal
-    /// ceasing to represent one proved contained success.
+    /// ceasing to represent a closed ordinary invocation under proved containment.
     pub fn validate(&self) -> Result<(), RustCompilationTrustError> {
         let admission = &self.accepted.admission;
         let proof = &self.trust_proof;
@@ -551,19 +635,29 @@ impl TrustQualifiedRustcCompilation {
         let compiler_succeeded = self.accepted.control.terminal.terminal
             == ProviderTerminalStatus::Complete
             && self.accepted.control.terminal.compiler_exit_status == 0;
-        let launcher_succeeded = proof.terminal().terminal_state
-            == crate::rust_compilation_trust::RustCompilationTerminalState::Succeeded
-            && proof.terminal().exit_code == Some(0)
-            && proof.terminal().accounting_quality
-                == crate::rust_compilation_trust::RustCompilationAccountingQuality::KernelComplete
+        let compiler_failed = self.accepted.control.terminal.terminal
+            == ProviderTerminalStatus::Failed
+            && self.accepted.control.terminal.compiler_exit_status != 0;
+        let launcher_completed = match proof.terminal().terminal_state {
+            crate::rust_compilation_trust::RustCompilationTerminalState::Succeeded => {
+                proof.terminal().exit_code == Some(0) && compiler_succeeded
+            }
+            crate::rust_compilation_trust::RustCompilationTerminalState::CompilerFailed => {
+                proof.terminal().exit_code.is_some_and(|code| code != 0)
+                    && (compiler_succeeded || compiler_failed)
+            }
+            _ => false,
+        };
+        let accounting_complete = proof.terminal().accounting_quality
+            == crate::rust_compilation_trust::RustCompilationAccountingQuality::KernelComplete
             && proof.terminal().process_sample_count > 0
             && proof.terminal().process_group_empty
             && proof.terminal().output_manifest_digest.is_some();
         let capability = proof.capability();
         let provenance = proof.provenance();
         if self.accepted.trust_binding != *proof.protocol_binding()
-            || !compiler_succeeded
-            || !launcher_succeeded
+            || !launcher_completed
+            || !accounting_complete
             || capability.workspace_id != admission.workspace_id
             || capability.provider_run_id != admission.provider_run_id
             || capability.trust_mode
@@ -1731,7 +1825,10 @@ impl RustcObservationService {
                             | ProviderTerminalStatus::Corrupt
                             | ProviderTerminalStatus::Oversized => ProviderRunState::ProtocolError,
                         };
-                        if terminal == ProviderRunState::Succeeded {
+                        if matches!(
+                            terminal,
+                            ProviderRunState::Succeeded | ProviderRunState::Failed
+                        ) {
                             self.accepted.send(completed).await.map_err(|_| {
                                 Status::unavailable("canonical ingest sink is closed")
                             })?;
@@ -2072,9 +2169,12 @@ where
         );
     }
     if terminal_states.len() != accepted.len()
-        || terminal_states
-            .values()
-            .any(|state| *state != ProviderRunState::Succeeded)
+        || terminal_states.values().any(|state| {
+            !matches!(
+                state,
+                ProviderRunState::Succeeded | ProviderRunState::Failed
+            )
+        })
     {
         return RustcProviderRunResult::gap(
             &provider_job,
@@ -2860,6 +2960,21 @@ mod tests {
         events
     }
 
+    #[test]
+    fn failed_compiler_stream_cannot_use_successful_launcher_proof() {
+        let (validator, _) = accepted_stream();
+        let last = failed_event_stream().pop().unwrap();
+        let Some(Event::CompilationEnd(end)) = last.event.as_ref() else {
+            panic!("terminal")
+        };
+        let accepted = validator.finish(end.clone(), last, false).unwrap();
+        let proof = RustCompilationAdmissionProof::test_only(accepted.trust_binding.clone());
+        assert!(matches!(
+            TrustQualifiedRustcCompilation::try_new(accepted, proof),
+            Err(RustCompilationTrustError::CompilerObservationBindingMismatch)
+        ));
+    }
+
     async fn send_lifecycle_events(
         socket: PathBuf,
         policy: RustcProtocolPolicy,
@@ -2913,6 +3028,12 @@ mod tests {
         let socket = harness.paths.extractor_socket_path.clone();
         let policy = harness.protocol_policy.clone();
         let admission = harness.admission.clone();
+        let compilation_failed = events.iter().any(|event| {
+            matches!(
+                event.event.as_ref(), Some(Event::CompilationEnd(end))
+                    if end.terminal_state == ProviderRunState::Failed as i32
+            )
+        });
         execute_prepared_rustc_lifecycle(
             provider_job,
             task_scope(),
@@ -2926,8 +3047,13 @@ mod tests {
                 if !tolerate_stream_failure {
                     stream_result.map_err(RustcProviderLifecycleError::Protocol)?;
                 }
-                RustCompilationLauncherReceipt::test_only_contained_success(&plan)
-                    .map_err(Into::into)
+                if compilation_failed {
+                    RustCompilationLauncherReceipt::test_only_contained_compiler_failed(&plan)
+                        .map_err(Into::into)
+                } else {
+                    RustCompilationLauncherReceipt::test_only_contained_success(&plan)
+                        .map_err(Into::into)
+                }
             },
         )
         .await
@@ -3538,7 +3664,7 @@ mod tests {
             .await
             .unwrap();
         let failure_millis = failure_started.elapsed().as_secs_f64() * 1_000.0;
-        assert!(compile_gap.compilations().is_empty());
+        assert_eq!(compile_gap.compilations().len(), 1);
         assert_eq!(
             compile_gap.result().terminal(),
             ProviderTerminalStatus::Failed

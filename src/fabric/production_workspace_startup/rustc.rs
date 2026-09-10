@@ -103,6 +103,16 @@ impl RustTargetProgress {
 }
 
 impl RustcOutcome {
+    pub fn observed_relations(
+        &self,
+    ) -> impl Iterator<Item = crate::rustc_relation_schema::RustcRelation> + '_ {
+        self.runs
+            .iter()
+            .flat_map(|run| &run.accepted().owners)
+            .flat_map(|owner| &owner.relations)
+            .map(|relation| relation.relation)
+    }
+
     pub fn compilation_units(&self) -> u64 {
         self.runs.len().max(1) as u64
     }
@@ -192,7 +202,12 @@ pub(super) fn run(
         match available {
             Ok((context_pin, admitted, runs)) => {
                 progress.context_id = Some(admitted.job().context().analysis_context_id());
-                progress.state = if runs.is_empty() {
+                progress.state = if runs.is_empty()
+                    || runs.iter().any(|run| {
+                        run.trust_proof().terminal().terminal_state
+                            == crate::rust_compilation_trust::RustCompilationTerminalState::CompilerFailed
+                    })
+                {
                     "unavailable"
                 } else {
                     "processed"

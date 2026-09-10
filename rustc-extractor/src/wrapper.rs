@@ -899,11 +899,11 @@ fn run_protocol(
     rustc_arguments.push(real_rustc.to_string_lossy().into_owned());
     rustc_arguments.extend(argument_strings);
     let extracted = crate::rustc_link::extract_owned(&rustc_arguments);
-    let compiler_exit_status = i32::from(extracted.is_err());
-    let owners = extracted.map_or_else(|_| Vec::new(), |extraction| extraction.owners);
+    let compiler_exit_status = i32::from(!extracted.compiler_succeeded);
+    let owners = extracted.owners;
     let mut sequence = 1_u64;
     let mut closed_owners = Vec::new();
-    if !cancelled.load(Ordering::Acquire) && compiler_exit_status == 0 {
+    if !cancelled.load(Ordering::Acquire) {
         for owner in &owners {
             let (source_path, source_start, source_end) = match owner_source_span(owner) {
                 Some(span) => span,

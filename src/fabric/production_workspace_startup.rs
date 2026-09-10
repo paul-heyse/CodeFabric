@@ -877,7 +877,7 @@ fn build_fresh_native_source(
         .map_err(|error| step("provider-derived-composition", error))?;
     let (derived, _) = outcome.into_parts();
     let (mut builder, _, _) = derived.into_parts();
-    let rustc_available = matches!(rustc.lane(), ExactProviderLaneRuns::Accepted(_));
+    let rustc_inputs = canonical::RustInputs::from_relations(rustc.observed_relations());
     let pyrefly_available = matches!(pyrefly.lane(), ExactProviderLaneRuns::Accepted(_));
     if let Some(admitted) = pyrefly.admitted {
         admitted_runs.push(admitted);
@@ -908,14 +908,14 @@ fn build_fresh_native_source(
         &mut builder,
         &prepared_inputs.inventory,
         !native_runs.is_empty(),
-        rustc_available,
+        rustc_inputs,
         pyrefly_available,
     )?;
     canonical::install_processing(
         &mut builder,
         &prepared_inputs.inventory,
         pyrefly_available && !native_runs.is_empty(),
-        rustc_available,
+        rustc_inputs.bodies,
     )?;
     // Registered batches own their buffers; source leases are no longer needed after providers join.
     prepared_inputs.release()?;

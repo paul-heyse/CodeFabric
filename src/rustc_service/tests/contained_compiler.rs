@@ -16,6 +16,15 @@ use crate::rust_compilation_trust::{
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn contained_cargo_extracts_real_selected_rust_call() {
+    contained_cargo_observations(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn contained_cargo_retains_structured_diagnostics_without_mir() {
+    contained_cargo_observations(true).await;
+}
+
+async fn contained_cargo_observations(compile_failure: bool) {
     let mut harness = lifecycle_harness();
     let workspace = harness.inputs.workspace_view.clone();
     let dependencies = harness.inputs.dependency_view.clone();
@@ -38,7 +47,11 @@ async fn contained_cargo_extracts_real_selected_rust_call() {
 
     fs::write(
         workspace.join("src/other.rs"),
-        "pub fn target(v: u32) -> u32 { v + 1 }\npub fn caller() -> u32 { target(4) }\n",
+        if compile_failure {
+            "pub fn target(v: u32) -> u32 { v + 1 }\npub fn caller() -> u32 { missing_function(4) }\n"
+        } else {
+            "pub fn target(v: u32) -> u32 { v + 1 }\npub fn caller() -> u32 { target(4) }\npub fn Uppercase() {}\n"
+        },
     )
     .unwrap();
 
@@ -316,8 +329,60 @@ async fn contained_cargo_extracts_real_selected_rust_call() {
         "{:?}\n{stderr}",
         result.result().gaps().first()
     );
-    assert_eq!(result.result().terminal(), ProviderTerminalStatus::Unknown);
-    assert_eq!(result.result().gaps().len(), 1);
+    if compile_failure {
+        assert_eq!(result.result().terminal(), ProviderTerminalStatus::Failed);
+        assert!(
+            result
+                .result()
+                .coverage()
+                .iter()
+                .all(|coverage| matches!(coverage.state(), ProviderCoverageState::Unknown { .. }))
+        );
+        assert!(result.compilations().iter().all(|compilation| {
+            compilation.trust_proof().terminal().terminal_state
+                == RustCompilationTerminalState::CompilerFailed
+        }));
+        let relations = result
+            .compilations()
+            .iter()
+            .flat_map(|compilation| &compilation.accepted().owners)
+            .flat_map(|owner| &owner.relations)
+            .collect::<Vec<_>>();
+        assert!(
+            !relations
+                .iter()
+                .any(|relation| relation.relation == RustcRelation::MirBody)
+        );
+        assert!(
+            relations
+                .iter()
+                .filter(|relation| relation.relation == RustcRelation::Diagnostic)
+                .any(|relation| {
+                    let strings = |name| {
+                        relation
+                            .batch
+                            .column_by_name(name)
+                            .unwrap()
+                            .as_any()
+                            .downcast_ref::<arrow_array::StringArray>()
+                            .unwrap()
+                    };
+                    strings("reason_code")
+                        .iter()
+                        .zip(strings("message").iter())
+                        .any(|(code, message)| {
+                            code == Some("E0425")
+                                && message
+                                    .is_some_and(|message| message.contains("missing_function"))
+                        })
+                }),
+            "expected the actual unresolved-function diagnostic: {stderr}"
+        );
+        assert!(!harness.paths.extractor_socket_path.exists());
+        return;
+    }
+    assert_eq!(result.result().terminal(), ProviderTerminalStatus::Complete);
+    assert!(result.result().gaps().is_empty());
     let diagnostics = result
         .result()
         .coverage()
@@ -331,11 +396,34 @@ async fn contained_cargo_extracts_real_selected_rust_call() {
         .unwrap();
     assert!(matches!(
         diagnostics.state(),
-        ProviderCoverageState::Unknown {
-            completed_units: 0,
-            cause: ProviderUnknownCause::MissingOutput,
-        }
+        ProviderCoverageState::Complete { completed_units: 1 }
     ));
+    assert!(
+        result
+            .compilations()
+            .iter()
+            .flat_map(|compilation| &compilation.accepted().owners)
+            .flat_map(|owner| &owner.relations)
+            .filter(|relation| relation.relation == RustcRelation::Diagnostic)
+            .any(|relation| {
+                let strings = |name| {
+                    relation
+                        .batch
+                        .column_by_name(name)
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<arrow_array::StringArray>()
+                        .unwrap()
+                };
+                strings("reason_code")
+                    .iter()
+                    .zip(strings("severity").iter())
+                    .any(|(code, severity)| {
+                        code == Some("non_snake_case") && severity == Some("warning")
+                    })
+            }),
+        "a successful compiler invocation retains actual lint diagnostics too"
+    );
     let targets = result
         .compilations()
         .iter()

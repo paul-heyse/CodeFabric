@@ -39,6 +39,31 @@ mod python_calls;
 mod relationship_selector;
 mod source_context;
 
+/// Each canonical projection requires its own native input set. Diagnostic-only compilation and
+/// crates with no body are valid observations, but do not supply declaration/call/body tables.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RustInputs {
+    declarations: bool,
+    calls: bool,
+    pub bodies: bool,
+}
+
+impl RustInputs {
+    pub fn from_relations(relations: impl IntoIterator<Item = RustcRelation>) -> Self {
+        let relations = relations
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        let declarations = relations.contains(&RustcRelation::PublicItem);
+        Self {
+            declarations,
+            calls: declarations
+                && relations.contains(&RustcRelation::Call)
+                && relations.contains(&RustcRelation::MirTerminator),
+            bodies: declarations && relations.contains(&RustcRelation::MirBody),
+        }
+    }
+}
+
 pub(super) fn install_processing(
     builder: &mut ProgrammaticFabricEpochBuilder,
     inventory: &ProviderSourceInventory,
@@ -65,23 +90,29 @@ pub(super) fn install(
     builder: &mut ProgrammaticFabricEpochBuilder,
     inventory: &ProviderSourceInventory,
     python: bool,
-    rust: bool,
+    rust: RustInputs,
     pyrefly: bool,
 ) -> Result<(), ProductionWorkspaceStartupError> {
     for kind in [
         Kind::Source,
-        Kind::Declaration { python, rust },
+        Kind::Declaration {
+            python,
+            rust: rust.declarations,
+        },
         Kind::Reference { python },
         Kind::CallSite {
             python,
-            rust,
+            rust: rust.calls,
             pyrefly,
         },
         Kind::Entity,
         Kind::EntitySelector,
         Kind::CallSelector,
         Kind::RelationshipSelector,
-        Kind::SourceContext { python, rust },
+        Kind::SourceContext {
+            python,
+            rust: rust.declarations,
+        },
     ] {
         builder
             .add_transformation(Arc::new(Canonical::new(kind, inventory)))
@@ -1158,7 +1189,14 @@ mod tests {
                 );
             }
         }
-        install(&mut builder, &inventory, python, false, false).unwrap();
+        install(
+            &mut builder,
+            &inventory,
+            python,
+            RustInputs::from_relations([]),
+            false,
+        )
+        .unwrap();
         let mut assembly = builder.into_assembly_parts().3;
         assembly.install_transformations().await.unwrap();
         assembly.candidate_context()

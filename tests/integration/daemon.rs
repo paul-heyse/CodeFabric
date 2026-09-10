@@ -3082,6 +3082,81 @@ fn pragmatic_rust_target_failure_retains_other_targets() {
 }
 
 #[cfg(target_os = "linux")]
+#[test]
+fn pragmatic_all_rust_targets_failed_retains_diagnostics_and_source() {
+    let fixture = ProductionFixture::new();
+    let workspace = Path::new(&fixture.workspace.root_path_display);
+    fs::create_dir(workspace.join("src")).unwrap();
+    fs::write(
+        workspace.join("Cargo.toml"),
+        "[package]\nname='fixture'\nversion='0.1.0'\nedition='2024'\n",
+    )
+    .unwrap();
+    fs::write(
+        workspace.join("Cargo.lock"),
+        "version=4\n[[package]]\nname='fixture'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    fs::write(
+        workspace.join("src/lib.rs"),
+        "pub fn unresolved() { missing_function(); }\n",
+    )
+    .unwrap();
+    let supervisor = fixture.start_supervisor();
+    let names = canonical_entity_names(&fixture);
+    assert!(names.iter().all(|(language, _)| language == "python"));
+    assert_structured_rust_failure_diagnostics(&fixture);
+    assert!(
+        fresh_activation_relation_batches(&fixture, "source.exact_source_bytes")
+            .iter()
+            .any(|batch| {
+                let binary = |name| {
+                    batch
+                        .column_by_name(name)
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<arrow::array::BinaryArray>()
+                        .unwrap()
+                };
+                binary("relative_path")
+                    .iter()
+                    .zip(binary("source_bytes").iter())
+                    .any(|(path, source)| {
+                        path == Some(b"src/lib.rs".as_slice())
+                            && source
+                                == Some(b"pub fn unresolved() { missing_function(); }\n".as_slice())
+                    })
+            }),
+        "compilation failure must preserve the exact captured Rust source"
+    );
+    assert!(
+        fresh_activation_relation_batches(&fixture, "provider.tree_sitter_rust.cst_node")
+            .iter()
+            .any(|batch| batch
+                .column_by_name("raw_kind")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap()
+                .iter()
+                .any(|kind| kind == Some("function_item"))),
+        "Rust syntax remains available without MIR"
+    );
+    let batches = fresh_activation_relation_batches(&fixture, "system.rust_target_progress");
+    assert!(batches.iter().all(|batch| {
+        batch
+            .column_by_name("processing_state")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap()
+            .iter()
+            .all(|state| state == Some("unavailable"))
+    }));
+    supervisor.stop();
+}
+
+#[cfg(target_os = "linux")]
 fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
     let fixture = if with_failure {
         ProductionFixture::with_source(b"def answer(value: int) -> int:\n    return value + 1\n\ndef zebra() -> int:\n    return 2\n")
@@ -3226,6 +3301,7 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
         );
         assert_eq!(states.get("working").map(String::as_str), Some("processed"));
         assert_eq!(states.get("fixture").map(String::as_str), Some("processed"));
+        assert_structured_rust_failure_diagnostics(&fixture);
         assert_rust_syntax_survives_compilation_failure(&fixture);
         assert_mixed_public_entity_queries(&fixture, stack.as_ref().unwrap());
         assert_public_declaration_kinds(
@@ -3247,6 +3323,42 @@ fn rust_semantics_publication(with_dependency: bool, with_failure: bool) {
         );
     }
     supervisor.stop();
+}
+
+#[cfg(target_os = "linux")]
+fn assert_structured_rust_failure_diagnostics(fixture: &ProductionFixture) {
+    assert!(
+        rust_diagnostic_messages(fixture)
+            .iter()
+            .any(|(code, severity, message)| code == "E0425"
+                && severity == "error"
+                && message.contains("missing_function")),
+        "the broken target must retain its structured compiler diagnostic"
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn rust_diagnostic_messages(fixture: &ProductionFixture) -> Vec<(String, String, String)> {
+    let mut diagnostics = Vec::new();
+    for batch in fresh_activation_relation_batches(fixture, "provider.rustc.diagnostic.v1") {
+        let strings = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap()
+        };
+        for row in 0..batch.num_rows() {
+            diagnostics.push((
+                strings("reason_code").value(row).to_owned(),
+                strings("severity").value(row).to_owned(),
+                strings("message").value(row).to_owned(),
+            ));
+        }
+    }
+    diagnostics.sort();
+    diagnostics
 }
 
 #[test]
@@ -3954,6 +4066,32 @@ fn assert_mixed_public_declaration_facts(
     );
 }
 
+/// Select compiler contexts by their actual target processing state.
+fn rust_target_contexts(fixture: &ProductionFixture, state: &str) -> BTreeSet<Vec<u8>> {
+    use arrow::array::{Array as _, BinaryArray, StringArray};
+    let mut contexts = BTreeSet::new();
+    for batch in fresh_activation_relation_batches(fixture, "system.rust_target_progress") {
+        let states = batch
+            .column_by_name("processing_state")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let ids = batch
+            .column_by_name("context_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            if states.value(row) == state && !ids.is_null(row) {
+                contexts.insert(ids.value(row).to_vec());
+            }
+        }
+    }
+    contexts
+}
+
 /// Actual provider calls through the installed modern client, including exact restart.
 fn assert_public_call_queries(
     fixture: &ProductionFixture,
@@ -3990,11 +4128,17 @@ fn assert_public_call_queries(
             }
         }
     }
-    // Multiple Cargo targets intentionally have distinct semantic identities. Resolve
-    // all three subjects in the same context, independently of batch/target order.
+    // Multiple Cargo targets intentionally have distinct semantic identities. A failed parent
+    // can retain positive library facts, but cannot satisfy this complete-target expectation.
+    let processed = (language == "rust").then(|| rust_target_contexts(fixture, "processed"));
     let context_bytes = subjects
         .keys()
-        .find(|(_, name)| name == caller_name)
+        .find(|(context, name)| {
+            name == caller_name
+                && processed
+                    .as_ref()
+                    .is_none_or(|contexts| contexts.contains(context))
+        })
         .unwrap()
         .0
         .clone();
@@ -4010,6 +4154,22 @@ fn assert_public_call_queries(
         "return": {"limit": {"maximum_results": 64}}
     }]);
     let mut requests = vec![("outgoing", request.clone())];
+    let failed_subjects = if language == "rust" {
+        let unavailable = rust_target_contexts(fixture, "unavailable");
+        let failed_context = &subjects
+            .keys()
+            .find(|(context, name)| name == caller_name && unavailable.contains(context))
+            .expect("the failed binary retains its successfully compiled library unit")
+            .0;
+        let failed_caller = &subjects[&(failed_context.clone(), caller_name.to_owned())];
+        let failed_target = &subjects[&(failed_context.clone(), target_name.to_owned())];
+        let mut selected = request.clone();
+        selected["queries"][0]["starting_from"] = json!([{"entity_id": failed_caller}]);
+        requests.push(("failed_parent", selected));
+        Some((failed_caller, failed_target))
+    } else {
+        None
+    };
     let mut default = request.clone();
     default["queries"][0]
         .as_object_mut()
@@ -4178,6 +4338,26 @@ fn assert_public_call_queries(
         true
     );
     let coverage = modern_structured(modern_step(&report, "outgoing"));
+    if let Some((failed_caller, failed_target)) = failed_subjects {
+        let retained = rows("failed_parent");
+        assert_eq!(retained.len(), 2);
+        assert!(
+            retained
+                .iter()
+                .all(|row| row.0.as_ref() == Some(failed_caller)
+                    && row.1.as_ref() == Some(failed_target))
+        );
+        let failed = modern_structured(modern_step(&report, "failed_parent"));
+        assert_eq!(failed["processing"][0]["remaining_partitions"], 1);
+        assert_eq!(
+            failed["processing"][0]["remainder"][0]["state"],
+            "unavailable"
+        );
+        assert_eq!(
+            failed["processing"][0]["remainder"][0]["entity_id"],
+            *failed_caller
+        );
+    }
     if language == "rust" {
         assert_eq!(coverage["processing"][0]["requested_partitions"], 1);
         assert_eq!(coverage["processing"][0]["remaining_partitions"], 0);

@@ -407,7 +407,7 @@ fn mixed_live_updates_equal_independent_clean_public_queries() {
             .unwrap();
         store.backup_to(&registration).unwrap();
     }
-    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let mut supervisor = fixture.start_supervisor_with(&stack.codefabric);
     let initial = four_forms(
         &fixture,
         &stack,
@@ -462,6 +462,15 @@ fn mixed_live_updates_equal_independent_clean_public_queries() {
             incremental, expected,
             "{phase}: exact public semantic comparison"
         );
+        supervisor = assert_compiler_diagnostics_and_reopen(
+            &fixture,
+            &clean,
+            &stack,
+            phase,
+            names,
+            &incremental,
+            supervisor,
+        );
         if phase == "restored" {
             assert_eq!(
                 incremental, initial,
@@ -471,6 +480,51 @@ fn mixed_live_updates_equal_independent_clean_public_queries() {
         clean_supervisor.stop();
     }
     supervisor.stop();
+}
+
+fn assert_compiler_diagnostics_and_reopen(
+    fixture: &ProductionFixture,
+    clean: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    names: &[&str],
+    incremental: &[SemanticObservation],
+    mut supervisor: RunningSupervisor,
+) -> RunningSupervisor {
+    let diagnostics = rust_diagnostic_messages(fixture);
+    assert_eq!(
+        diagnostics,
+        rust_diagnostic_messages(clean),
+        "{phase}: exact live/clean compiler diagnostics"
+    );
+    if phase == "broken" {
+        assert!(
+            diagnostics
+                .iter()
+                .any(|(code, level, message)| code == "E0425"
+                    && level == "error"
+                    && message.contains("missing"))
+        );
+        let activation = all_activation_control_rows(fixture);
+        supervisor.stop();
+        supervisor = fixture.start_supervisor_with(&stack.codefabric);
+        assert_eq!(
+            four_forms(fixture, stack, "broken-reopened", names),
+            incremental
+        );
+        assert_eq!(rust_diagnostic_messages(fixture), diagnostics);
+        assert_eq!(
+            all_activation_control_rows(fixture),
+            activation,
+            "reopening a terminal failed compilation must reuse the exact persisted epoch"
+        );
+    } else {
+        assert!(
+            diagnostics.is_empty(),
+            "{phase}: previous compiler failure must not remain current"
+        );
+    }
+    supervisor
 }
 
 /// Independent expected calls accompany clean/live equality, including semantic unknowns.

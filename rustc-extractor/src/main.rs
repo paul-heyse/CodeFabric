@@ -2,6 +2,7 @@
 #![deny(unsafe_code)]
 
 extern crate rustc_driver;
+extern crate rustc_errors;
 extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_public;

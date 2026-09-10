@@ -1247,7 +1247,7 @@ const fn rustc_upstream_symbol(relation: RustcRelation) -> &'static str {
         RustcRelation::CfgEdge => "rustc_public::mir::Terminator::successors",
         RustcRelation::Call => "rustc_public::Instance::resolve",
         RustcRelation::Access => "rustc_public::mir::Place",
-        RustcRelation::Diagnostic => "rustc_driver::diagnostic-boundary",
+        RustcRelation::Diagnostic => "rustc_errors::json::JsonEmitter",
         RustcRelation::Coverage => "codefabric::rustc::coverage",
         RustcRelation::Remainder => "codefabric::rustc::remainder",
     }

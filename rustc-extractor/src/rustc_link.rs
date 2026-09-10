@@ -22,6 +22,8 @@ use rustc_public_bridge::IndexedVal;
 
 use crate::rustc_relation_schema::{RUSTC_PUBLIC_RELEASE, RUSTC_TOOLCHAIN, RustcRelation};
 
+mod diagnostics;
+
 /// Closed scalar set used by the extractor-owned relation rows.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum OwnedCell {
@@ -126,10 +128,11 @@ pub(crate) struct OwnedRustcOwner {
     pub relations: Vec<OwnedRustcRelation>,
 }
 
-/// Complete successful callback output.
+/// Closed compiler invocation, including observations available before ordinary compilation failure.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct OwnedRustcExtraction {
     pub owners: Vec<OwnedRustcOwner>,
+    pub compiler_succeeded: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -424,7 +427,7 @@ fn authority_surface(relation: RustcRelation) -> &'static str {
         | RustcRelation::CfgEdge
         | RustcRelation::Call
         | RustcRelation::Access => "rustc_public-1.100.0-nightly",
-        RustcRelation::Diagnostic => "rustc-driver-diagnostic-boundary",
+        RustcRelation::Diagnostic => "rustc_errors::json::JsonEmitter",
         RustcRelation::Coverage | RustcRelation::Remainder => "codefabric-adapter-v1",
     }
 }
@@ -1815,13 +1818,6 @@ fn extract_inside_callback(tcx: TyCtxt<'_>) -> ControlFlow<(), OwnedRustcExtract
             "direct Instance resolution is emitted; full vtable and mono-use closure is not claimed",
         ),
         (
-            "compiler-diagnostics",
-            "STRUCTURED_DIAGNOSTIC_SINK_NOT_SELECTED",
-            "rustc_driver diagnostic emitter",
-            false,
-            "terminal compiler status remains control metadata; structured diagnostics are not fabricated",
-        ),
-        (
             "derived-flow-analyses",
             "APPLICATION_ANALYSIS_OWNED_OUTSIDE_PROVIDER",
             "CodeFabric WP24 analysis release",
@@ -1839,21 +1835,6 @@ fn extract_inside_callback(tcx: TyCtxt<'_>) -> ControlFlow<(), OwnedRustcExtract
                 .utf8("detail", detail),
         );
     }
-    compilation.push(
-        RustcRelation::Coverage,
-        OwnedRow::default()
-            .utf8("fact_family", RustcRelation::Diagnostic.relation_id())
-            .utf8(
-                "authority_surface",
-                authority_surface(RustcRelation::Diagnostic),
-            )
-            .u64("requested_units", 1)
-            .u64("completed_units", 0)
-            .u64("emitted_rows", 0)
-            .utf8("completeness", "unavailable-characterized")
-            .u64("remainder_count", 1)
-            .boolean("unknown_semantics", true),
-    );
     let mut owners = vec![OwnedRustcOwner {
         qualified_name: local_crate.name.clone(),
         owner_kind: "COMPILATION".to_owned(),
@@ -1861,16 +1842,14 @@ fn extract_inside_callback(tcx: TyCtxt<'_>) -> ControlFlow<(), OwnedRustcExtract
         relations: compilation.finish(),
     }];
     owners.extend(items.into_iter().map(|item| build_item_owner(tcx, item)));
-    ControlFlow::Continue(OwnedRustcExtraction { owners })
+    ControlFlow::Continue(OwnedRustcExtraction {
+        owners,
+        compiler_succeeded: false, // The driver still has code generation and final diagnostics to run.
+    })
 }
 
-#[allow(
-    clippy::unnested_or_patterns,
-    reason = "the pinned rustc_public::run_with_tcx! macro expands the unnested pattern"
-)]
-pub(crate) fn extract_owned(rustc_args: &[String]) -> Result<OwnedRustcExtraction, String> {
-    rustc_public::run_with_tcx!(rustc_args, extract_inside_callback)
-        .map_err(|error| format!("{error:?}"))
+pub(crate) fn extract_owned(rustc_args: &[String]) -> OwnedRustcExtraction {
+    diagnostics::extract(rustc_args)
 }
 
 #[cfg(test)]

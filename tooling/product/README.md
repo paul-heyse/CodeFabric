@@ -108,3 +108,12 @@ harness deadline is 600 seconds.
 build-profile selections, duplicate coalescing, independent valid and unavailable contexts, typed
 selection remainders, live override, clean reconstruction and exact reopen through installed clients.
 Its default harness deadline is 600 seconds.
+
+`just golden --case rust-failure` exercises installed public queries with both valid and failed Rust
+targets and verifies that the failed target retains its actual structured compiler diagnostic while
+remaining unavailable. Complete-call expectations explicitly select a processed context; retained
+calls in a failed parent context must carry their unavailable remainder. The contained compiler tests separately exercise successful lint messages and
+failure before MIR. `mixed-clean-live` additionally compares primary diagnostic messages through a
+compiler failure and repair against independent clean construction and checks exact failed-epoch
+reopening. Primary diagnostics have compilation-root ownership; per-message spans and child notes
+remain unfinished. These cases do not certify the full Rust CPG or all diagnostic consumers.

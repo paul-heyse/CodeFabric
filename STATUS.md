@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `09988b9d` (`Apply captured Cargo feature and profile selections with typed failure scope`);
-source-first fresh startup is the current implementation slice.
+Baseline for this continuation: `56d2a36d` (`Activate source and syntax before fresh semantic convergence`);
+structured compiler diagnostics and closed failed-compilation observations are the current slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -32,6 +32,46 @@ Fresh startup now uses this source-first path too. The first useful release rema
 The call-query continuation present at session start was preserved, exercised and committed in
 `80bc6d18`; declaration kinds/public subjects followed in `1a60e748`, and lexical references in
 `5964e5ff`. The full requested implementation remains unfinished. No outcome from 4 through 8 is closed.
+
+## Structured Rust diagnostics and failed compilation observations
+
+The dated-nightly extractor installs the native diagnostic emitter and retains typed primary
+messages, severity, compiler/lint code and invocation-local ordinal. Its additional capture is
+bounded to 8 MiB and 20,000 primary diagnostics; overflow, unfinished frames and unavailable sink
+initialization leave explicit unknown scope. Messages without a native code retain an empty code.
+The compiler's display paths are not source identities. Diagnostic owners bind the exact captured
+compilation root; per-message source spans, child notes and suggestions remain open.
+
+Closed diagnostic owners now survive ordinary compiler failure even when no MIR callback runs.
+Closed successful units within a failed Cargo invocation can also retain positive facts. Canonical
+declaration, call and caller-body projections now select their native prerequisites independently,
+so diagnostic-only output does not require nonexistent MIR tables. Receipt
+admission still requires exact plan/input binding, proved containment, complete kernel accounting,
+process samples, an empty process group and a complete output manifest. Failed targets remain
+unavailable and every requested target family remains unknown; retained diagnostic rows do not
+establish semantic completion. Cancelled, timed-out, resource-limited or corrupt work remains
+inadmissible. The existing provider contract uses a `Failed` terminal for this qualified failure.
+
+Validation on 2026-09-09: both real contained compiler cases pass (successful warning/direct call
+8.21 s; unresolved-function diagnostic without MIR 8.12 s). Installed live/clean failure, repair and
+exact persisted reopening pass on the final production candidate (374.04 s), including removal of
+the old diagnostic after repair and unchanged activation history on failed-epoch reopen. All-failed
+fresh startup passes (48.36 s), with exact captured Rust bytes and syntax still present. Staged
+source/semantic cancellation, obsolete completion and restart pass (188.20 s).
+The mixed-target check now explicitly selects completed contexts for complete-call expectations and
+separately verifies retained calls in a failed parent context with an unavailable remainder; it passes
+(76.48 s). Previously selecting the first context by ID made that expectation dependent on which
+parent target was selected. The shared Python call/reopen helper also passes (26.21 s). Public source identity checks remain intact.
+All 19 extractor tests and strict build/lint/identity checks pass. Eighteen Rust service checks pass,
+including corrupted streams, pin drift, cancellation, ordinary failure retention and failed-stream/
+successful-receipt rejection. Four canonical checks and the launcher-evidence check pass together.
+Launcher proof checks reject missing accounting samples/output manifests, surviving processes and
+degraded accounting. Default/featureless root checks, full governance and all 216 tooling tests pass.
+Clippy retains 952 library/36 integration warnings, with no new code/file diagnostics; three previously
+oversized functions remain oversized. Changed-file formatting and document navigation pass. The repository-wide spelling check retains
+existing escaped-source fixture and vendored/historical-text findings; the new text passes separately.
+These delegated-cgroup fixture samples are correctness evidence, not comparative latency measurements.
+Full diagnostic mapping, canonical/public diagnostic consumers and the other outcome scope remain open.
 
 ## Source-first fresh readiness
 
@@ -525,8 +565,10 @@ Implemented in `eba6f19a`, `baf533f4`, `52477365` and `b6a7d777`:
 Remaining: registry/git dependency materialization; build-script/proc-macro and generated `OUT_DIR`
 input closure/source mapping; effective Cargo configuration/environment and selectable feature,
 profile/target combinations; host-versus-target build separation; retained compatible compiler
-build caches; bounded parallel context scheduling; byte-safe compiler path handling; structured
-compiler diagnostics; update-time invalidation, cancellation and obsolete-completion scenarios.
+build caches; bounded parallel context scheduling; byte-safe compiler path handling; complete
+diagnostic spans/children and public consumers; broader update-time invalidation, cancellation and
+obsolete-completion scenarios. Primary compiler diagnostics now survive qualified ordinary failure
+as described above.
 
 ### 4B — Python contexts and semantic extraction: partial
 
@@ -723,7 +765,7 @@ identity and relationships; the wider edit and rename-continuity corpus remains 
 | 7A Python language semantics | Owned Ruff bindings/references/call syntax and selected Pyrefly call definition anchors | Complete scope/binding/import/type/member/call/decorator/pattern/comprehension and dynamic-semantics rows, canonical consumers and invalidation |
 | 7B Python CFG/dataflow | Typed analysis code and prepared source expectations | Correct owner-scoped control/evaluation semantics, normal/exception/cleanup/suspend edges, reaching definitions/liveness and real production input wiring; replace ordinal/sequential approximations |
 | 7C Python advanced state | Existing analysis structures | Finite memory/points-to, effects/resources/exceptions, capture/generator/async/concurrency and unknown propagation, built on 7B |
-| 7D Rust source/types/MIR | Real typed compiler publication, stable declaration keys and selected canonical calls | Full types/generics/traits/instances/MIR payloads, macro/hygiene/generated spans, coroutine/CTFE/FFI facts, structured diagnostics and canonical/public coverage |
+| 7D Rust source/types/MIR | Real typed compiler publication, stable declaration keys and selected canonical calls | Full types/generics/traits/instances/MIR payloads, macro/hygiene/generated spans, coroutine/CTFE/FFI facts, diagnostic spans/children and canonical/public coverage |
 | 7E Rust derived/private borrow | Existing MIR analysis modules and contained compiler seam | Real typed inputs, finite dataflow/state/ownership analyses, exact private loans/regions, drop/unwind/coroutine and changed-body replacement |
 | 7F Common graphs/summaries | Existing petgraph/analysis integration and canonical calls | Demand-rooted projections, correct dominance/SCC/reachability, structural facts and bounded interprocedural fixpoints with precision/frontier scope |
 | 7G Complete forms/composition | Eight-form request/ingress infrastructure; four limited public forms | FindPaths, MatchPattern, Compare and Summarize; finish first four; real typed multi-block DAGs, fan-out/fan-in, repeated forms, references, authorization, negatives, ordering/limits and cancellation |

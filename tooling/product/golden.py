@@ -18,6 +18,7 @@ CASES = {
     "python-serving": "wp63_beh_real_source_to_installed_fastmcp_is_causal_and_epoch_coherent",
     "reopen": "wp63_ops_installed_restart_reconstructs_only_exact_activation_authority",
     "cancellation": "wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation",
+    "rust-failure": "pragmatic_rust_target_failure_retains_other_targets",
     "python-live": "pragmatic_live_python_edits_converge_without_restart",
     "mixed-clean-live": "live_updates::mixed_live_updates_equal_independent_clean_public_queries",
     "staged-live": "live_updates::source_current_publication_fences_delayed_semantics_and_resumes_after_restart",

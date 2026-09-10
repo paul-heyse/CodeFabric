@@ -2230,6 +2230,16 @@ impl RustCompilationLauncherReceipt {
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_only_contained_compiler_failed(
+        plan: &RustCompilationLaunchPlan,
+    ) -> Result<Self, RustCompilationTrustError> {
+        let mut terminal = Self::test_only_contained_success(plan)?.terminal;
+        terminal.terminal_state = RustCompilationTerminalState::CompilerFailed;
+        terminal.exit_code = Some(101);
+        Self::close(plan, terminal, None)
+    }
+
     /// Close a launch with actual bounded observations.
     ///
     /// # Errors
@@ -3226,7 +3236,7 @@ impl RustCompilationAdmissionProof {
 ///
 /// # Errors
 ///
-/// Rejects trusted-local/degraded plans, mismatched or changed receipts, non-success terminals,
+/// Rejects trusted-local/degraded plans, mismatched or changed receipts, interrupted terminals,
 /// incomplete process-group accounting, or a missing complete output-tree manifest.
 pub fn issue_rust_compilation_admission_proof(
     plan: &RustCompilationLaunchPlan,
@@ -3244,8 +3254,14 @@ pub fn issue_rust_compilation_admission_proof(
     {
         return Err(RustCompilationTrustError::UntrustedAdmissionRequired);
     }
-    if terminal.terminal_state != RustCompilationTerminalState::Succeeded
-        || terminal.exit_code != Some(0)
+    let completed = match terminal.terminal_state {
+        RustCompilationTerminalState::Succeeded => terminal.exit_code == Some(0),
+        RustCompilationTerminalState::CompilerFailed => {
+            terminal.exit_code.is_some_and(|code| code != 0)
+        }
+        _ => false,
+    };
+    if !completed
         || !terminal.process_group_empty
         || terminal.accounting_quality != RustCompilationAccountingQuality::KernelComplete
         || terminal.process_sample_count == 0
@@ -3311,7 +3327,7 @@ pub enum RustCompilationTrustError {
     UntrustedAdmissionRequired,
     #[error("rustc compiler observation differs from the exact launch-plan binding")]
     CompilerObservationBindingMismatch,
-    #[error("rustc launcher receipt lacks complete contained success evidence")]
+    #[error("rustc launcher receipt lacks complete contained terminal evidence")]
     IncompleteContainedTerminalEvidence,
     #[error("trusted-local authorization is required")]
     TrustedLocalAuthorizationRequired,
@@ -5150,6 +5166,46 @@ sleep 30
         assert!(matches!(
             issue_rust_compilation_admission_proof(&trusted_plan, &trusted_receipt).unwrap_err(),
             RustCompilationTrustError::UntrustedAdmissionRequired
+        ));
+    }
+
+    #[test]
+    fn failed_compilation_observations_require_complete_contained_terminal_evidence() {
+        let harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
+        let plan = compile_untrusted(&harness);
+        let receipt =
+            RustCompilationLauncherReceipt::test_only_contained_compiler_failed(&plan).unwrap();
+        let proof = issue_rust_compilation_admission_proof(&plan, &receipt).unwrap();
+        assert_eq!(
+            proof.terminal().terminal_state,
+            RustCompilationTerminalState::CompilerFailed
+        );
+        assert!(proof.capability().available);
+        for mutate in [
+            |terminal: &mut RustCompilationTerminalObservation| terminal.process_sample_count = 0,
+            |terminal: &mut RustCompilationTerminalObservation| {
+                terminal.output_manifest_digest = None
+            },
+        ] {
+            let mut terminal = receipt.terminal().clone();
+            mutate(&mut terminal);
+            let incomplete = RustCompilationLauncherReceipt::close(&plan, terminal, None).unwrap();
+            assert!(matches!(
+                issue_rust_compilation_admission_proof(&plan, &incomplete),
+                Err(RustCompilationTrustError::IncompleteContainedTerminalEvidence)
+            ));
+        }
+        let mut terminal = receipt.terminal().clone();
+        terminal.process_group_empty = false;
+        assert!(matches!(
+            RustCompilationLauncherReceipt::close(&plan, terminal, None),
+            Err(RustCompilationTrustError::ProcessGroupSurvived)
+        ));
+        let mut terminal = receipt.terminal().clone();
+        terminal.accounting_quality = RustCompilationAccountingQuality::SampledDegraded;
+        assert!(matches!(
+            RustCompilationLauncherReceipt::close(&plan, terminal, None),
+            Err(RustCompilationTrustError::CompleteAccountingUnavailable)
         ));
     }
 
