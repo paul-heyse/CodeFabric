@@ -4452,7 +4452,7 @@ fn assert_public_call_queries(
             assert_eq!(row["state"], "unsupported");
             assert_eq!(
                 row["reason_code"],
-                "rust_canonical_references_unimplemented"
+                "rust_lexical_references_unimplemented"
             );
         }
     }

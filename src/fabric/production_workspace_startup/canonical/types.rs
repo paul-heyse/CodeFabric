@@ -214,20 +214,7 @@ fn union(
     relation: Relation,
     plans: impl Iterator<Item = LogicalPlan>,
 ) -> Result<LogicalPlan, TransformationPlanError> {
-    let mut output: Option<LogicalPlanBuilder> = None;
-    for plan in plans {
-        let plan = LogicalPlanBuilder::from(plan)
-            .project(super::canonical_projection(
-                relation.name(),
-                &relation.fields(),
-            ))?
-            .build()?;
-        output = Some(match output {
-            Some(output) => output.union(plan)?,
-            None => LogicalPlanBuilder::from(plan),
-        });
-    }
-    output.map_or_else(|| empty(relation.fields()), |plan| Ok(plan.build()?))
+    super::canonical_union(relation.name(), relation.fields(), plans)
 }
 
 fn type_union(inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {

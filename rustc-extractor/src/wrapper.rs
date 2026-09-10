@@ -702,9 +702,9 @@ impl CapturedCompilerSources {
     }
 }
 
-/// Diagnostic locations can be outside this run's captured universe. Preserve that limitation,
+/// Compiler locations can be outside this run's captured universe. Preserve that limitation,
 /// while retaining the ordinary hard rejection for changed or aliased captured source inputs.
-fn bind_diagnostic_locations(
+fn bind_source_locations(
     owner: &mut OwnedRustcOwner,
     sources: &mut CapturedCompilerSources,
 ) -> Result<(), String> {
@@ -712,7 +712,10 @@ fn bind_diagnostic_locations(
     for relation in &mut owner.relations {
         if !matches!(
             relation.relation,
-            RustcRelation::DiagnosticSpan | RustcRelation::DiagnosticEdit
+            RustcRelation::DiagnosticSpan
+                | RustcRelation::DiagnosticEdit
+                | RustcRelation::HirReference
+                | RustcRelation::HirImport
         ) {
             continue;
         }
@@ -744,12 +747,12 @@ fn bind_diagnostic_locations(
                         (row.0.get("span_start_byte"), row.0.get("span_end_byte"))
                     else {
                         return Err(
-                            "compiler diagnostic has a file path without its native range".into(),
+                            "compiler observation has a file path without its native range".into(),
                         );
                     };
                     if start > end || *end > length {
                         return Err(
-                            "compiler diagnostic range is outside its captured source".into()
+                            "compiler observation range is outside its captured source".into()
                         );
                     }
                     row.0.insert("location_file_id", OwnedCell::Utf8(file));
@@ -965,7 +968,7 @@ fn run_protocol(
     let compiler_exit_status = i32::from(!extracted.compiler_succeeded);
     let mut owners = extracted.owners;
     for owner in &mut owners {
-        bind_diagnostic_locations(owner, &mut captured_sources)?;
+        bind_source_locations(owner, &mut captured_sources)?;
     }
     let mut sequence = 1_u64;
     let mut closed_owners = Vec::new();
@@ -1685,7 +1688,7 @@ mod tests {
                 ],
             }],
         };
-        bind_diagnostic_locations(
+        bind_source_locations(
             &mut owner,
             &mut CapturedCompilerSources::open(environment).unwrap(),
         )
@@ -1711,7 +1714,7 @@ mod tests {
         let original = std::fs::read(source).unwrap();
         std::fs::write(source, b"changed").unwrap();
         assert!(
-            bind_diagnostic_locations(
+            bind_source_locations(
                 &mut owner,
                 &mut CapturedCompilerSources::open(environment).unwrap()
             )

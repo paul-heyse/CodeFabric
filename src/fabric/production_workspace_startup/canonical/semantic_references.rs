@@ -2,8 +2,8 @@
 
 use super::{
     DECLARATION, DataType, FieldSpec, JoinType, LogicalPlan, LogicalPlanBuilder, RUN, SOURCE,
-    ScalarValue, TransformationInputs, TransformationPlanError, col, empty, file_id_udf, lit,
-    modules, plan, source_alias, source_occurrence_id,
+    ScalarValue, TransformationInputs, TransformationPlanError, col, file_id_udf, lit, modules,
+    plan, source_alias, source_occurrence_id,
 };
 use crate::pyrefly_service::PyreflyRelation;
 use datafusion::functions::core::expr_fn::coalesce;
@@ -25,10 +25,10 @@ pub(super) fn fields() -> Vec<FieldSpec> {
         ("unknown_reason", DataType::Utf8, true),
         ("context_id", DataType::FixedSizeBinary(16), false),
         ("file_id", DataType::FixedSizeBinary(16), true),
-        ("content_digest", DataType::FixedSizeBinary(32), false),
+        ("content_digest", DataType::FixedSizeBinary(32), true),
         ("source_generation", DataType::UInt64, false),
-        ("start_byte", DataType::UInt64, false),
-        ("end_byte", DataType::UInt64, false),
+        ("start_byte", DataType::UInt64, true),
+        ("end_byte", DataType::UInt64, true),
         ("provider_run_id", DataType::FixedSizeBinary(16), false),
         ("provider_occurrence_ordinal", DataType::UInt64, false),
         ("provider_target_ordinal", DataType::UInt64, true),
@@ -36,11 +36,16 @@ pub(super) fn fields() -> Vec<FieldSpec> {
         ("workspace_id", DataType::FixedSizeBinary(16), false),
         ("target_mapping", DataType::Utf8, false),
         ("target_file_id", DataType::FixedSizeBinary(16), true),
+        ("provider_compilation_unit", DataType::Utf8, true),
+        ("provider_owner", DataType::Utf8, true),
+        ("target_namespace", DataType::Utf8, true),
+        ("target_definition_kind", DataType::Utf8, true),
+        ("target_native_definition_kind", DataType::Utf8, true),
     ]
 }
 
-pub(super) fn dependencies(available: bool) -> Vec<&'static str> {
-    if available {
+pub(super) fn dependencies(available: bool, rust: bool) -> Vec<&'static str> {
+    let mut result = if available {
         vec![
             SOURCE,
             RUN,
@@ -50,21 +55,44 @@ pub(super) fn dependencies(available: bool) -> Vec<&'static str> {
         ]
     } else {
         vec![]
+    };
+    if rust {
+        result.extend([
+            SOURCE,
+            RUN,
+            DECLARATION,
+            super::RustcRelation::HirReference.relation_id(),
+        ]);
     }
+    result.sort_unstable();
+    result.dedup();
+    result
+}
+
+pub(super) fn build(
+    workspace: [u8; 16],
+    inputs: &TransformationInputs,
+    python: bool,
+    rust: bool,
+) -> Result<LogicalPlan, TransformationPlanError> {
+    let mut plans = Vec::new();
+    if python {
+        plans.push(python_plan(workspace, inputs)?);
+    }
+    if rust {
+        plans.push(super::rust_references::references(workspace, inputs)?);
+    }
+    super::canonical_union(RELATION, fields(), plans)
 }
 
 #[allow(
     clippy::too_many_lines,
     reason = "one native reference plan keeps candidate cardinality, validity and projection together"
 )]
-pub(super) fn build(
+fn python_plan(
     workspace: [u8; 16],
     inputs: &TransformationInputs,
-    available: bool,
 ) -> Result<LogicalPlan, TransformationPlanError> {
-    if !available {
-        return empty(fields());
-    }
     let raw = LogicalPlanBuilder::from(plan(inputs, PyreflyRelation::Reference.relation_id())?)
         .alias("p")?
         .build()?;
@@ -219,6 +247,11 @@ pub(super) fn build(
             col("s.workspace_id").alias("workspace_id"),
             col("p.definition_mapping").alias("target_mapping"),
             target_file.alias("target_file_id"),
+            lit(ScalarValue::Utf8(None)).alias("provider_compilation_unit"),
+            lit(ScalarValue::Utf8(None)).alias("provider_owner"),
+            lit(ScalarValue::Utf8(None)).alias("target_namespace"),
+            lit(ScalarValue::Utf8(None)).alias("target_definition_kind"),
+            lit(ScalarValue::Utf8(None)).alias("target_native_definition_kind"),
         ])?
         .distinct()?
         .build()?)

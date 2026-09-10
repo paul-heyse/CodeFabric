@@ -33,6 +33,8 @@ struct Partition<'a> {
     reason: &'static str,
 }
 
+// Keep publication states and their complete family partition census together.
+#[allow(clippy::too_many_lines)]
 pub(super) fn install(
     builder: &mut ProgrammaticFabricEpochBuilder,
     inventory: &ProviderSourceInventory,
@@ -138,6 +140,8 @@ pub(super) fn install(
             "diagnostic-locations",
             "diagnostic-suggestions",
             "types",
+            "semantic-references",
+            "imports",
         ] {
             rows.push(Partition {
                 family,
@@ -262,7 +266,7 @@ fn unsupported_rust_references(partition: Partition<'_>) -> Partition<'_> {
     Partition {
         family: "lexical-references",
         state: "unsupported",
-        reason: "rust_canonical_references_unimplemented",
+        reason: "rust_lexical_references_unimplemented",
         ..partition
     }
 }
@@ -306,6 +310,11 @@ fn append_rust_partitions<'a>(
         rows.push(unsupported_rust_references(partition));
         for (family, relations) in [
             ("types", &[RustcRelation::Type][..]),
+            ("semantic-references", &[RustcRelation::HirReference][..]),
+            (
+                "imports",
+                &[RustcRelation::HirImport, RustcRelation::HirReference][..],
+            ),
             ("diagnostic-messages", &[RustcRelation::Diagnostic][..]),
             (
                 "diagnostic-locations",
@@ -320,22 +329,22 @@ fn append_rust_partitions<'a>(
                 ][..],
             ),
         ] {
-            let mut diagnostic = Partition {
+            let mut requested = Partition {
                 family,
                 ..partition
             };
             // Failed compilation may have accepted diagnostic output without declarations or MIR.
             if run.is_some() {
-                (diagnostic.state, diagnostic.reason) = ("complete", "");
+                (requested.state, requested.reason) = ("complete", "");
                 for relation in relations {
                     let state = family_state(run, relation.relation_id());
                     if state.0 != "complete" {
-                        (diagnostic.state, diagnostic.reason) = state;
+                        (requested.state, requested.reason) = state;
                         break;
                     }
                 }
             }
-            rows.push(diagnostic);
+            rows.push(requested);
         }
         let mut calls = Partition {
             family: "call-targets",

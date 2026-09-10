@@ -440,8 +440,29 @@ daemon now initializes existing warning events on supervisor-owned stderr using 
 tracing formatter. E26's immediate missing-sink issue is corrected; complete correlated metrics
 and provider-output retention/recovery remain in their packages.
 
-Continue P02 with initial Rust imports/semantic references and public family
-selection for the canonical clusters. Complete recursive/binder/alias/overload/ParamSpec/TypedDict
+**P02 initial Rust import/reference cluster implemented, 2026-09-10.** A native HIR item/body
+traversal exports typed resolved paths, associated paths, methods and namespace-specific imports.
+Definition keys and type-checker resolutions establish native denotations; display names do not.
+Raw/normalized target kinds, local binding provenance, source anchors, aliases and public/glob flags
+remain typed. Native lowering list stems do not invent imports, and injected prelude imports stay
+generated. The shared Arrow bundle and rebuilt extractor include both new relations.
+
+Native DataFusion plans bind compilation owners and observation locations independently, validate
+current target declaration bytes/context, preserve candidates and join imports by exact compiler
+reference ordinal/run/unit/owner. Namespace alternatives share their source occurrence without
+collapsing targets. Missing locations retain null canonical coordinates. Metadata-aligned native
+unions share a helper with canonical types. Target-scoped coverage includes normalization gaps and
+accepted observations removed by source fencing, detected with native anti joins and explicit null
+target-ordinal semantics. Local/module/external/glob/macro and broader reference normalization remain P06.
+
+All 22 extractor tests and strict extractor checks pass. The mixed native/reopen scenario passes
+(62.67 s), alongside the preceding Python case. The expanded 26-case regression run passes
+(64.58 s); independent Arrow and final type regression cases verify stale inputs, candidate and
+context/unit isolation, null locations, identity continuity and missing-observation coverage.
+`canonical-rust-references` selects the native case. STATUS records commands, final checks and limits.
+
+Continue P02 with public family selection for the canonical clusters.
+Complete recursive/binder/alias/overload/ParamSpec/TypedDict
 normalization, expanded type observation roles and members in P06. This does not defer or close any
 of P02's required semantic verticals. P03–P14 remain in the table's order.
 
@@ -658,7 +679,8 @@ relations and separate requested diagnostic coverage. The Python module/import/s
 cluster now has typed native observations, canonical joins, scoped coverage and exact reopen, as
 recorded in §3.3. Initial Python/Rust structural types, observations and components also publish
 with explicit unknown coverage and exact reopen. Public family selection, full type normalization,
-the Rust import/reference cluster and the broader semantic families below remain open.
+and the broader semantic families below remain open. The initial Rust import/reference cluster
+now also publishes typed native denotations, scoped unknowns and exact reopen as recorded in §3.3.
 
 1. Route raw source/syntax, Pyrefly and rustc outputs into typed canonical entity, occurrence, declaration, binding, reference, import/export, type, member, callable, call-site and dispatch relations. Preserve raw relations alongside normalized facts.
 2. Join ranges on `(file_id, content_digest, start_byte, end_byte)` and semantic role. Use exact matches first; a permitted containment/overlap rule records method and ambiguity. Never match unrelated declarations just because their ranges coincide.
@@ -1756,8 +1778,9 @@ P01–P14 register entries. These checks validate the planning artifact, not pro
 Implementation resumed from `b2a97b9c` under the user's instruction to execute §3.3 package by
 package across outcomes 4–8. P01's initial dependency/context vertical and phase costs are now
 implemented and exercised, with the limits recorded in §3.3 and STATUS. P02's canonical diagnostics
-and initial Python module/import/reference cluster are implemented with scoped coverage. Structural
-types, initial Rust imports/references and public family selection remain.
+and initial Python module/import/reference cluster, Python/Rust structural types and initial Rust
+imports/references are implemented with scoped coverage and exact reopen. Public family selection
+remains before the P02 package exit.
 
 Continue using §3.3 as the integrated order:
 

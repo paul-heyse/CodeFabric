@@ -48,7 +48,7 @@ pub(super) fn output_fields() -> Vec<FieldSpec> {
     fields
 }
 
-pub(super) fn dependencies(pyrefly: bool, rust: bool, rust_types: bool) -> Vec<&'static str> {
+pub(super) fn dependencies(pyrefly: bool, rust: super::RustInputs) -> Vec<&'static str> {
     let mut result = vec![
         INPUT,
         super::calls::RELATION,
@@ -61,7 +61,7 @@ pub(super) fn dependencies(pyrefly: bool, rust: bool, rust_types: bool) -> Vec<&
         super::DECLARATION,
         super::source_context::RELATION,
     ];
-    if rust {
+    if rust.bodies {
         result.extend([
             super::SOURCE,
             RUN,
@@ -76,8 +76,14 @@ pub(super) fn dependencies(pyrefly: bool, rust: bool, rust_types: bool) -> Vec<&
             NativeSyntaxRelation::RuffCallableSyntax.as_str(),
         ]);
     }
-    if rust_types {
+    if rust.types {
         result.extend([RUN, super::RustcRelation::Type.relation_id()]);
+    }
+    if rust.references {
+        result.extend([RUN, super::RustcRelation::HirReference.relation_id()]);
+    }
+    if rust.imports {
+        result.extend([RUN, super::RustcRelation::HirImport.relation_id()]);
     }
     result.sort_unstable();
     result.dedup();
@@ -103,8 +109,7 @@ fn count_when(condition: Expr) -> Result<Expr, datafusion::common::DataFusionErr
 pub(super) fn build(
     inputs: &TransformationInputs,
     pyrefly: bool,
-    rust: bool,
-    rust_types: bool,
+    rust: super::RustInputs,
     workspace: [u8; 16],
 ) -> Result<LogicalPlan, TransformationPlanError> {
     let calls = plan(inputs, super::calls::RELATION)?;
@@ -124,7 +129,7 @@ pub(super) fn build(
         )?
         .alias("g")?
         .build()?;
-    let base = LogicalPlanBuilder::from(qualify_references(inputs, rust_types)?)
+    let base = LogicalPlanBuilder::from(qualify_references(inputs, rust)?)
         .union(function_source_scope(inputs)?)?
         .build()?;
     let fields = fields();
@@ -232,7 +237,7 @@ pub(super) fn build(
             .map(|(name, _, _)| col(*name))
             .chain([lit(ScalarValue::FixedSizeBinary(16, None)).alias("owner_entity_id")]),
     )?;
-    Ok(if rust {
+    Ok(if rust.bodies {
         broad
             .union(call_owners::build(inputs, workspace)?)?
             .build()?
@@ -243,7 +248,7 @@ pub(super) fn build(
 
 fn qualify_references(
     inputs: &TransformationInputs,
-    rust_types: bool,
+    rust: super::RustInputs,
 ) -> Result<LogicalPlan, TransformationPlanError> {
     let mut base = plan(inputs, INPUT)?;
     for (relation, family, reason) in [
@@ -302,7 +307,7 @@ fn qualify_references(
                 .or(col("unknown_reason").is_not_null()),
         )?;
     }
-    if rust_types {
+    if rust.types {
         base = qualify_observation_gaps(
             base,
             missing_rust_type_graphs(inputs)?,
@@ -310,6 +315,24 @@ fn qualify_references(
             "native_type_source_unavailable",
             col("graph_type_key").is_null(),
         )?;
+    }
+    for (available, native, family) in [
+        (
+            rust.references,
+            super::RustcRelation::HirReference,
+            "semantic-references",
+        ),
+        (rust.imports, super::RustcRelation::HirImport, "imports"),
+    ] {
+        if available {
+            base = qualify_observation_gaps(
+                base,
+                super::rust_references::missing_bindings(inputs, native)?,
+                family,
+                "compiler_observation_source_unavailable",
+                lit(true),
+            )?;
+        }
     }
     Ok(base)
 }

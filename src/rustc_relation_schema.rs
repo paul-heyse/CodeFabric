@@ -44,10 +44,12 @@ pub enum RustcRelation {
     DiagnosticSpan = 140,
     DiagnosticSuggestion = 141,
     DiagnosticEdit = 142,
+    HirReference = 147,
+    HirImport = 148,
 }
 
 impl RustcRelation {
-    pub(crate) const ALL: [Self; 22] = [
+    pub(crate) const ALL: [Self; 24] = [
         Self::Compilation,
         Self::PublicItem,
         Self::Type,
@@ -70,6 +72,8 @@ impl RustcRelation {
         Self::DiagnosticSpan,
         Self::DiagnosticSuggestion,
         Self::DiagnosticEdit,
+        Self::HirReference,
+        Self::HirImport,
     ];
 
     pub const fn family_code(self) -> u32 {
@@ -100,6 +104,8 @@ impl RustcRelation {
             Self::DiagnosticSpan => "provider.rustc.diagnostic_span.v1",
             Self::DiagnosticSuggestion => "provider.rustc.diagnostic_suggestion.v1",
             Self::DiagnosticEdit => "provider.rustc.diagnostic_edit.v1",
+            Self::HirReference => "provider.rustc.hir_reference.v1",
+            Self::HirImport => "provider.rustc.hir_import.v1",
         }
     }
 
@@ -479,6 +485,44 @@ impl RustcRelation {
                 fields.extend(diagnostic_location_fields());
                 fields
             }
+            Self::HirReference => {
+                let mut fields = vec![
+                    u64_field("reference_ordinal", false),
+                    u64_field("target_ordinal", true),
+                    utf8("name", false),
+                    utf8("reference_kind", false),
+                    utf8("resolution_kind", false),
+                    utf8("target_namespace", true),
+                    u64_field("occurrence_owner_stable_crate_id", false),
+                    fixed_binary("occurrence_owner_def_path_hash", 16, false),
+                    u64_field("occurrence_local_index", false),
+                    u64_field("target_stable_crate_id", true),
+                    fixed_binary("target_def_path_hash", 16, true),
+                    utf8("target_definition_kind", true),
+                    utf8("target_native_definition_kind", true),
+                    bool_field("target_is_local", true),
+                    u64_field("target_local_owner_stable_crate_id", true),
+                    fixed_binary("target_local_owner_def_path_hash", 16, true),
+                    u64_field("target_local_index", true),
+                    utf8("primitive_kind", true),
+                ];
+                fields.extend(hir_location_fields());
+                fields
+            }
+            Self::HirImport => {
+                let mut fields = vec![
+                    u64_field("import_ordinal", false),
+                    u64_field("reference_ordinal", false),
+                    utf8("import_kind", false),
+                    utf8("alias", true),
+                    utf8("path", false),
+                    bool_field("is_public", false),
+                    u64_field("import_stable_crate_id", false),
+                    fixed_binary("import_def_path_hash", 16, false),
+                ];
+                fields.extend(hir_location_fields());
+                fields
+            }
             Self::Coverage => vec![
                 utf8("fact_family", false),
                 utf8("authority_surface", false),
@@ -519,6 +563,17 @@ fn diagnostic_location_fields() -> Vec<FieldSpec> {
         utf8("location_file_id", true),
         fixed_binary("location_content_digest", 32, true),
     ]
+}
+
+fn hir_location_fields() -> Vec<FieldSpec> {
+    let mut fields = diagnostic_location_fields();
+    fields.extend([
+        span_start_line(),
+        span_end_line(),
+        span_start_column(),
+        span_end_column(),
+    ]);
+    fields
 }
 
 /// Deterministic identity of the complete rustc provider-native schema bundle.

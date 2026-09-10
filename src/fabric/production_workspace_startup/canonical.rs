@@ -40,6 +40,7 @@ mod modules;
 mod processing;
 mod python_calls;
 mod relationship_selector;
+mod rust_references;
 mod semantic_references;
 mod source_context;
 mod types;
@@ -56,6 +57,8 @@ pub(super) struct RustInputs {
     calls: bool,
     pub bodies: bool,
     types: bool,
+    references: bool,
+    imports: bool,
     diagnostics: diagnostics::Inputs,
 }
 
@@ -72,6 +75,8 @@ impl RustInputs {
                 && relations.contains(&RustcRelation::MirTerminator),
             bodies: declarations && relations.contains(&RustcRelation::MirBody),
             types: relations.contains(&RustcRelation::Type),
+            references: relations.contains(&RustcRelation::HirReference),
+            imports: relations.contains(&RustcRelation::HirImport),
             diagnostics: diagnostics::Inputs::from_relations(&relations),
         }
     }
@@ -114,8 +119,14 @@ pub(super) fn install(
         },
         Kind::Reference { python },
         Kind::Module { pyrefly },
-        Kind::SemanticReference { pyrefly },
-        Kind::Import { python },
+        Kind::SemanticReference {
+            pyrefly,
+            rust: rust.references,
+        },
+        Kind::Import {
+            python,
+            rust: rust.imports,
+        },
         Kind::Type {
             relation: types::Relation::Graph,
             inputs: types::Inputs::new(pyrefly, rust),
@@ -204,9 +215,11 @@ enum Kind {
     },
     SemanticReference {
         pyrefly: bool,
+        rust: bool,
     },
     Import {
         python: bool,
+        rust: bool,
     },
     DiagnosticDetail {
         detail: diagnostics::Detail,
@@ -254,7 +267,7 @@ impl Canonical {
             Kind::Processing { pyrefly, rust } => (
                 processing::OUTPUT,
                 processing::output_fields(),
-                processing::dependencies(pyrefly, rust.bodies, rust.types),
+                processing::dependencies(pyrefly, rust),
             ),
             Kind::Source => (SOURCE, source_fields(), vec![INPUT]),
             Kind::Diagnostic { pyrefly, rust } => (
@@ -267,15 +280,15 @@ impl Canonical {
                 modules::fields(),
                 modules::dependencies(pyrefly),
             ),
-            Kind::Import { python } => (
+            Kind::Import { python, rust } => (
                 imports::RELATION,
                 imports::fields(),
-                imports::dependencies(python),
+                imports::dependencies(python, rust),
             ),
-            Kind::SemanticReference { pyrefly } => (
+            Kind::SemanticReference { pyrefly, rust } => (
                 semantic_references::RELATION,
                 semantic_references::fields(),
-                semantic_references::dependencies(pyrefly),
+                semantic_references::dependencies(pyrefly, rust),
             ),
             Kind::DiagnosticDetail { detail, available } => (
                 detail.relation(),
@@ -660,7 +673,7 @@ impl ProgrammaticTransformation for Canonical {
                 inputs: available,
             } => relation.build(self.workspace, inputs, available),
             Kind::Processing { pyrefly, rust } => {
-                processing::build(inputs, pyrefly, rust.bodies, rust.types, self.workspace)
+                processing::build(inputs, pyrefly, rust, self.workspace)
             }
             Kind::CallSelector => call_selector::build(inputs),
             Kind::RelationshipSelector => relationship_selector::build(inputs),
@@ -670,9 +683,9 @@ impl ProgrammaticTransformation for Canonical {
                 diagnostics::build(self.workspace, inputs, pyrefly, rust)
             }
             Kind::Module { pyrefly } => modules::build(self.workspace, inputs, pyrefly),
-            Kind::Import { python } => imports::build(self.workspace, inputs, python),
-            Kind::SemanticReference { pyrefly } => {
-                semantic_references::build(self.workspace, inputs, pyrefly)
+            Kind::Import { python, rust } => imports::build(self.workspace, inputs, python, rust),
+            Kind::SemanticReference { pyrefly, rust } => {
+                semantic_references::build(self.workspace, inputs, pyrefly, rust)
             }
             Kind::DiagnosticDetail { detail, available } => detail.build(inputs, available),
             Kind::Reference { python: true } => self.references(inputs),
@@ -857,6 +870,24 @@ fn canonical_projection(id: &str, fields: &[FieldSpec]) -> Vec<Expr> {
             )
         })
         .collect()
+}
+
+fn canonical_union(
+    id: &str,
+    fields: Vec<FieldSpec>,
+    plans: impl IntoIterator<Item = LogicalPlan>,
+) -> Result<LogicalPlan, TransformationPlanError> {
+    let mut output: Option<LogicalPlanBuilder> = None;
+    for plan in plans {
+        let plan = LogicalPlanBuilder::from(plan)
+            .project(canonical_projection(id, &fields))?
+            .build()?;
+        output = Some(match output {
+            Some(output) => output.union(plan)?,
+            None => LogicalPlanBuilder::from(plan),
+        });
+    }
+    output.map_or_else(|| empty(fields), |plan| Ok(plan.build()?))
 }
 
 fn entity_fields() -> Vec<FieldSpec> {
@@ -1179,6 +1210,7 @@ fn source_occurrence_id(workspace: [u8; 16], name: &str, kind: u16, family: u16)
 #[cfg(test)]
 mod tests {
     mod diagnostics;
+    mod rust_references;
     mod rust_types;
     mod semantic_references;
     mod types;

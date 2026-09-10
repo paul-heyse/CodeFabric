@@ -642,6 +642,8 @@ fn rustc_plan(
             let requested_units = if matches!(
                 relation,
                 RustcRelation::Compilation
+                    | RustcRelation::HirReference
+                    | RustcRelation::HirImport
                     | RustcRelation::Diagnostic
                     | RustcRelation::DiagnosticChild
                     | RustcRelation::DiagnosticSpan
@@ -1296,6 +1298,9 @@ const fn rustc_upstream_symbol(relation: RustcRelation) -> &'static str {
         }
         RustcRelation::Coverage => "codefabric::rustc::coverage",
         RustcRelation::Remainder => "codefabric::rustc::remainder",
+        RustcRelation::HirReference | RustcRelation::HirImport => {
+            "rustc_hir::intravisit / TyCtxt::typeck / DefPathHash"
+        }
     }
 }
 
@@ -2462,6 +2467,41 @@ fn compiled_provider_field_role(
             | "replacement_text" | "expansion_kind" | "location_state" => Some(DIAGNOSTIC_ROLE),
             _ => None,
         },
+        ProviderRelation::Rustc(RustcRelation::HirReference | RustcRelation::HirImport) => {
+            match name {
+                "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+                "compilation_unit_id" | "owner_id" => Some(CANONICAL_KEY_ROLE),
+                "source_file_id" | "location_file_id" => Some(FILE_IDENTITY_ROLE),
+                "source_content_digest" | "location_content_digest" => Some(CONTENT_DIGEST_ROLE),
+                "stable_crate_id"
+                | "def_path_hash"
+                | "occurrence_owner_stable_crate_id"
+                | "occurrence_owner_def_path_hash"
+                | "target_stable_crate_id"
+                | "target_def_path_hash"
+                | "target_local_owner_stable_crate_id"
+                | "target_local_owner_def_path_hash"
+                | "import_stable_crate_id"
+                | "import_def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+                "occurrence_local_index" | "target_local_index" => Some(COMPILER_LOCAL_INDEX_ROLE),
+                "span_file" | "span_file_bytes" | "span_start_byte" | "span_end_byte"
+                | "span_start_line" | "span_end_line" | "span_start_column" | "span_end_column" => {
+                    Some(PROVIDER_COORDINATE_ROLE)
+                }
+                "expansion_kind" => Some(HYGIENE_ROLE),
+                "reference_kind"
+                | "resolution_kind"
+                | "target_namespace"
+                | "target_definition_kind"
+                | "target_native_definition_kind"
+                | "primitive_kind"
+                | "import_kind" => Some(PROVIDER_KIND_ROLE),
+                "location_state" => Some(DIAGNOSTIC_ROLE),
+                "reference_ordinal" | "target_ordinal" | "name" | "target_is_local"
+                | "import_ordinal" | "alias" | "path" | "is_public" => Some(PROVIDER_FACT_ROLE),
+                _ => None,
+            }
+        }
         ProviderRelation::Rustc(RustcRelation::Coverage) => match name {
             "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
             "compilation_unit_id" | "owner_id" => Some(CANONICAL_KEY_ROLE),
@@ -2558,8 +2598,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(release.observation().provider_lanes, 5);
-        assert_eq!(release.observation().provider_relations, 70);
-        assert_eq!(release.observation().transformations, 70);
+        assert_eq!(release.observation().provider_relations, 72);
+        assert_eq!(release.observation().transformations, 72);
         assert_eq!(release.observation().query_forms, 8);
     }
 

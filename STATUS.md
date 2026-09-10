@@ -3,8 +3,9 @@
 Updated 2026-09-10 from the canonical `/home/paul/CodeFabric` working tree on `master`.
 Implementation has resumed from `b2a97b9c` in the detailed plan's P01–P14 package order, as requested.
 P01's initial captured dependency/context vertical and phase costs are committed in `a31e2a3a`.
-P02 is in progress; canonical diagnostics and the initial Python module/import/semantic-reference
-cluster and initial Python/Rust structural types are implemented with scoped coverage and exact reopen.
+P02 is in progress; canonical diagnostics, initial Python modules, Python/Rust imports and semantic
+references, and initial Python/Rust structural types publish with scoped coverage and exact reopen.
+The initial Rust type slice is committed in `ba35b4c7`; public family selection is next.
 The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
 Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
 
@@ -39,7 +40,7 @@ The call-query continuation present at session start was preserved, exercised an
 originally stopped at the diagnostic checkpoint. The subsequent user instruction resumes execution
 of the cross-cutting packages in §3.3 of the detailed plan.
 
-## P02 in progress: Python semantic references and canonical diagnostics
+## P02 in progress: canonical semantic families
 
 The Python continuation publishes `fact.code_module`, `fact.code_semantic_reference` and
 `fact.code_import`. Checker-selected modules are application-owned semantic entities without
@@ -83,8 +84,54 @@ completes with the existing warning backlog; full-suite, doctest and public fami
 completion are not claimed by this slice. The code-facts and DataFusion reference skills and exact
 local sources guided the bulk resolver, typed Arrow boundary, joins, aggregates and alias metadata.
 
-Initial Rust import/reference normalization and public family selection remain P02 work.
+Public family selection remains P02 work.
 P03–P14 remain required in package order.
+
+### Initial Rust imports and semantic references
+
+One native HIR traversal visits every item-like and its bodies, exporting paths, type-relative
+associated paths, method references and each import namespace. It uses resolved HIR `Res` and
+type-checker dependent definitions rather than rendered names to select targets. Typed Arrow
+relations `provider.rustc.hir_reference.v1` and `provider.rustc.hir_import.v1` carry source anchors,
+stable compiler definition keys, raw/normalized target kinds, local-owner/index provenance,
+aliases, glob/public flags and namespace distinctions. Lowering-only list stems do not invent
+imports; compiler-injected prelude imports retain their generated provenance. The shared bundle
+and current extractor were rebuilt; the provider recipe census now has 72 relations.
+
+Canonical references require exact accepted run/context/generation and captured compilation-owner
+bytes. Each HIR location independently binds its actual captured file/digest/range; unmapped,
+generated or invalid locations keep unknowns and null canonical coordinates. Target joins also
+require current captured declaration bytes and context. Multiple canonical declarations remain
+candidates. Import resolution joins native reference ordinals within the same run, compilation
+unit and owner. Syntax-only provider/observation fields remain null for the compiler branch.
+Namespace alternatives retain separate rows sharing their source import occurrence. Field metadata
+is aligned before native unions through a common helper shared with the type relations.
+
+Requested `imports` and `semantic-references` processing partitions are Cargo-target/context scoped.
+Canonical gaps downgrade completion. Native anti joins also detect accepted observations excluded
+by source validation; null target ordinals are compared explicitly. Unrepresented local bindings,
+primitive/self types, full module/member/external normalization, glob expansion, macro/hygiene
+correspondence and the broader reference census remain P06. Positive resolved imports/methods
+remain usable beside those unknowns. Rust lexical references retain their separate unsupported scope.
+
+Validation on 2026-09-10: all 22 extractor tests pass, including real alias resolution, distinct
+type/value namespace targets, local binding provenance, method byte positions, generated imports
+and distinct source ranges for nested imports (`/tmp/codefabric-p02-rust-references-native-tests-3.log`).
+Strict extractor check/Clippy passes (`/tmp/codefabric-p02-rust-references-extractor-check-final.log`).
+The real mixed daemon case verifies canonical function/method targets, aliases/public imports,
+namespace rows, unknown coverage and exact Delta reopen (62.67 s), alongside the existing Python
+reference scenario (26.25 s; `/tmp/codefabric-p02-rust-references-integration-tests.log`).
+The expanded 26-case canonical/provider/processing/native regression run passes (64.58 s;
+`/tmp/codefabric-p02-rust-references-final-tests.log`). Independent Arrow cases cover stale owners,
+locations and target digests, generations, candidate multiplicity, context/compilation-unit isolation,
+null coordinates and identity stability. The final four Arrow/type regression cases also pass,
+including the anti join's missing-owner and null-target behavior
+(`/tmp/codefabric-p02-rust-references-final-arrow-tests.log`). `canonical-rust-references` selects
+the native scenario. Root default/featureless checks pass
+(`/tmp/codefabric-p02-rust-references-root-check-final.log`). Root Clippy completes with the
+existing warning backlog (`/tmp/codefabric-p02-rust-references-clippy-final.jsonl`); new slice
+warnings were addressed. Full-suite, doctest and all-family public-query completion are not claimed. The code-facts and DataFusion
+references and exact local HIR/type-checker/source-map/plan APIs guided the implementation.
 
 ### Initial Python structural types
 
@@ -192,8 +239,7 @@ integrated retry/recovery acceptance remain in their packages.
 
 The code-facts, DataFusion, petgraph and Rust daemon references and exact local sources guided this
 slice. Complete binders/regions, const generics, aliases, trait objects, nominal/member census and
-additional type propositions remain P06/P08. Initial Rust imports/references and public family
-retrieval remain P02. No outcome is closed.
+additional type propositions remain P06/P08. Public family retrieval remains P02. No outcome is closed.
 
 ### Canonical diagnostics (`cf42d574`)
 
@@ -1036,8 +1082,8 @@ reverse; buffers and schema metadata remain intact. Exact Delta reopen restores 
 and numeric types from storage representations. `068e8fd4` fixes empty metadata-rich IPC schema validation
 to use the admitted allocation bound instead of encoded page length.
 
-Remaining: full module/class/lambda/callable entities; Rust imports/references and full exports/reference
-census; complete structural types and propositions beyond the P02 initial shapes; members/signatures/argument binding; complete
+Remaining: full module/class/lambda/callable entities; full exports/reference census beyond P02's
+initial Python/Rust cluster; complete structural types and propositions beyond the initial shapes; members/signatures/argument binding; complete
 candidate/dispatch and executable-instance relations; external endpoints and generated/lowered correspondence;
 full per-proposition authority/conflict retention; identity continuity and owner replacement under edits.
 Raw provider coverage is not complete canonical-family coverage.

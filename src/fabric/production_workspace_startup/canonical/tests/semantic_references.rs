@@ -149,7 +149,7 @@ async fn fixture(generation: u64, run: u8) -> datafusion::prelude::SessionContex
     );
     for kind in [
         Kind::Module { pyrefly: true },
-        Kind::SemanticReference { pyrefly: true },
+        Kind::SemanticReference { pyrefly: true, rust: false },
     ] {
         builder
             .add_transformation(Arc::new(Canonical::new(kind, &inventory)))

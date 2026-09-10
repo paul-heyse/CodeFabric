@@ -23,6 +23,7 @@ use rustc_public_bridge::IndexedVal;
 use crate::rustc_relation_schema::{RUSTC_PUBLIC_RELEASE, RUSTC_TOOLCHAIN, RustcRelation};
 
 mod diagnostics;
+mod references;
 mod type_structure;
 
 /// Closed scalar set used by the extractor-owned relation rows.
@@ -155,6 +156,7 @@ struct OwnerRelations {
     requested_native_families: BTreeSet<RustcRelation>,
     unresolved_calls: u64,
     unknown_operand_types: u64,
+    unresolved_references: u64,
 }
 
 impl OwnerRelations {
@@ -164,6 +166,7 @@ impl OwnerRelations {
             requested_native_families: families.into_iter().collect(),
             unresolved_calls: 0,
             unknown_operand_types: 0,
+            unresolved_references: 0,
         }
     }
 
@@ -187,6 +190,7 @@ impl OwnerRelations {
             let remainder_count = match relation {
                 RustcRelation::Call => self.unresolved_calls,
                 RustcRelation::MirOperand => self.unknown_operand_types,
+                RustcRelation::HirReference => self.unresolved_references,
                 _ => 0,
             };
             let partial = remainder_count > 0;
@@ -217,7 +221,11 @@ impl OwnerRelations {
     }
 }
 
-const COMPILATION_NATIVE_FAMILIES: [RustcRelation; 1] = [RustcRelation::Compilation];
+const COMPILATION_NATIVE_FAMILIES: [RustcRelation; 3] = [
+    RustcRelation::Compilation,
+    RustcRelation::HirReference,
+    RustcRelation::HirImport,
+];
 
 const ITEM_NATIVE_FAMILIES: [RustcRelation; 14] = [
     RustcRelation::PublicItem,
@@ -437,6 +445,9 @@ fn authority_surface(relation: RustcRelation) -> &'static str {
             "rustc_errors::DiagInner / rustc_span::source_map::SourceMap"
         }
         RustcRelation::Coverage | RustcRelation::Remainder => "codefabric-adapter-v1",
+        RustcRelation::HirReference | RustcRelation::HirImport => {
+            "rustc_hir::intravisit / TyCtxt::typeck / DefPathHash"
+        }
     }
 }
 
@@ -1843,6 +1854,7 @@ fn extract_inside_callback(tcx: TyCtxt<'_>) -> ControlFlow<(), OwnedRustcExtract
                 .utf8("detail", detail),
         );
     }
+    references::emit(tcx, &mut compilation);
     let mut owners = vec![OwnedRustcOwner {
         qualified_name: local_crate.name.clone(),
         owner_kind: "COMPILATION".to_owned(),

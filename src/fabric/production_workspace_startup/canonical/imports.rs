@@ -2,7 +2,7 @@
 
 use super::{
     DataType, FieldSpec, JoinType, LogicalPlan, LogicalPlanBuilder, NativeSyntaxRelation, SOURCE,
-    TransformationInputs, TransformationPlanError, col, empty, lit, modules, plan,
+    ScalarValue, TransformationInputs, TransformationPlanError, col, lit, modules, plan,
     semantic_references, source_alias, source_occurrence_id,
 };
 use datafusion::functions::core::expr_fn::coalesce;
@@ -16,12 +16,12 @@ pub(super) fn fields() -> Vec<FieldSpec> {
         ("semantic_reference_id", DataType::FixedSizeBinary(16), true),
         ("language", DataType::Utf8, false),
         ("context_id", DataType::FixedSizeBinary(16), false),
-        ("file_id", DataType::FixedSizeBinary(16), false),
-        ("content_digest", DataType::FixedSizeBinary(32), false),
+        ("file_id", DataType::FixedSizeBinary(16), true),
+        ("content_digest", DataType::FixedSizeBinary(32), true),
         ("source_generation", DataType::UInt64, false),
         ("workspace_id", DataType::FixedSizeBinary(16), false),
-        ("start_byte", DataType::UInt64, false),
-        ("end_byte", DataType::UInt64, false),
+        ("start_byte", DataType::UInt64, true),
+        ("end_byte", DataType::UInt64, true),
         ("import_kind", DataType::Utf8, false),
         ("source_name", DataType::Utf8, false),
         ("module_name", DataType::Utf8, true),
@@ -36,7 +36,7 @@ pub(super) fn fields() -> Vec<FieldSpec> {
         (
             "syntax_provider_run_id",
             DataType::FixedSizeBinary(16),
-            false,
+            true,
         ),
         (
             "semantic_provider_run_id",
@@ -44,17 +44,19 @@ pub(super) fn fields() -> Vec<FieldSpec> {
             true,
         ),
         ("semantic_context_id", DataType::FixedSizeBinary(16), true),
-        (
-            "syntax_observation_id",
-            DataType::FixedSizeBinary(16),
-            false,
-        ),
+        ("syntax_observation_id", DataType::FixedSizeBinary(16), true),
         ("join_method", DataType::Utf8, false),
+        ("provider", DataType::Utf8, false),
+        ("provider_compilation_unit", DataType::Utf8, true),
+        ("provider_owner", DataType::Utf8, true),
+        ("provider_import_ordinal", DataType::UInt64, true),
+        ("target_namespace", DataType::Utf8, true),
+        ("is_public", DataType::Boolean, true),
     ]
 }
 
-pub(super) fn dependencies(available: bool) -> Vec<&'static str> {
-    if available {
+pub(super) fn dependencies(available: bool, rust: bool) -> Vec<&'static str> {
+    let mut result = if available {
         vec![
             SOURCE,
             NativeSyntaxRelation::RuffImport.as_str(),
@@ -63,21 +65,44 @@ pub(super) fn dependencies(available: bool) -> Vec<&'static str> {
         ]
     } else {
         vec![]
+    };
+    if rust {
+        result.extend([
+            SOURCE,
+            super::RUN,
+            semantic_references::RELATION,
+            super::RustcRelation::HirImport.relation_id(),
+        ]);
     }
+    result.sort_unstable();
+    result.dedup();
+    result
+}
+
+pub(super) fn build(
+    workspace: [u8; 16],
+    inputs: &TransformationInputs,
+    python: bool,
+    rust: bool,
+) -> Result<LogicalPlan, TransformationPlanError> {
+    let mut plans = Vec::new();
+    if python {
+        plans.push(python_plan(workspace, inputs)?);
+    }
+    if rust {
+        plans.push(super::rust_references::imports(workspace, inputs)?);
+    }
+    super::canonical_union(RELATION, fields(), plans)
 }
 
 #[allow(
     clippy::too_many_lines,
     reason = "one native import plan keeps exact join keys and its typed projection together"
 )]
-pub(super) fn build(
+fn python_plan(
     workspace: [u8; 16],
     inputs: &TransformationInputs,
-    available: bool,
 ) -> Result<LogicalPlan, TransformationPlanError> {
-    if !available {
-        return empty(fields());
-    }
     let raw = LogicalPlanBuilder::from(plan(inputs, NativeSyntaxRelation::RuffImport.as_str())?)
         .alias("p")?
         .build()?;
@@ -174,6 +199,12 @@ pub(super) fn build(
             )
             .otherwise(lit("unmatched-syntax"))?
             .alias("join_method"),
+            lit("ruff/pyrefly").alias("provider"),
+            lit(ScalarValue::Utf8(None)).alias("provider_compilation_unit"),
+            lit(ScalarValue::Utf8(None)).alias("provider_owner"),
+            lit(ScalarValue::UInt64(None)).alias("provider_import_ordinal"),
+            lit(ScalarValue::Utf8(None)).alias("target_namespace"),
+            lit(ScalarValue::Boolean(None)).alias("is_public"),
         ])?
         .distinct()?
         .build()?)
