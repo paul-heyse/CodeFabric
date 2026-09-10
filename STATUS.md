@@ -48,6 +48,37 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The independent compiler-branch continuation after `c7012005` isolates unavailable return meanings
+and invalid return ordering to their owning block. Valid dependents of failed blocks receive
+`NOT_EXECUTED_DEPENDENCY`; independent compiled outputs still execute and publish real Arrow
+results. Structural execution-catalog inconsistencies remain fatal. Rust publishes typed per-block
+execution outcomes and bounded issues in original request order, separately from processing
+coverage. A completed block can still have incomplete semantic knowledge.
+
+The sealed manifest validates successful block/relation correspondence and failed-dependency
+identities. Fresh registration and exact retained-package reissue derive identical outcomes from
+that manifest. The generated Protobuf response uses a presence-bearing message; older responses
+without outcomes remain distinguishable from reported outcomes. Strict Pydantic models reject
+inconsistent states, empty/duplicate identities and malformed dependencies. Reconnect identity
+includes block outcomes while excluding reissued resource authority.
+
+Five focused compiler cases and 35 compiler/package/registry regression cases pass. The installed
+five-block branch/reopen scenario passes in 76.55 s (`/tmp/codefabric-p03-branches-native-4.log`),
+and the preceding Python/Rust ordering regression passes in 150.49 s. All 120 adapter cases, adapter lint/types,
+Protobuf generation and compatibility, 218 tooling cases, default/featureless root checks and
+affected Clippy pass. Validation logs use `/tmp/codefabric-p03-branches-*`.
+The native fixture first requested an invalid
+fact-to-entity role, then exposed the still-unimplemented FindEntities prior-result `within` slot;
+the supported entity-to-facts dependency is the acceptance path for this slice. The native comparison
+also caught null-versus-absent related IDs; Rust now omits unset related IDs consistently with the
+generated wire and public adapter. `query-branches` selects the scenario. Navigation, affected
+spelling and diff checks pass; full-suite/strict baseline lint closure is not claimed.
+
+This is the initial compiler-failure vertical. Runtime stream/planning failures, early phrase/input
+and authorization failures, all-failed request result envelopes, ready-block concurrency, prior
+FindEntities scopes and broader first-four semantics remain P03 work. An all-failed request retains
+the existing request-level failure. P03 and subsequent packages remain open.
+
 The semantic-ordering continuation after `b81ef8c9` adds admitted `return.order_by` meanings to
 all first-four production programs. Native sort keys support ascending/descending order and retain
 the program's remaining deterministic tie breakers. Unknown keys, duplicate aliases and keys

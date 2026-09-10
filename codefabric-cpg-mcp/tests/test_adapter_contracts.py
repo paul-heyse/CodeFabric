@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from codefabric_cpg_mcp.contracts.wire_models import (
     PublicToolMeta,
+    QueryBlockOutcome,
     QueryToolInput,
     QueryToolOutput,
     ReferenceToolOutput,
@@ -94,6 +95,23 @@ def test_query_projection_separates_presentation_and_daemon_identities() -> None
             manifest=manifest,
             total_pages=1,
         )
+
+
+def test_query_outcomes_require_a_sealed_result_and_unique_request_ids() -> None:
+    complete = QueryBlockOutcome(query_id="first", execution_state="COMPLETE")
+    for outcomes, state in [
+        ((), "SUCCEEDED"),
+        ((complete, complete), "SUCCEEDED"),
+        ((complete,), "FAILED"),
+    ]:
+        with pytest.raises(ValidationError, match="sealed result"):
+            QueryToolOutput(
+                outcome="accepted",
+                daemon_query_id="query:one",
+                semantic_request_id="semantic:one",
+                execution_state=state,  # type: ignore[arg-type]
+                query_results=outcomes,
+            )
 
 
 def test_reference_projects_only_a_public_daemon_resource() -> None:

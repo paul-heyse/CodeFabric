@@ -38,6 +38,7 @@ mod source_boundary_queries;
 mod syntax_queries;
 mod location_queries;
 mod ordering_queries;
+mod branch_queries;
 mod types;
 
 struct InstalledProductionStack {

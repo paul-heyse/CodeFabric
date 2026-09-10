@@ -26,6 +26,8 @@ from ..contracts.wire_models import (
     ProcessingRemainder,
     ProcessingRustBuildSelection,
     ProcessingState,
+    QueryBlockIssue,
+    QueryBlockOutcome,
     QueryProcessingSummary,
     QueryToolInput,
     SnapshotFreshness,
@@ -556,6 +558,7 @@ class DaemonQueryResult(_PortModel):
     freshness: SnapshotFreshness | None = None
     analysis_context_set_id: str | None = None
     processing: tuple[QueryProcessingSummary, ...] = ()
+    query_results: tuple[QueryBlockOutcome, ...] | None = None
     package_id: str | None
     manifest: ResourceHandle | None
     pages: tuple[ResourceHandle, ...]
@@ -1006,6 +1009,41 @@ def _safe_error_identity(error: SafeError | None) -> tuple[object, ...] | None:
     )
 
 
+def _query_block_results(value: query_pb.ResultReadyEvent) -> tuple[QueryBlockOutcome, ...] | None:
+    if not value.HasField("block_results"):
+        return None
+    states: dict[int, Literal["COMPLETE", "FAILED", "NOT_EXECUTED_DEPENDENCY"]] = {
+        query_pb.QUERY_BLOCK_EXECUTION_STATE_COMPLETE: "COMPLETE",
+        query_pb.QUERY_BLOCK_EXECUTION_STATE_FAILED: "FAILED",
+        query_pb.QUERY_BLOCK_EXECUTION_STATE_NOT_EXECUTED_DEPENDENCY: "NOT_EXECUTED_DEPENDENCY",
+    }
+    outcomes: list[QueryBlockOutcome] = []
+    try:
+        for outcome in value.block_results.query_results:
+            state = states.get(outcome.execution_state)
+            if state is None:
+                raise DaemonProtocolError("unknown query block execution state")
+            outcomes.append(
+                QueryBlockOutcome(
+                    query_id=outcome.query_id,
+                    execution_state=state,
+                    errors=tuple(
+                        QueryBlockIssue(
+                            code=issue.code,
+                            subject_id=issue.subject_id,
+                            related_id=issue.related_id if issue.HasField("related_id") else None,
+                        )
+                        for issue in outcome.errors
+                    ),
+                )
+            )
+    except ValidationError as error:
+        raise DaemonProtocolError("invalid query block outcome") from error
+    if not outcomes or len({outcome.query_id for outcome in outcomes}) != len(outcomes):
+        raise DaemonProtocolError("query block outcomes must have unique query identities")
+    return tuple(outcomes)
+
+
 def _processing_summary(value: query_pb.QueryProcessingSummary) -> QueryProcessingSummary:
     states: dict[int, ProcessingState] = {
         query_pb.PROCESSING_STATE_PENDING: "pending",
@@ -1141,6 +1179,9 @@ def _query_event_identity(event: query_pb.QueryEvent) -> tuple[object, ...]:
             value.total_rows,
             value.total_pages,
             value.total_bytes,
+            None
+            if (outcomes := _query_block_results(value)) is None
+            else tuple(outcome.model_dump_json() for outcome in outcomes),
             tuple(
                 _processing_summary(item).model_dump_json(exclude={"remainder_handle"})
                 for item in value.processing
@@ -1942,6 +1983,7 @@ class CpgDaemonClient:
             freshness=freshness,
             analysis_context_set_id=analysis_context_set_id,
             processing=processing,
+            query_results=None if result_ready is None else _query_block_results(result_ready),
             package_id=package_id,
             manifest=manifest,
             pages=page_resources,

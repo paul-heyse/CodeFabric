@@ -949,6 +949,7 @@ def create_server(
                 freshness=result.freshness,
                 analysis_context_set_id=result.analysis_context_set_id,
                 processing=result.processing,
+                query_results=result.query_results,
                 package_id=result.package_id,
                 manifest=manifest,
                 pages=pages,

@@ -749,6 +749,32 @@ The 23.97-second source execution/write sample is not comparative optimization e
 Other return directives, precise dependency scopes, broader first-four meanings and independent
 branch execution remain P03 scope. No package or outcome exit is claimed.
 
+**P03 independent compiler-branch continuation passes native validation, 2026-09-10.** Unknown
+return meanings and invalid return ordering now fail their own blocks; valid dependents receive
+`NOT_EXECUTED_DEPENDENCY`, and independent compiled outputs continue through the native runtime.
+Structural execution-catalog mismatches remain fatal. Typed outcomes and bounded issues preserve
+original request order in the sealed manifest and the public response. Execution completion is
+separate from processing completeness. Successful block/relation correspondence and dependency
+identities are checked when sealing and reopening retained packages.
+
+The Protobuf reference §7.1 (explicit presence) informs the presence-bearing `QueryBlockResults`
+message and optional related block ID; no existing field number changes. The grpcio replay path
+compares typed outcome content separately from reissued handles. Pydantic reference §21.6 informs
+reuse of compiled model validators; the adapter validates and presents Rust outcomes without
+deciding semantic success. Older absent outcomes remain distinct from malformed empty outcomes.
+Five compiler tests, 120 adapter tests, adapter lint/types, generated wire compatibility, 218 tooling
+cases, default/featureless builds and affected Clippy pass. Thirty-five compiler/package/registry
+regression cases pass, including retained reissue and malformed-manifest checks. The five-block
+installed-client branch/reopen scenario passes in 76.55 s. It exposed a null-versus-absent related-ID
+inconsistency; unset related IDs are now omitted consistently. `query-branches` selects the scenario.
+The preceding Python/Rust ordering regression passes in 150.49 s; STATUS records commands, logs
+and limits. Navigation, affected spelling and diff checks pass. Full-suite closure is not claimed.
+
+Early phrase/input/authorization errors, native planning/stream failures, all-failed request
+envelopes and ready-block concurrency remain open. The native fixture exposed the missing
+FindEntities prior-result `within` slot; that scope must be added as remaining P03 composition.
+Current all-failed requests retain their request-level failure. No package exit is claimed.
+
 **Next:** remaining first-four scopes/meanings, precise dependency scope and independent block
 execution/failure, then proceed to P04 in package order.
 Full source/syntax selection and remaining P03 acceptance are still open.
@@ -1546,7 +1572,7 @@ Complete resource acquisition/transfer/drop/escape, unwind paths, closure captur
 
 ### 7G. Remaining forms, complete composition and query semantics
 
-**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, CombineResults, SummarizeFacts and full first-four behavior remain. P03 now isolates repeated first-four blocks and materializes typed entity results once for fan-out/fan-in. Broader prior roles, independent-branch execution/failure and the full mixed-form DAG remain.
+**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, CombineResults, SummarizeFacts and full first-four behavior remain. P03 now isolates repeated first-four blocks and materializes typed entity results once for fan-out/fan-in. Compiler return-resolution/lowering failures now preserve independent results with typed outcomes and failed-dependency states through exact reopen. Broader prior roles/scopes, runtime branch failures, ready-block concurrency and the full mixed-form DAG remain.
 
 **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, query contracts and graph integration. Complete the first four forms from 4E and extend them to every relevant family in the coverage map as those families land.
 

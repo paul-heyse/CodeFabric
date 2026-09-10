@@ -3,7 +3,7 @@
 // version: 2.0
 // compatible_suite_major: 2
 // status: released
-// canonical_digest: b3:e59786c90044225c4fb4fc894473b14cab543af9738da3c791cfccb1c402f37c
+// canonical_digest: b3:b970dec1bf345bd3df0abd6da76e275a65eab5bce56406419f66ebe4ed29bbb3
 // digest_projection: proto-descriptor-v2
 syntax = "proto3";
 
@@ -573,6 +573,31 @@ message ResultReadyEvent {
   repeated ResourceDescriptor pages = 7;
   // Immutable query dependency scope at this result's pinned source generation.
   repeated QueryProcessingSummary processing = 8;
+  // Absent on older retained profiles; present outcomes follow original request order.
+  QueryBlockResults block_results = 9;
+}
+
+enum QueryBlockExecutionState {
+  QUERY_BLOCK_EXECUTION_STATE_UNSPECIFIED = 0;
+  QUERY_BLOCK_EXECUTION_STATE_COMPLETE = 1;
+  QUERY_BLOCK_EXECUTION_STATE_FAILED = 2;
+  QUERY_BLOCK_EXECUTION_STATE_NOT_EXECUTED_DEPENDENCY = 3;
+}
+
+message QueryBlockIssue {
+  string code = 1;
+  string subject_id = 2;
+  optional string related_id = 3;
+}
+
+message QueryBlockOutcome {
+  string query_id = 1;
+  QueryBlockExecutionState execution_state = 2;
+  repeated QueryBlockIssue errors = 3;
+}
+
+message QueryBlockResults {
+  repeated QueryBlockOutcome query_results = 1;
 }
 
 enum ProcessingState {

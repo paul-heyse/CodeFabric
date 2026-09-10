@@ -1245,16 +1245,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         let mut output_by_query = BTreeMap::new();
         for block in compiled.blocks() {
             if block.disposition() != SemanticBlockDisposition::Compiled {
-                return failed(
-                    &artifacts,
-                    "logical_planning",
-                    format!(
-                        "query block {} is not executable: {:?} {:?}",
-                        block.query_id(),
-                        block.disposition(),
-                        block.issues()
-                    ),
-                );
+                continue;
             }
             let Some(mut output) = block.output().cloned() else {
                 return failed(
@@ -1283,10 +1274,16 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             output_queries.push(Arc::clone(block.query_id()));
         }
         if outputs.is_empty() {
-            return failed(
+            let block = &compiled.blocks()[0];
+            return failed_error(
                 &artifacts,
-                "logical_planning",
-                "epoch-bound compiler produced no executable outputs",
+                "semantic_resolution",
+                SemanticQueryError::Phase {
+                    code: "SEMANTIC_REFERENCE_UNAVAILABLE",
+                    phase: "semantic_resolution",
+                    pointer: format!("queries.{}", block.query_id()),
+                    message: format!("no executable query blocks: {:?}", block.issues()),
+                },
             );
         }
         if ports.scope_authorization.policy_pin() != handoff.policy_pin {
@@ -1730,11 +1727,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 .iter()
                 .position(|query| *query == prior.query_id)
             else {
-                return failed(
-                    &artifacts,
-                    "prior_result_binding",
-                    "consumer block is not executable",
-                );
+                continue;
             };
             let producers = prior
                 .producer_query_ids
@@ -1756,14 +1749,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
         for request_input in handoff.request_inputs {
             let Some(output_relation) = output_by_query.get(&request_input.query_id).cloned()
             else {
-                return failed(
-                    &artifacts,
-                    "request_input",
-                    format!(
-                        "request input {} names unknown query {}",
-                        request_input.input_id, request_input.query_id
-                    ),
-                );
+                continue;
             };
             handoffs_by_output
                 .entry(output_relation)
@@ -1839,6 +1825,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             "semantic_request_id": request.parsed().request.semantic_request_id,
             "snapshot": &snapshot,
             "resolved_scope": {"source_boundaries": source_boundaries.resolved()},
+            "query_results": query_block_outcomes(&request.parsed().request, compiled.blocks()),
             "queries": output_queries.iter().map(|query_id| serde_json::json!({
                 "query_id": query_id,
                 "relation_id": output_by_query[query_id].as_str(),
@@ -1936,6 +1923,42 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             artifacts.snapshot(),
         ))
     }
+}
+
+fn query_block_outcomes(
+    request: &crate::semantic_query_contract::SemanticQueryRequest,
+    blocks: &[crate::relational_semantic_query::CompiledSemanticBlock],
+) -> Vec<crate::semantic_query_contract::QueryBlockOutcome> {
+    use crate::semantic_query_contract::{
+        QueryBlockExecutionState as State, QueryBlockIssue, QueryBlockOutcome,
+    };
+    request
+        .queries
+        .iter()
+        .map(|query| {
+            let block = blocks
+                .iter()
+                .find(|block| block.query_id().as_ref() == query.query_id())
+                .expect("compiler returns every validated block");
+            QueryBlockOutcome {
+                query_id: query.query_id().to_owned(),
+                execution_state: match block.disposition() {
+                    SemanticBlockDisposition::Compiled => State::Complete,
+                    SemanticBlockDisposition::NotExecutedDependency => State::NotExecutedDependency,
+                    _ => State::Failed,
+                },
+                errors: block
+                    .issues()
+                    .iter()
+                    .map(|issue| QueryBlockIssue {
+                        code: issue.code.to_owned(),
+                        subject_id: issue.subject_id.to_string(),
+                        related_id: issue.related_id.as_deref().map(str::to_owned),
+                    })
+                    .collect(),
+            }
+        })
+        .collect()
 }
 
 fn resolved_semantic_selections(

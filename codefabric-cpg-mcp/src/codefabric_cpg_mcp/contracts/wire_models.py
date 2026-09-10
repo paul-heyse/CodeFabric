@@ -268,6 +268,31 @@ class SnapshotFreshness(StrEnum):
     UNAVAILABLE = "UNAVAILABLE"
 
 
+class QueryBlockIssue(StrictWireModel):
+    code: Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[^\x00]+$")]
+    subject_id: Annotated[str, Field(min_length=1, max_length=512, pattern=r"^[^\x00]+$")]
+    related_id: (
+        Annotated[str, Field(min_length=1, max_length=512, pattern=r"^[^\x00]+$")] | None
+    ) = None
+
+
+class QueryBlockOutcome(StrictWireModel):
+    query_id: Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[^\x00]+$")]
+    execution_state: Literal["COMPLETE", "FAILED", "NOT_EXECUTED_DEPENDENCY"]
+    errors: tuple[QueryBlockIssue, ...] = Field(default=(), max_length=128)
+
+    @model_validator(mode="after")
+    def consistent_outcome(self) -> QueryBlockOutcome:
+        if (self.execution_state == "COMPLETE") != (not self.errors):
+            raise ValueError("query block execution state and errors disagree")
+        if self.execution_state == "NOT_EXECUTED_DEPENDENCY" and any(
+            issue.code != "NOT_EXECUTED_DEPENDENCY" or issue.related_id is None
+            for issue in self.errors
+        ):
+            raise ValueError("blocked query must identify its failed dependencies")
+        return self
+
+
 class QueryToolOutput(StrictWireModel):
     """One strict object with branch invariants for both terminal start outcomes."""
 
@@ -280,6 +305,7 @@ class QueryToolOutput(StrictWireModel):
     freshness: SnapshotFreshness | None = None
     analysis_context_set_id: str | None = None
     processing: tuple[QueryProcessingSummary, ...] = ()
+    query_results: tuple[QueryBlockOutcome, ...] | None = None
     package_id: str | None = None
     manifest: ResourceReference | None = None
     pages: tuple[ResourceReference, ...] = ()
@@ -292,6 +318,12 @@ class QueryToolOutput(StrictWireModel):
 
     @model_validator(mode="after")
     def closed_outcome(self) -> QueryToolOutput:
+        if self.query_results is not None and (
+            not self.query_results
+            or len({result.query_id for result in self.query_results}) != len(self.query_results)
+            or self.execution_state != "SUCCEEDED"
+        ):
+            raise ValueError("query block outcomes require unique identities and a sealed result")
         if self.outcome == "accepted":
             if self.daemon_query_id is None or self.semantic_request_id is None:
                 raise ValueError("accepted query output requires both query identities")

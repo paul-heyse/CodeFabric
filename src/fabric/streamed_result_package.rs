@@ -221,6 +221,73 @@ pub struct StreamedResultPackageManifest {
 }
 
 impl StreamedResultPackageManifest {
+    pub(crate) fn query_results(
+        &self,
+    ) -> Result<
+        Option<Vec<crate::semantic_query_contract::QueryBlockOutcome>>,
+        StreamedResultPackageError,
+    > {
+        use crate::semantic_query_contract::QueryBlockExecutionState;
+
+        let Some(value) = self.canonical_semantic_response.get("query_results") else {
+            return Ok(None);
+        };
+        let outcomes: Vec<crate::semantic_query_contract::QueryBlockOutcome> =
+            serde_json::from_value(value.clone())
+                .map_err(StreamedResultPackageError::CanonicalResponse)?;
+        let ids = outcomes
+            .iter()
+            .map(|outcome| outcome.query_id.as_str())
+            .collect::<BTreeSet<_>>();
+        if outcomes.is_empty()
+            || ids.len() != outcomes.len()
+            || outcomes.iter().any(|outcome| !outcome.valid())
+        {
+            return Err(StreamedResultPackageError::ManifestShape);
+        }
+        let complete = outcomes
+            .iter()
+            .filter(|outcome| outcome.execution_state == QueryBlockExecutionState::Complete)
+            .map(|outcome| outcome.query_id.as_str())
+            .collect::<BTreeSet<_>>();
+        let bindings = self.canonical_semantic_response["queries"]
+            .as_array()
+            .ok_or(StreamedResultPackageError::ManifestShape)?;
+        let mut bound_queries = BTreeSet::new();
+        let mut bound_relations = BTreeSet::new();
+        for binding in bindings {
+            let query = binding["query_id"]
+                .as_str()
+                .ok_or(StreamedResultPackageError::ManifestShape)?;
+            let relation = binding["relation_id"]
+                .as_str()
+                .ok_or(StreamedResultPackageError::ManifestShape)?;
+            if !bound_queries.insert(query) || !bound_relations.insert(relation) {
+                return Err(StreamedResultPackageError::ManifestShape);
+            }
+        }
+        if bound_queries != complete
+            || bound_relations
+                != self
+                    .relations
+                    .iter()
+                    .map(|entry| entry.relation_id.as_str())
+                    .collect()
+            || outcomes.iter().any(|outcome| {
+                outcome.execution_state == QueryBlockExecutionState::NotExecutedDependency
+                    && outcome.errors.iter().any(|error| {
+                        let related = error.related_id.as_deref().expect("validated dependency");
+                        related == outcome.query_id
+                            || !ids.contains(related)
+                            || complete.contains(related)
+                    })
+            })
+        {
+            return Err(StreamedResultPackageError::ManifestShape);
+        }
+        Ok(Some(outcomes))
+    }
+
     pub(crate) fn requires_source_disclosure(&self) -> bool {
         self.relations.iter().any(|relation| {
             // Retain the historical output check. New block IDs are opaque; their sealed
@@ -1399,6 +1466,7 @@ fn validate_manifest(
     manifest: &StreamedResultPackageManifest,
     limits: StreamedResultPackageLimits,
 ) -> Result<(), StreamedResultPackageError> {
+    manifest.query_results()?;
     if manifest.format != STREAMED_RESULT_PACKAGE_FORMAT
         || manifest.relations.is_empty()
         || manifest.relations.len() > limits.max_relations.get()

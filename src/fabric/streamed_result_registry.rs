@@ -43,6 +43,7 @@ fn validate_budget_workspace(
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StreamedResultRegistration {
+    pub query_results: Option<Vec<crate::semantic_query_contract::QueryBlockOutcome>>,
     pub processing: Vec<super::processing_status::QueryProcessing>,
     pub processing_handles: BTreeMap<String, String>,
     pub package_id: String,
@@ -643,6 +644,7 @@ impl StreamedResultRegistry {
             expires_at_unix_ms: lease_expires_at_unix_ms,
         };
         let registration = StreamedResultRegistration {
+            query_results: manifest.query_results()?,
             processing: manifest.processing.clone(),
             processing_handles: processing_handles.clone(),
             package_id: package_id.clone(),
@@ -1070,6 +1072,12 @@ impl StreamedResultRegistry {
         }
         pages.sort_by_key(|resource| resource.page_ordinal);
         Ok(StreamedResultRegistration {
+            query_results: package
+                .package
+                .as_ref()
+                .ok_or(StreamedResultRegistryError::Released)?
+                .manifest()
+                .query_results()?,
             processing_handles,
             processing: package
                 .package
@@ -1888,6 +1896,13 @@ mod tests {
     }
 
     async fn result_package(sink: Arc<dyn ResultObjectSink>) -> SealedStreamedResultPackage {
+        result_package_with_response(sink, br#"{"request":"resource-scoped"}"#).await
+    }
+
+    async fn result_package_with_response(
+        sink: Arc<dyn ResultObjectSink>,
+        response: &[u8],
+    ) -> SealedStreamedResultPackage {
         let schema = Arc::new(Schema::new(vec![Field::new(
             "value",
             DataType::Int64,
@@ -1906,7 +1921,7 @@ mod tests {
             .seal(
                 EpochId::from_bytes([0x31; 16]),
                 QueryExecutionPin::from_bytes([0x32; 32]),
-                br#"{"request":"resource-scoped"}"#,
+                response,
                 vec![StreamedRelationInput {
                     relation_id: RelationId::new("query.result.v1").unwrap(),
                     schema,
@@ -2899,7 +2914,63 @@ mod tests {
     async fn wp45_restart_reissues_fresh_handles_from_the_durable_package_locator() {
         let sink = Arc::new(FaultSink::new());
         let initial = StreamedResultRegistry::try_new(32, test_resource_budget()).unwrap();
-        let registration = publish_result_fixture(&initial, &sink, "query:restart").await;
+        let response = serde_json::json!({
+            "query_results": [
+                {"query_id":"blocked","execution_state":"NOT_EXECUTED_DEPENDENCY","errors":[{"code":"NOT_EXECUTED_DEPENDENCY","subject_id":"blocked","related_id":"failed"}]},
+                {"query_id":"failed","execution_state":"FAILED","errors":[{"code":"SEMANTIC_REFERENCE_UNAVAILABLE","subject_id":"return.order-by"}]},
+                {"query_id":"complete","execution_state":"COMPLETE","errors":[]}
+            ],
+            "queries":[{"query_id":"complete","relation_id":"query.result.v1"}]
+        });
+        let package = result_package_with_response(
+            Arc::clone(&sink) as Arc<dyn ResultObjectSink>,
+            &serde_json_canonicalizer::to_vec(&response).unwrap(),
+        )
+        .await;
+        for (pointer, replacement) in [
+            (
+                "/query_results/0/errors/0/related_id",
+                serde_json::json!("complete"),
+            ),
+            ("/query_results/0/query_id", serde_json::json!("complete")),
+            (
+                "/query_results/2/errors",
+                serde_json::json!([{"code":"FAILED","subject_id":"complete"}]),
+            ),
+            ("/queries/0/query_id", serde_json::json!("failed")),
+            (
+                "/queries/0/relation_id",
+                serde_json::json!("invented.relation"),
+            ),
+        ] {
+            let mut invalid = package.manifest().clone();
+            *invalid
+                .canonical_semantic_response
+                .pointer_mut(pointer)
+                .unwrap() = replacement;
+            assert!(
+                invalid.query_results().is_err(),
+                "accepted inconsistent block manifest at {pointer}"
+            );
+        }
+        let registration = initial
+            .publish_package(
+                "query:restart",
+                PRINCIPAL,
+                WORKSPACE,
+                7,
+                8,
+                9,
+                package.clone(),
+                ResultCleanup::Package(package),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&registration.query_results).unwrap(),
+            response["query_results"]
+        );
         let initial_handles = std::iter::once(registration.manifest.public_handle.clone())
             .chain(
                 registration
@@ -2927,6 +2998,7 @@ mod tests {
             .await
             .expect("reopen retained manifest and mint current-generation handles");
         assert_eq!(reissued.package_id, registration.package_id);
+        assert_eq!(reissued.query_results, registration.query_results);
         assert_eq!(
             reissued.manifest_resource_id,
             registration.manifest_resource_id

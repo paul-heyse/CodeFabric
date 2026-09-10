@@ -8,7 +8,9 @@ use crate::contracts::jcs::{CanonicalJsonError, canonicalize_slice, canonicalize
 use crate::registries::{FRESHNESS_STATE_VALUES, FreshnessState, registry_state_name};
 use serde::{Deserialize, Serialize};
 
+mod block_outcome;
 mod source_location;
+pub use block_outcome::{QueryBlockExecutionState, QueryBlockIssue, QueryBlockOutcome};
 pub use source_location::SourceLocation;
 
 const MAX_REQUEST_BYTES: usize = 256 * 1024;

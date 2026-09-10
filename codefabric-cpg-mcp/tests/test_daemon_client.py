@@ -32,10 +32,85 @@ from codefabric_cpg_mcp.daemon import (
     ReferenceSelector,
     StringInputAnswer,
 )
-from codefabric_cpg_mcp.daemon.client import _processing_summary, _safe_error
+from codefabric_cpg_mcp.daemon.client import _processing_summary, _query_block_results, _safe_error
 from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2 as query_pb
 from codefabric_cpg_mcp.daemon.generated import cpg_query_service_pb2_grpc as query_grpc
 from codefabric_cpg_mcp.settings import Settings
+
+
+def _block_results(*, changed: bool = False) -> query_pb.QueryBlockResults:
+    return query_pb.QueryBlockResults(
+        query_results=[
+            query_pb.QueryBlockOutcome(
+                query_id="dependent",
+                execution_state=query_pb.QUERY_BLOCK_EXECUTION_STATE_NOT_EXECUTED_DEPENDENCY,
+                errors=[
+                    query_pb.QueryBlockIssue(
+                        code="NOT_EXECUTED_DEPENDENCY", subject_id="dependent", related_id="failed"
+                    )
+                ],
+            ),
+            query_pb.QueryBlockOutcome(
+                query_id="failed",
+                execution_state=query_pb.QUERY_BLOCK_EXECUTION_STATE_FAILED,
+                errors=[
+                    query_pb.QueryBlockIssue(
+                        code="CHANGED" if changed else "SEMANTIC_REFERENCE_UNAVAILABLE",
+                        subject_id="return.order-by",
+                    )
+                ],
+            ),
+            query_pb.QueryBlockOutcome(
+                query_id="complete", execution_state=query_pb.QUERY_BLOCK_EXECUTION_STATE_COMPLETE
+            ),
+        ]
+    )
+
+
+def test_block_results_preserve_absence_order_and_failed_dependency_presence() -> None:
+    assert _query_block_results(query_pb.ResultReadyEvent()) is None
+    outcomes = _query_block_results(query_pb.ResultReadyEvent(block_results=_block_results()))
+    assert outcomes is not None
+    assert [outcome.query_id for outcome in outcomes] == ["dependent", "failed", "complete"]
+    assert outcomes[0].errors[0].related_id == "failed"
+    assert outcomes[1].errors[0].related_id is None
+    assert outcomes[2].execution_state == "COMPLETE"
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "empty",
+        "unknown",
+        "duplicate",
+        "complete-errors",
+        "failed-empty",
+        "missing-dependency",
+        "empty-dependency",
+        "null-id",
+    ],
+)
+def test_block_results_reject_inconsistent_daemon_outcomes(fault: str) -> None:
+    results = _block_results()
+    match fault:
+        case "empty":
+            results.ClearField("query_results")
+        case "unknown":
+            results.query_results[0].execution_state = 99  # type: ignore[assignment]
+        case "duplicate":
+            results.query_results[0].query_id = "complete"
+        case "complete-errors":
+            results.query_results[0].execution_state = query_pb.QUERY_BLOCK_EXECUTION_STATE_COMPLETE
+        case "failed-empty":
+            results.query_results[1].ClearField("errors")
+        case "missing-dependency":
+            results.query_results[0].errors[0].ClearField("related_id")
+        case "empty-dependency":
+            results.query_results[0].errors[0].related_id = ""
+        case "null-id":
+            results.query_results[0].query_id = "query\x00id"
+    with pytest.raises(DaemonProtocolError):
+        _query_block_results(query_pb.ResultReadyEvent(block_results=results))
 
 
 @pytest.mark.parametrize(
@@ -229,6 +304,8 @@ class V2DaemonPortStub(query_grpc.CpgQueryServiceServicer):
         self.change_replayed_result = False
         self.include_processing = False
         self.change_replayed_processing = False
+        self.include_block_results = False
+        self.change_replayed_block_results = False
         self.replacement_daemon_generation = 7
         self.active_session_id = "session:one"
         self.active_session_generation = 3
@@ -587,6 +664,13 @@ class V2DaemonPortStub(query_grpc.CpgQueryServiceServicer):
                     total_pages=1,
                     total_bytes=len(self.page_content),
                     processing=self.processing(),
+                    block_results=(
+                        _block_results(
+                            changed=self.change_replayed_block_results and self.watch_calls > 1
+                        )
+                        if self.include_block_results
+                        else None
+                    ),
                     pages=[
                         query_pb.ResourceDescriptor(
                             kind=query_pb.RESOURCE_KIND_RESULT_PAGE,
@@ -987,6 +1071,7 @@ def test_watch_reconnects_with_fresh_session_without_resubmitting_start(
     daemon.disconnect_after = disconnect_after
     daemon.replacement_daemon_generation = replacement_daemon_generation
     daemon.include_processing = True
+    daemon.include_block_results = True
 
     async def exercise() -> None:
         async with _client(tmp_path, daemon) as client:
@@ -1013,6 +1098,9 @@ def test_watch_reconnects_with_fresh_session_without_resubmitting_start(
             assert result.manifest.public_handle != original_handle
             assert [page.public_handle for page in result.pages] == [daemon.page_handle]
             assert result.processing[0].remainder_handle == "processing:2"
+            assert result.query_results == _query_block_results(
+                query_pb.ResultReadyEvent(block_results=_block_results())
+            )
 
     asyncio.run(exercise())
     assert daemon.handshake_calls == 2
@@ -1025,17 +1113,19 @@ def test_watch_reconnects_with_fresh_session_without_resubmitting_start(
     ]
 
 
-@pytest.mark.parametrize("change_processing", [False, True])
+@pytest.mark.parametrize("changed_content", ["rows", "processing", "block_results"])
 def test_watch_reconnect_rejects_changed_replayed_result_without_resubmitting_start(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    change_processing: bool,
+    changed_content: str,
 ) -> None:
     daemon = V2DaemonPortStub()
     daemon.disconnect_after = "result_ready"
-    daemon.change_replayed_result = not change_processing
-    daemon.include_processing = change_processing
-    daemon.change_replayed_processing = change_processing
+    daemon.change_replayed_result = changed_content == "rows"
+    daemon.include_processing = changed_content == "processing"
+    daemon.change_replayed_processing = changed_content == "processing"
+    daemon.include_block_results = changed_content == "block_results"
+    daemon.change_replayed_block_results = changed_content == "block_results"
 
     async def exercise() -> None:
         async with _client(tmp_path, daemon) as client:

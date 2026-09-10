@@ -1451,6 +1451,7 @@ pub struct ProducerClosureProof {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum SemanticBlockDisposition {
     Compiled,
+    SemanticUnavailable,
     UnsupportedRemainder,
     UnknownProducerClosure,
     NotExecutedDependency,
@@ -2625,6 +2626,7 @@ pub fn compile_relational_semantic_request(
         SemanticCompilerDependency::Authority(Arc::clone(&catalog.authority_id)),
         SemanticCompilerDependency::SemanticClass(Arc::clone(&catalog.semantic_class_id)),
     ]);
+
     for block in request_rows.blocks.values() {
         dependencies.insert(SemanticCompilerDependency::RequestBlock {
             query_id: Arc::clone(&block.query_id),
@@ -5761,6 +5763,8 @@ pub fn compile_epoch_bound_semantic_request(
         SemanticCompilerDependency::SemanticClass(Arc::clone(&catalog.semantic_class_id)),
     ]);
 
+    let mut resolution_issues = BTreeMap::<Arc<str>, Vec<SemanticCompilationIssue>>::new();
+
     for block in blocks.values() {
         let program = catalog
             .programs
@@ -5834,18 +5838,30 @@ pub fn compile_epoch_bound_semantic_request(
             .filter(|return_row| return_row.query_id == block.query_id)
         {
             observed_return = true;
-            let realization = catalog
-                .returns
-                .get(&(
-                    Arc::clone(&block.program_binding_id),
-                    Arc::clone(&return_row.return_id),
-                    return_row.value.clone(),
-                ))
-                .ok_or_else(|| EpochBoundSemanticCompileError::MissingBinding {
-                    query_id: block.query_id.to_string(),
-                    family: "return realization",
-                    binding_id: return_row.return_id.to_string(),
-                })?;
+            let Some(realization) = catalog.returns.get(&(
+                Arc::clone(&block.program_binding_id),
+                Arc::clone(&return_row.return_id),
+                return_row.value.clone(),
+            )) else {
+                if !catalog.returns.keys().any(|(program_id, return_id, _)| {
+                    program_id == &block.program_binding_id && return_id == &return_row.return_id
+                }) {
+                    return Err(EpochBoundSemanticCompileError::MissingBinding {
+                        query_id: block.query_id.to_string(),
+                        family: "return realization",
+                        binding_id: return_row.return_id.to_string(),
+                    });
+                }
+                resolution_issues
+                    .entry(block.query_id.clone())
+                    .or_default()
+                    .push(SemanticCompilationIssue {
+                        code: "SEMANTIC_REFERENCE_UNAVAILABLE",
+                        subject_id: return_row.return_id.clone(),
+                        related_id: None,
+                    });
+                continue;
+            };
             dependencies.insert(SemanticCompilerDependency::ReturnRealization {
                 return_id: Arc::clone(&return_row.return_id),
                 realization_pin: realization.realization_pin,
@@ -5856,6 +5872,7 @@ pub fn compile_epoch_bound_semantic_request(
             }
         }
         if observed_return
+            && !resolution_issues.contains_key(&block.query_id)
             && realized_fields
                 != program
                     .output_fields
@@ -5887,8 +5904,12 @@ pub fn compile_epoch_bound_semantic_request(
     for query_id in &request.dependency_order {
         let block = blocks[query_id.as_ref()];
         let program = catalog.programs[block.program_binding_id.as_ref()];
-        let mut disposition = SemanticBlockDisposition::Compiled;
-        let mut issues = Vec::new();
+        let mut issues = resolution_issues.remove(query_id).unwrap_or_default();
+        let mut disposition = if issues.is_empty() {
+            SemanticBlockDisposition::Compiled
+        } else {
+            SemanticBlockDisposition::SemanticUnavailable
+        };
 
         for family in catalog
             .required_families
@@ -5967,23 +5988,39 @@ pub fn compile_epoch_bound_semantic_request(
                 &composition_inputs,
                 &mut dependencies,
                 &mut operators,
-            )?;
-            compiled_roots.insert(
-                Arc::clone(query_id),
-                EpochCompiledRoot {
-                    relation_id: program.output_relation_id.clone(),
-                    fields: program.output_fields.clone(),
-                    expression: relational_program.root.clone(),
-                },
             );
-            Some(SelectedQueryOutput::new(
-                program.output_relation_id.clone(),
-                relational_program,
-                Some(epoch_bound_output_coverage(block)?),
-            ))
+            match relational_program {
+                Ok(relational_program) => {
+                    compiled_roots.insert(
+                        Arc::clone(query_id),
+                        EpochCompiledRoot {
+                            relation_id: program.output_relation_id.clone(),
+                            fields: program.output_fields.clone(),
+                            expression: relational_program.root.clone(),
+                        },
+                    );
+                    Some(SelectedQueryOutput::new(
+                        program.output_relation_id.clone(),
+                        relational_program,
+                        Some(epoch_bound_output_coverage(block)?),
+                    ))
+                }
+                Err(EpochBoundSemanticCompileError::InvalidReturn { return_id, .. }) => {
+                    disposition = SemanticBlockDisposition::SemanticUnavailable;
+                    issues.push(SemanticCompilationIssue {
+                        code: "INVALID_RETURN_DIRECTIVE",
+                        subject_id: Arc::from(return_id),
+                        related_id: None,
+                    });
+                    None
+                }
+                Err(error) => return Err(error),
+            }
         } else {
             None
         };
+        issues.sort();
+        issues.dedup();
         dispositions.insert(Arc::clone(query_id), disposition);
         compiled_blocks.push(CompiledSemanticBlock {
             query_id: Arc::clone(query_id),
@@ -7587,6 +7624,87 @@ mod tests {
                 dependency,
                 SemanticCompilerDependency::FormRole { .. }
             ))
+        );
+    }
+
+    #[test]
+    fn unavailable_return_only_blocks_its_dependent_branch() {
+        let mut request = epoch_ingress();
+        let mut independent = request
+            .blocks
+            .iter()
+            .find(|block| block.query_id.as_ref() == "query-entities")
+            .unwrap()
+            .clone();
+        independent.query_id = Arc::from("independent");
+        request.blocks.push(independent);
+        let copied_inputs = request
+            .request_inputs
+            .iter()
+            .cloned()
+            .map(|mut row| {
+                row.query_id = Arc::from("independent");
+                row
+            })
+            .collect::<Vec<_>>();
+        request.request_inputs.extend(copied_inputs);
+        let copied_selections = request
+            .selections
+            .iter()
+            .cloned()
+            .map(|mut row| {
+                row.query_id = Arc::from("independent");
+                row
+            })
+            .collect::<Vec<_>>();
+        request.selections.extend(copied_selections);
+        let mut copied_return = request
+            .returns
+            .iter()
+            .find(|row| row.query_id.as_ref() == "query-entities")
+            .unwrap()
+            .clone();
+        copied_return.query_id = Arc::from("independent");
+        request.returns.push(copied_return);
+        request
+            .returns
+            .iter_mut()
+            .find(|row| row.query_id.as_ref() == "query-entities")
+            .unwrap()
+            .value = SemanticClauseValue::Text(Arc::from("unavailable meaning"));
+        request.dependency_order.insert(0, Arc::from("independent"));
+        let ingress =
+            validate_epoch_bound_semantic_ingress(request, &epoch_ingress_catalog()).unwrap();
+        let compiled = compile_epoch_bound_semantic_request(
+            &ingress,
+            &epoch_execution_catalog(),
+            &epoch_runtime_closure(),
+        )
+        .unwrap();
+        let blocks = compiled.compiled().blocks();
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|block| (block.query_id().as_ref(), block.disposition()))
+                .collect::<Vec<_>>(),
+            [
+                ("independent", SemanticBlockDisposition::Compiled),
+                (
+                    "query-entities",
+                    SemanticBlockDisposition::SemanticUnavailable
+                ),
+                (
+                    "query-facts",
+                    SemanticBlockDisposition::NotExecutedDependency
+                ),
+            ]
+        );
+        assert!(blocks[0].output().is_some());
+        assert!(blocks[1].output().is_none());
+        assert!(blocks[2].output().is_none());
+        assert_eq!(
+            blocks[2].issues()[0].related_id.as_deref(),
+            Some("query-entities")
         );
     }
 

@@ -1,4 +1,4 @@
-# @generated from released Protobuf semantic identities b3:e59786c90044225c4fb4fc894473b14cab543af9738da3c791cfccb1c402f37c,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
+# @generated from released Protobuf semantic identities b3:b970dec1bf345bd3df0abd6da76e275a65eab5bce56406419f66ebe4ed29bbb3,b3:71fb94283214d79068ede88e0f45e1460336b23b9678f80b4ddbece098cd626f,b3:d5b256baca150eed2617f78f88362c607ff12db7a94af9524658a3c82f247973,b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62; do not edit.
 import datetime
 
 from google.protobuf import duration_pb2 as _duration_pb2
@@ -165,6 +165,13 @@ class SnapshotFreshness(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     SNAPSHOT_FRESHNESS_POTENTIALLY_STALE: _ClassVar[SnapshotFreshness]
     SNAPSHOT_FRESHNESS_UNAVAILABLE: _ClassVar[SnapshotFreshness]
 
+class QueryBlockExecutionState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    QUERY_BLOCK_EXECUTION_STATE_UNSPECIFIED: _ClassVar[QueryBlockExecutionState]
+    QUERY_BLOCK_EXECUTION_STATE_COMPLETE: _ClassVar[QueryBlockExecutionState]
+    QUERY_BLOCK_EXECUTION_STATE_FAILED: _ClassVar[QueryBlockExecutionState]
+    QUERY_BLOCK_EXECUTION_STATE_NOT_EXECUTED_DEPENDENCY: _ClassVar[QueryBlockExecutionState]
+
 class ProcessingState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     PROCESSING_STATE_UNSPECIFIED: _ClassVar[ProcessingState]
@@ -282,6 +289,10 @@ SNAPSHOT_FRESHNESS_UNSPECIFIED: SnapshotFreshness
 SNAPSHOT_FRESHNESS_CURRENT: SnapshotFreshness
 SNAPSHOT_FRESHNESS_POTENTIALLY_STALE: SnapshotFreshness
 SNAPSHOT_FRESHNESS_UNAVAILABLE: SnapshotFreshness
+QUERY_BLOCK_EXECUTION_STATE_UNSPECIFIED: QueryBlockExecutionState
+QUERY_BLOCK_EXECUTION_STATE_COMPLETE: QueryBlockExecutionState
+QUERY_BLOCK_EXECUTION_STATE_FAILED: QueryBlockExecutionState
+QUERY_BLOCK_EXECUTION_STATE_NOT_EXECUTED_DEPENDENCY: QueryBlockExecutionState
 PROCESSING_STATE_UNSPECIFIED: ProcessingState
 PROCESSING_STATE_PENDING: ProcessingState
 PROCESSING_STATE_RUNNING: ProcessingState
@@ -912,7 +923,7 @@ class ResourceDescriptor(_message.Message):
     def __init__(self, kind: _Optional[_Union[ResourceKind, str]] = ..., public_handle: _Optional[str] = ..., package_id: _Optional[str] = ..., page_ordinal: _Optional[int] = ..., media_type: _Optional[str] = ..., byte_length: _Optional[int] = ..., content_checksum: _Optional[str] = ..., expires_at_unix_ms: _Optional[int] = ..., authority: _Optional[_Union[AuthorityGeneration, _Mapping]] = ...) -> None: ...
 
 class ResultReadyEvent(_message.Message):
-    __slots__ = ("header", "package_id", "manifest", "total_rows", "total_pages", "total_bytes", "pages", "processing")
+    __slots__ = ("header", "package_id", "manifest", "total_rows", "total_pages", "total_bytes", "pages", "processing", "block_results")
     HEADER_FIELD_NUMBER: _ClassVar[int]
     PACKAGE_ID_FIELD_NUMBER: _ClassVar[int]
     MANIFEST_FIELD_NUMBER: _ClassVar[int]
@@ -921,6 +932,7 @@ class ResultReadyEvent(_message.Message):
     TOTAL_BYTES_FIELD_NUMBER: _ClassVar[int]
     PAGES_FIELD_NUMBER: _ClassVar[int]
     PROCESSING_FIELD_NUMBER: _ClassVar[int]
+    BLOCK_RESULTS_FIELD_NUMBER: _ClassVar[int]
     header: QueryEventHeader
     package_id: str
     manifest: ResourceDescriptor
@@ -929,7 +941,34 @@ class ResultReadyEvent(_message.Message):
     total_bytes: int
     pages: _containers.RepeatedCompositeFieldContainer[ResourceDescriptor]
     processing: _containers.RepeatedCompositeFieldContainer[QueryProcessingSummary]
-    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., package_id: _Optional[str] = ..., manifest: _Optional[_Union[ResourceDescriptor, _Mapping]] = ..., total_rows: _Optional[int] = ..., total_pages: _Optional[int] = ..., total_bytes: _Optional[int] = ..., pages: _Optional[_Iterable[_Union[ResourceDescriptor, _Mapping]]] = ..., processing: _Optional[_Iterable[_Union[QueryProcessingSummary, _Mapping]]] = ...) -> None: ...
+    block_results: QueryBlockResults
+    def __init__(self, header: _Optional[_Union[QueryEventHeader, _Mapping]] = ..., package_id: _Optional[str] = ..., manifest: _Optional[_Union[ResourceDescriptor, _Mapping]] = ..., total_rows: _Optional[int] = ..., total_pages: _Optional[int] = ..., total_bytes: _Optional[int] = ..., pages: _Optional[_Iterable[_Union[ResourceDescriptor, _Mapping]]] = ..., processing: _Optional[_Iterable[_Union[QueryProcessingSummary, _Mapping]]] = ..., block_results: _Optional[_Union[QueryBlockResults, _Mapping]] = ...) -> None: ...
+
+class QueryBlockIssue(_message.Message):
+    __slots__ = ("code", "subject_id", "related_id")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    SUBJECT_ID_FIELD_NUMBER: _ClassVar[int]
+    RELATED_ID_FIELD_NUMBER: _ClassVar[int]
+    code: str
+    subject_id: str
+    related_id: str
+    def __init__(self, code: _Optional[str] = ..., subject_id: _Optional[str] = ..., related_id: _Optional[str] = ...) -> None: ...
+
+class QueryBlockOutcome(_message.Message):
+    __slots__ = ("query_id", "execution_state", "errors")
+    QUERY_ID_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_STATE_FIELD_NUMBER: _ClassVar[int]
+    ERRORS_FIELD_NUMBER: _ClassVar[int]
+    query_id: str
+    execution_state: QueryBlockExecutionState
+    errors: _containers.RepeatedCompositeFieldContainer[QueryBlockIssue]
+    def __init__(self, query_id: _Optional[str] = ..., execution_state: _Optional[_Union[QueryBlockExecutionState, str]] = ..., errors: _Optional[_Iterable[_Union[QueryBlockIssue, _Mapping]]] = ...) -> None: ...
+
+class QueryBlockResults(_message.Message):
+    __slots__ = ("query_results",)
+    QUERY_RESULTS_FIELD_NUMBER: _ClassVar[int]
+    query_results: _containers.RepeatedCompositeFieldContainer[QueryBlockOutcome]
+    def __init__(self, query_results: _Optional[_Iterable[_Union[QueryBlockOutcome, _Mapping]]] = ...) -> None: ...
 
 class ProcessingRustBuildSelection(_message.Message):
     __slots__ = ("profile", "features", "default_features")

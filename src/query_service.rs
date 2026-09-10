@@ -3233,6 +3233,34 @@ async fn event_to_wire(
                 return Err(public_status(Code::DataLoss, "RESULT_EVENT_BINDING"));
             }
             Event::ResultReady(ResultReadyEvent {
+                block_results: registration.query_results.map(|outcomes| {
+                    use crate::rpc::generated::codefabric::cpgd::v2 as wire;
+                    use crate::semantic_query_contract::QueryBlockExecutionState as State;
+                    wire::QueryBlockResults {
+                        query_results: outcomes
+                            .into_iter()
+                            .map(|outcome| wire::QueryBlockOutcome {
+                                query_id: outcome.query_id,
+                                execution_state: match outcome.execution_state {
+                                    State::Complete => wire::QueryBlockExecutionState::Complete,
+                                    State::Failed => wire::QueryBlockExecutionState::Failed,
+                                    State::NotExecutedDependency => {
+                                        wire::QueryBlockExecutionState::NotExecutedDependency
+                                    }
+                                } as i32,
+                                errors: outcome
+                                    .errors
+                                    .into_iter()
+                                    .map(|error| wire::QueryBlockIssue {
+                                        code: error.code,
+                                        subject_id: error.subject_id,
+                                        related_id: error.related_id,
+                                    })
+                                    .collect(),
+                            })
+                            .collect(),
+                    }
+                }),
                 processing: registration
                     .processing
                     .into_iter()
