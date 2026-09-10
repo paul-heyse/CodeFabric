@@ -1210,7 +1210,28 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             authority.producer_closure(),
         ) {
             Ok(compiled) => compiled,
-            Err(error) => return failed(&artifacts, "logical_planning", error.to_string()),
+            Err(error) => {
+                use crate::relational_semantic_query::EpochBoundSemanticCompileError as E;
+                if let E::InvalidReturn { query_id, .. }
+                | E::MissingBinding {
+                    query_id,
+                    family: "return realization",
+                    ..
+                } = &error
+                {
+                    return failed_error(
+                        &artifacts,
+                        "return_resolution",
+                        SemanticQueryError::Phase {
+                            code: "SEMANTIC_REFERENCE_UNAVAILABLE",
+                            phase: "return_resolution",
+                            pointer: format!("queries.{query_id}.return"),
+                            message: error.to_string(),
+                        },
+                    );
+                }
+                return failed(&artifacts, "logical_planning", error.to_string());
+            }
         };
         record_complete_stage(
             &artifacts,
@@ -1822,6 +1843,15 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 "query_id": query_id,
                 "relation_id": output_by_query[query_id].as_str(),
                 "resolved_semantics": resolved_semantic_selections(&validated.ingress().selections, query_id),
+                "return_directives": validated.ingress().returns.iter().filter(|row| row.query_id == *query_id).map(|row| {
+                    let value = match &row.value {
+                        SemanticClauseValue::Text(value) => serde_json::json!(value),
+                        SemanticClauseValue::Boolean(value) => serde_json::json!(value),
+                        SemanticClauseValue::Int64(value) => serde_json::json!(value),
+                        SemanticClauseValue::UInt64(value) => serde_json::json!(value),
+                    };
+                    serde_json::json!({"field":row.return_id,"ordinal":row.ordinal,"value":value})
+                }).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "query_dependencies": handoff.prior_results.iter().flat_map(|slot| {
                 slot.producer_query_ids.iter().map(|producer| serde_json::json!({

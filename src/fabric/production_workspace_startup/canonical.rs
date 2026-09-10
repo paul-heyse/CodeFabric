@@ -36,6 +36,7 @@ use crate::rustc_relation_schema::RustcRelation;
 mod call_selector;
 mod calls;
 mod diagnostics;
+mod entity_selector;
 mod imports;
 mod locations;
 mod modules;
@@ -388,12 +389,11 @@ impl Canonical {
                     vec![]
                 },
             ),
-            Kind::EntitySelector => {
-                let mut fields = entity_fields();
-                fields.push(("selector", DataType::Utf8, false));
-                fields.push(("public_entity_id", DataType::Utf8, true));
-                (SELECTOR, fields, vec![ENTITY])
-            }
+            Kind::EntitySelector => (
+                SELECTOR,
+                entity_selector::fields(),
+                vec![ENTITY, locations::RELATION],
+            ),
         };
         if let Kind::Declaration { python, rust } = kind {
             if python {
@@ -743,31 +743,7 @@ impl ProgrammaticTransformation for Canonical {
                 (false, true) => calls::build(self.workspace, inputs),
                 (false, false) => empty(calls::fields()),
             },
-            Kind::EntitySelector => {
-                let input = plan(inputs, ENTITY)?;
-                let project = |selector: Expr| -> Result<LogicalPlan, TransformationPlanError> {
-                    Ok(LogicalPlanBuilder::from(input.clone())
-                        .project(
-                            entity_fields()
-                                .iter()
-                                .map(|(name, _, _)| col(*name))
-                                .chain([
-                                    selector.alias("selector"),
-                                    public_entity_id()
-                                        .call(vec![col("entity_id"), col("entity_kind")])
-                                        .alias("public_entity_id"),
-                                ]),
-                        )?
-                        .build()?)
-                };
-                let generic = project(col("entity_kind"))?;
-                let language = project(datafusion::functions::string::expr_fn::concat(vec![
-                    col("language"),
-                    lit(":"),
-                    col("entity_kind"),
-                ]))?;
-                Ok(LogicalPlanBuilder::from(generic).union(language)?.build()?)
-            }
+            Kind::EntitySelector => entity_selector::build(inputs),
             Kind::Entity => occurrences::entities(inputs),
             Kind::Declaration { python, rust } => {
                 let mut branches = Vec::new();

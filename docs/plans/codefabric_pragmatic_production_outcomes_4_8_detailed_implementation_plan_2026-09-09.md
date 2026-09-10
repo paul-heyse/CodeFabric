@@ -721,6 +721,34 @@ select the native cases; STATUS records logs and final validation. Configured co
 source outlines/related contexts, remaining directives/dependency scopes and independent branch
 execution remain open. This slice does not close P03 or any outcome.
 
+**P03 semantic ordering passes native validation, 2026-09-10.** Released first-four templates
+now advertise semantic ordering keys present in their actual output schemas. Typed return actions
+bind ascending/descending keys to a native sort node and precede deterministic remaining keys.
+The compiler rejects unknown/duplicate keys and unadmitted fields; order remains inside composed
+producer plans. Manifests record resolved return directives. Entity discovery exposes an intact
+exact captured source anchor and defaults to source path/position, kind, name and identity/context
+ordering, preserving unlocated entities with null anchors.
+
+This follows QRY v2.3 §3 (common returns) and QRY v1.3 §§12.6/33 (semantic/default ordering).
+The DataFusion reference's planning §53.8.1 and resolved 55.0.0 `LogicalPlanBuilder::sort`,
+`sort_with_limit` and `distinct_on` APIs keep sorting, spill and top-k native. `DISTINCT ON` selects
+one complete source descriptor per exact entity/context/file/workspace instead of independent
+column minima. Scope/location semi-joins now sit below final sorts and limits. No request-supplied
+SQL, separate sorting engine or application result collection is introduced.
+
+The twelve-block installed-client Python/Rust scenario and exact reopen pass in 147.43 s, including
+all four forms, source-location scope before truncation, typed prior reuse, unknown keys and repeated
+sort keys. Independent native anchor/context and compiler/schema checks also pass. The initial run
+hit the previously selected 120-second bound; the case now has the existing finite five-minute
+public-scenario allowance. Rust expectations preserve existing qualified names. Twenty-two initial
+canonical/recipe cases, default/featureless builds, final affected Clippy, 218 tooling cases and
+Python lint pass. The final 28-case regression passes in 86.86 s, including existing installed-client
+syntax and source locations with exact reopen. Documentation/navigation, affected spelling and
+diff checks pass. `semantic-ordering` selects the scenario; STATUS records the logs.
+The 23.97-second source execution/write sample is not comparative optimization evidence.
+Other return directives, precise dependency scopes, broader first-four meanings and independent
+branch execution remain P03 scope. No package or outcome exit is claimed.
+
 **Next:** remaining first-four scopes/meanings, precise dependency scope and independent block
 execution/failure, then proceed to P04 in package order.
 Full source/syntax selection and remaining P03 acceptance are still open.

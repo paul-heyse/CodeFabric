@@ -32,14 +32,15 @@ use crate::relational_semantic_query::{
     EpochBoundExecutionProgramRow, EpochBoundExecutionRequestInputRow,
     EpochBoundExecutionRequiredFamilyRow, EpochBoundExecutionReturnRow,
     EpochBoundExecutionScopeRow, EpochBoundExecutionSelectionRow, EpochBoundProgramBindingRow,
-    EpochBoundRequestInputBindingRow, EpochBoundRequestInputField, EpochBoundReturnBindingRow,
-    EpochBoundScopeBindingRow, EpochBoundSelectionBindingRow, EpochBoundSelectionFold,
-    EpochBoundSelectionValueResolution, EpochBoundSemanticExecutionCatalog,
-    EpochBoundSemanticIngressCatalog, EpochBoundSemanticIngressLimits, ProducerClosureProof,
-    ProducerFamilyClosureRow, ProducerFamilyDisposition, ProgramProjectionField,
-    ProgramRelationSchemaRow, ProgramRelationalOperator, ReleasedSemanticForm,
-    RuntimeProducerProof, SemanticClauseValue, SemanticQueryAuthority, SemanticQueryClass,
-    SemanticValueKind, UnsupportedFamilyRemainder, epoch_bound_semantic_ingress_limits_pin,
+    EpochBoundRequestInputBindingRow, EpochBoundRequestInputField, EpochBoundReturnAction,
+    EpochBoundReturnBindingRow, EpochBoundScopeBindingRow, EpochBoundSelectionBindingRow,
+    EpochBoundSelectionFold, EpochBoundSelectionValueResolution,
+    EpochBoundSemanticExecutionCatalog, EpochBoundSemanticIngressCatalog,
+    EpochBoundSemanticIngressLimits, ProducerClosureProof, ProducerFamilyClosureRow,
+    ProducerFamilyDisposition, ProgramProjectionField, ProgramRelationSchemaRow,
+    ProgramRelationalOperator, ReleasedSemanticForm, RuntimeProducerProof, SemanticClauseValue,
+    SemanticQueryAuthority, SemanticQueryClass, SemanticValueKind, UnsupportedFamilyRemainder,
+    epoch_bound_semantic_ingress_limits_pin,
 };
 use crate::schema_contract::SchemaRole;
 use crate::semantic_query_contract::{COMPILED_V2_0_SCOPE_DEFINITIONS, ResultRole};
@@ -50,6 +51,7 @@ mod locations;
 mod named;
 mod prior;
 mod properties;
+mod returns;
 use crate::relational_semantic_query::EpochBoundSelectionTarget;
 pub(crate) use facts::families::{
     known_meaning as canonical_fact_meaning, result_family as canonical_result_family,
@@ -160,6 +162,7 @@ struct ProductionReturnRealization {
     value: SemanticClauseValue,
     realization_node_id: Arc<str>,
     realization_field_ids: Vec<FieldId>,
+    action: EpochBoundReturnAction,
 }
 
 /// Ingress contract and finite execution realizations for one return directive.
@@ -580,6 +583,7 @@ fn compiled_released_form_programs(
         }
         named::install(&source, &mut programs);
         locations::install(epoch, &mut programs)?;
+        returns::install(&mut programs);
         return validate_form_coverage(programs);
     }
     let binding_family = NativeSyntaxRelation::RuffBinding.as_str();
@@ -793,20 +797,27 @@ fn epoch_semantic_relation(
                             .index_of("public_entity_id")
                             .is_ok(),
                     )?;
-                    if let Ok(index) = sealed.contract.logical_schema().index_of("qualified_name") {
-                        fields.push((
-                            release_field_id(
-                                sealed
-                                    .contract
-                                    .field_id_at(SchemaRole::Logical, index)
-                                    .map_err(|error| {
-                                        ProductionQueryRecipeError::InvalidCompiledRelease {
-                                            detail: error.to_string(),
-                                        }
-                                    })?,
-                            )?,
-                            "qualified-name",
-                        ));
+                    for (source_name, output_name) in [
+                        ("qualified_name", "qualified-name"),
+                        ("relative_path", "source-file-path"),
+                        ("start_byte", "start-byte"),
+                        ("end_byte", "end-byte"),
+                    ] {
+                        if let Ok(index) = sealed.contract.logical_schema().index_of(source_name) {
+                            fields.push((
+                                release_field_id(
+                                    sealed
+                                        .contract
+                                        .field_id_at(SchemaRole::Logical, index)
+                                        .map_err(|error| {
+                                            ProductionQueryRecipeError::InvalidCompiledRelease {
+                                                detail: error.to_string(),
+                                            }
+                                        })?,
+                                )?,
+                                output_name,
+                            ));
+                        }
                     }
                     fields
                 }
@@ -1015,14 +1026,29 @@ fn compiled_find_entities_program(
                 ordinal: 3,
                 input_node_ids: vec![projection],
                 operator: ProgramRelationalOperator::Sort {
-                    fields: [2, 0]
-                        .into_iter()
-                        .map(|index| crate::relational_semantic_query::ProgramSortField {
-                            input_field_id: program.output_fields[index].clone(),
-                            ascending: true,
-                            nulls_first: false,
-                        })
-                        .collect(),
+                    fields: [
+                        "source-file-path",
+                        "start-byte",
+                        "entity-kind",
+                        "qualified-name",
+                        "entity-name",
+                        "public-entity-id",
+                        "entity-id",
+                        "analysis-context-id",
+                    ]
+                    .into_iter()
+                    .filter_map(|name| {
+                        program
+                            .output_fields
+                            .iter()
+                            .find(|field| field.as_str().ends_with(&format!(".{name}")))
+                    })
+                    .map(|field| crate::relational_semantic_query::ProgramSortField {
+                        input_field_id: field.clone(),
+                        ascending: true,
+                        nulls_first: false,
+                    })
+                    .collect(),
                 },
                 output_fields: program.output_fields.clone(),
             },
@@ -1641,6 +1667,7 @@ fn append_returns(
                 value: realization.value.clone(),
                 realization_node_id: Arc::clone(&realization.realization_node_id),
                 realization_field_ids: realization.realization_field_ids.clone(),
+                action: realization.action.clone(),
                 realization_pin: encode_return_realization(realization)
                     .finish(b"codefabric.semantic-return-realization.v2"),
             });
@@ -2517,6 +2544,18 @@ fn encode_return_realization(value: &ProductionReturnRealization) -> CanonicalId
     frame.nested(1, encode_clause_value(&value.value));
     frame.text(2, &value.realization_node_id);
     frame.frames(3, value.realization_field_ids.iter().map(encode_field_id));
+    match &value.action {
+        EpochBoundReturnAction::OutputFields => frame.u64(4, 0),
+        EpochBoundReturnAction::OrderBy { fields } => {
+            frame.u64(4, 1);
+            frame.nested(
+                5,
+                encode_relational_operator(&ProgramRelationalOperator::Sort {
+                    fields: fields.clone(),
+                }),
+            );
+        }
+    }
     frame
 }
 

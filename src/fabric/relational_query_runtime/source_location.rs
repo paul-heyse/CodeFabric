@@ -88,14 +88,7 @@ impl super::SelectedQueryOutput {
             kind: JoinKind::LeftSemi,
             predicates,
         };
-        self.program.root = match self.program.root {
-            R::Limit { input, skip, fetch } => R::Limit {
-                input: Box::new(narrow(*input)),
-                skip,
-                fetch,
-            },
-            root => narrow(root),
-        };
+        self.program.root = super::result_order::before_order(self.program.root, narrow);
         Ok(self)
     }
 }

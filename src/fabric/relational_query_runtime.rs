@@ -14,6 +14,7 @@ use std::time::Instant;
 use arrow_schema::SchemaRef;
 
 mod block;
+mod result_order;
 
 use crate::cancellation::Cancellation;
 use crate::relational_program::{
@@ -377,17 +378,11 @@ impl SelectedQueryOutput {
         predicate: crate::relational_program::ScalarExpression,
     ) -> Self {
         use crate::relational_program::RelationalExpression;
-        self.program.root = match self.program.root {
-            RelationalExpression::Limit { input, skip, fetch } => RelationalExpression::Limit {
-                input: Box::new(RelationalExpression::Filter { input, predicate }),
-                skip,
-                fetch,
-            },
-            root => RelationalExpression::Filter {
+        self.program.root =
+            result_order::before_order(self.program.root, |root| RelationalExpression::Filter {
                 input: Box::new(root),
                 predicate,
-            },
-        };
+            });
         self
     }
 }

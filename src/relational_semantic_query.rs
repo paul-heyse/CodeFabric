@@ -1207,6 +1207,15 @@ pub struct EpochBoundExecutionSelectionRow {
     pub fold: EpochBoundSelectionFold,
 }
 
+/// Typed behavior of a return directive inside its released operator.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EpochBoundReturnAction {
+    /// The directive selects the existing output-field contract.
+    OutputFields,
+    /// Requested semantic sort keys precede the program's deterministic tie breakers.
+    OrderBy { fields: Vec<ProgramSortField> },
+}
+
 /// Exact return value and operator/field realization inside one selected program.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EpochBoundExecutionReturnRow {
@@ -1216,6 +1225,7 @@ pub struct EpochBoundExecutionReturnRow {
     pub value: SemanticClauseValue,
     pub realization_node_id: Arc<str>,
     pub realization_field_ids: Vec<FieldId>,
+    pub action: EpochBoundReturnAction,
     pub realization_pin: [u8; 32],
 }
 
@@ -1358,6 +1368,12 @@ pub enum EpochBoundSemanticCompileError {
     ExecutionProgramPinMismatch { program_binding_id: String },
     #[error("invalid execution node {node}: {detail}")]
     InvalidNode { node: String, detail: String },
+    #[error("query {query_id} has an invalid return directive {return_id}: {detail}")]
+    InvalidReturn {
+        query_id: String,
+        return_id: String,
+        detail: String,
+    },
     #[error("execution relation/schema mismatch for {program_binding_id}: {detail}")]
     OutputSchema {
         program_binding_id: String,
@@ -4902,6 +4918,25 @@ fn validate_epoch_execution_catalog<'a>(
                 detail: "return realization field is absent from its node".to_owned(),
             });
         }
+        if let EpochBoundReturnAction::OrderBy { fields } = &realization.action
+            && (!matches!(node.operator, ProgramRelationalOperator::Sort { .. })
+                || fields.is_empty()
+                || fields
+                    .iter()
+                    .any(|field| !node.output_fields.contains(&field.input_field_id))
+                || fields
+                    .iter()
+                    .map(|field| &field.input_field_id)
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    != fields.len())
+        {
+            return Err(EpochBoundSemanticCompileError::InvalidNode {
+                node: realization.realization_node_id.to_string(),
+                detail: "return ordering requires distinct admitted fields on a sort node"
+                    .to_owned(),
+            });
+        }
     }
     for slot in validated.consumer_slots.values() {
         let consumed = validated.operators.values().any(|operator| {
@@ -5305,6 +5340,59 @@ fn fold_epoch_predicates(
     )
 }
 
+fn return_ordering(
+    block: &EpochBoundBlockBindingRow,
+    node: &EpochBoundExecutionOperatorRow,
+    defaults: &[ProgramSortField],
+    request: &EpochBoundSemanticIngress,
+    catalog: &ValidatedEpochExecutionCatalog<'_>,
+) -> Result<Vec<ProgramSortField>, EpochBoundSemanticCompileError> {
+    let mut selected = request
+        .returns
+        .iter()
+        .filter_map(|row| {
+            if row.query_id != block.query_id {
+                return None;
+            }
+            let realization = catalog.returns.get(&(
+                block.program_binding_id.clone(),
+                row.return_id.clone(),
+                row.value.clone(),
+            ))?;
+            if realization.realization_node_id != node.node_id {
+                return None;
+            }
+            match &realization.action {
+                EpochBoundReturnAction::OrderBy { fields } => Some((row.ordinal, fields)),
+                EpochBoundReturnAction::OutputFields => None,
+            }
+        })
+        .collect::<Vec<_>>();
+    selected.sort_by_key(|(ordinal, _)| *ordinal);
+    let mut fields = Vec::new();
+    let mut seen = BTreeSet::new();
+    for (_, requested) in selected {
+        for field in requested {
+            if !seen.insert(field.input_field_id.clone()) {
+                return Err(EpochBoundSemanticCompileError::InvalidReturn {
+                    query_id: block.query_id.to_string(),
+                    return_id: "return.order-by".to_owned(),
+                    detail: "return ordering repeats a semantic key".to_owned(),
+                });
+            }
+            fields.push(field.clone());
+        }
+    }
+    // Remaining native keys stabilize ties without merging representations or contexts.
+    fields.extend(
+        defaults
+            .iter()
+            .filter(|field| seen.insert(field.input_field_id.clone()))
+            .cloned(),
+    );
+    Ok(fields)
+}
+
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn lower_epoch_execution_program(
     block: &EpochBoundBlockBindingRow,
@@ -5540,7 +5628,7 @@ fn lower_epoch_execution_program(
                 selected_operators.insert(SemanticCompilerOperator::Sort);
                 RelationalExpression::Sort {
                     input: Box::new(inputs[0].clone()),
-                    expressions: fields
+                    expressions: return_ordering(block, row, fields, request, catalog)?
                         .iter()
                         .map(|field| SortExpression {
                             expression: ScalarExpression::Field(field.input_field_id.clone()),
@@ -7210,6 +7298,7 @@ mod tests {
                     value: SemanticClauseValue::Text(Arc::from("entity.identity")),
                     realization_node_id: Arc::from("entities.project"),
                     realization_field_ids: vec![entity_identity],
+                    action: EpochBoundReturnAction::OutputFields,
                     realization_pin: [26; 32],
                 },
                 EpochBoundExecutionReturnRow {
@@ -7219,6 +7308,7 @@ mod tests {
                     value: SemanticClauseValue::Text(Arc::from("fact.identity")),
                     realization_node_id: Arc::from("facts.project"),
                     realization_field_ids: vec![fact_identity],
+                    action: EpochBoundReturnAction::OutputFields,
                     realization_pin: [27; 32],
                 },
             ],
@@ -7301,6 +7391,95 @@ mod tests {
                 .map(|block| block.query_id.as_ref())
                 .collect::<Vec<_>>(),
             ["query-entities", "query-facts"]
+        );
+    }
+
+    #[test]
+    fn epoch_bound_return_ordering_is_typed_and_preserved_in_composition() {
+        let mut catalog = epoch_execution_catalog();
+        let identity = field("result.entities.entity-id");
+        let requested = ProgramSortField {
+            input_field_id: identity.clone(),
+            ascending: false,
+            nulls_first: false,
+        };
+        catalog.returns[0].action = EpochBoundReturnAction::OrderBy {
+            fields: vec![requested.clone()],
+        };
+        assert!(
+            matches!(
+                compile_epoch_bound_semantic_request(
+                    &validated_epoch_ingress(),
+                    &catalog,
+                    &epoch_runtime_closure()
+                ),
+                Err(EpochBoundSemanticCompileError::InvalidNode { .. })
+            ),
+            "ordering cannot target a projection"
+        );
+        catalog.returns[0].realization_node_id = Arc::from("entities.sort");
+        let limit = catalog
+            .operators
+            .iter_mut()
+            .find(|node| node.node_id.as_ref() == "entities.limit")
+            .unwrap();
+        limit.ordinal = 4;
+        limit.input_node_ids = vec![Arc::from("entities.sort")];
+        catalog.operators.push(EpochBoundExecutionOperatorRow {
+            program_binding_id: Arc::from("program.entities"),
+            execution_program_pin: [21; 32],
+            node_id: Arc::from("entities.sort"),
+            ordinal: 3,
+            input_node_ids: vec![Arc::from("entities.project")],
+            operator: ProgramRelationalOperator::Sort {
+                fields: vec![ProgramSortField {
+                    ascending: true,
+                    ..requested.clone()
+                }],
+            },
+            output_fields: vec![identity.clone()],
+        });
+        let compiled = compile_epoch_bound_semantic_request(
+            &validated_epoch_ingress(),
+            &catalog,
+            &epoch_runtime_closure(),
+        )
+        .unwrap();
+        let root = &compiled.compiled().blocks()[0]
+            .output()
+            .unwrap()
+            .program()
+            .root;
+        let RelationalExpression::Limit { input, .. } = root else {
+            panic!("explicit limit stays outermost")
+        };
+        let RelationalExpression::Sort { expressions, .. } = input.as_ref() else {
+            panic!("native sort precedes the limit")
+        };
+        assert_eq!(
+            expressions,
+            &[SortExpression {
+                expression: ScalarExpression::Field(identity),
+                ascending: false,
+                nulls_first: false
+            }]
+        );
+        catalog.returns[0].action = EpochBoundReturnAction::OrderBy {
+            fields: vec![ProgramSortField {
+                input_field_id: field("unreleased.field"),
+                ..requested
+            }],
+        };
+        assert!(
+            matches!(
+                compile_epoch_bound_semantic_request(
+                    &validated_epoch_ingress(),
+                    &catalog,
+                    &epoch_runtime_closure()
+                ),
+                Err(EpochBoundSemanticCompileError::InvalidNode { .. })
+            ),
+            "an action cannot escape its admitted schema"
         );
     }
 

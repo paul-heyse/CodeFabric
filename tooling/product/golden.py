@@ -32,6 +32,7 @@ CASES = {
     "source-boundaries": "source_boundary_queries::pragmatic_source_boundaries_narrow_first_four_forms_and_survive_reopen",
     "syntax-nodes": "syntax_queries::pragmatic_syntax_nodes_properties_parents_and_source_survive_public_reopen",
     "source-locations": "location_queries::pragmatic_source_locations_resolve_captured_bytes_lines_and_zero_width_nodes",
+    "semantic-ordering": "ordering_queries::pragmatic_semantic_ordering_precedes_limits_and_survives_prior_reuse_and_reopen",
     "source-location-metadata": "location_queries::pragmatic_source_location_facts_do_not_require_source_disclosure",
     "python-live": "pragmatic_live_python_edits_converge_without_restart",
     "mixed-clean-live": "live_updates::mixed_live_updates_equal_independent_clean_public_queries",

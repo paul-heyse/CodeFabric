@@ -48,6 +48,35 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The semantic-ordering continuation after `b81ef8c9` adds admitted `return.order_by` meanings to
+all first-four production programs. Native sort keys support ascending/descending order and retain
+the program's remaining deterministic tie breakers. Unknown keys, duplicate aliases and keys
+outside the selected schema fail explicitly. Typed return actions are part of the release identity,
+compiler dependencies and block manifest; they remain inside composed producer plans.
+
+Entity discovery now carries a deterministic exact captured source anchor and defaults to source
+path/position, kind, name and identity/context ordering. Native DataFusion `DISTINCT ON` selects
+one intact anchor per entity/context/file/workspace; it cannot combine unrelated minimum values
+into a fabricated span. All source/scope filters run below the final sort and limit, preserving
+native sort/top-k planning. Historical schemas advertise only their available ordering keys.
+
+The twelve-block installed-client Python/Rust scenario passes all four forms, ordering before
+location-scoped truncation, prior reuse, unavailable/duplicate keys and exact reopen in 147.43 s
+(`/tmp/codefabric-p03-ordering-native-2.log`). The independent native whole-span/context test and
+compiler action/schema test also pass. The first run hit the old 120-second test bound; the new
+case now uses the same finite five-minute override as other expanded public cases. Fixture Rust
+name expectations retain their existing qualified-name representation. The initial 22 canonical/
+recipe cases pass in 4.17 s (`/tmp/codefabric-p03-ordering-units-1.log`). Default/featureless root
+checks pass (`/tmp/codefabric-p03-ordering-root-check.log`); final Clippy has no new-file/changed-line
+findings (`/tmp/codefabric-p03-ordering-final-clippy.jsonl`). All 218 tooling cases and affected
+Python lint pass. `semantic-ordering` selects the native scenario. All 28 final regression cases
+pass in 86.86 s (`/tmp/codefabric-p03-ordering-regression.log`), including installed-client syntax
+(85.48 s) and source locations (86.86 s) with exact reopen. Documentation/navigation, affected
+spelling and diff checks pass. Source preparation in this fixture
+spent 23.97 s executing/writing 84 relations; this is an observation, not a comparative performance
+claim. Other return projections/groups/deduplication, broader first-four meanings and independent
+branch failure remain open.
+
 The source-location continuation after `8c0d9494` now accepts typed captured-file points and
 half-open ranges in all first-four forms. Original byte offsets and one-based line/zero-based byte
 columns remain distinct inputs; CRLF, lone CR, Unicode and zero-width syntax nodes retain their
@@ -65,7 +94,9 @@ conservative. Historical epochs without the location relation do not advertise t
 The twelve-block installed-client Python/Rust scenario passes initial publication and exact reopen
 in 73.99 s, including byte/line subjects, all four forms, range selection before truncation and empty
 Rust syntax. A separate metadata-only scenario passes in 60.44 s
-(`/tmp/codefabric-p03-locations-native-3.log`). The first added Find-within case exposed physical
+(`/tmp/codefabric-p03-locations-native-3.log`). The final explicit metadata-only policy assertion
+also passes in 57.77 s (`/tmp/codefabric-p03-locations-metadata-final.log`). This slice is committed
+in `b81ef8c9`. The first added Find-within case exposed physical
 column names differing from released semantic field IDs; selection now uses the released IDs.
 The existing ten-block syntax/named/prior/source scenario passes in 69.86 s
 (`/tmp/codefabric-p03-locations-named-regression.log`). Fifty-five affected Rust cases pass in
@@ -74,7 +105,7 @@ The existing ten-block syntax/named/prior/source scenario passes in 69.86 s
 lint. Final all-target Clippy has no new-file/changed-line findings
 (`/tmp/codefabric-p03-locations-final-clippy-2.jsonl`). Documentation/navigation and affected
 spelling/diff checks pass. Whole-file spelling still flags the pre-existing truncated UTF-8
-`caf\xc3` test bytes in `daemon.rs`; that unrelated fixture is preserved. Product selectors
+test bytes in `daemon.rs`; that unrelated fixture is preserved. Product selectors
 `source-locations` and `source-location-metadata` name the public scenarios. These checks use the
 existing delegated user-systemd scope and installed provider binaries. Full source outlines,
 configured context defaults, directives, precise dependencies and independent branch failure
