@@ -343,7 +343,10 @@ pub struct RustcProviderRunResult {
     result: ProviderRunResult,
 }
 
-fn diagnostic_capture_complete(compilation: &TrustQualifiedRustcCompilation) -> bool {
+fn diagnostic_capture_complete(
+    compilation: &TrustQualifiedRustcCompilation,
+    requested: &str,
+) -> bool {
     let mut observed = false;
     for relation in compilation
         .accepted()
@@ -366,7 +369,7 @@ fn diagnostic_capture_complete(compilation: &TrustQualifiedRustcCompilation) -> 
             return false;
         };
         for (family, state) in families.iter().zip(states.iter()) {
-            if family == Some(RustcRelation::Diagnostic.relation_id()) {
+            if family == Some(requested) {
                 observed = true;
                 if state != Some("complete") {
                     return false;
@@ -375,6 +378,24 @@ fn diagnostic_capture_complete(compilation: &TrustQualifiedRustcCompilation) -> 
         }
     }
     observed
+}
+
+fn incomplete_diagnostic_capture(
+    compilations: &[TrustQualifiedRustcCompilation],
+    requested: &str,
+) -> bool {
+    [
+        RustcRelation::Diagnostic,
+        RustcRelation::DiagnosticChild,
+        RustcRelation::DiagnosticSpan,
+        RustcRelation::DiagnosticSuggestion,
+        RustcRelation::DiagnosticEdit,
+    ]
+    .iter()
+    .any(|relation| relation.relation_id() == requested)
+        && !compilations
+            .iter()
+            .all(|compilation| diagnostic_capture_complete(compilation, requested))
 }
 
 fn collect_compiler_relation_batches(
@@ -455,9 +476,8 @@ impl RustcProviderRunResult {
                 relation_batches,
                 job.resource_budget(),
             )?);
-            let incomplete_capture = request.relation().as_str()
-                == RustcRelation::Diagnostic.relation_id()
-                && !compilations.iter().all(diagnostic_capture_complete);
+            let incomplete_capture =
+                incomplete_diagnostic_capture(&compilations, request.relation().as_str());
             if compilation_failed || incomplete_capture {
                 let (cause, detail) = if compilation_failed {
                     (

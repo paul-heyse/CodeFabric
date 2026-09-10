@@ -643,6 +643,10 @@ fn rustc_plan(
                 relation,
                 RustcRelation::Compilation
                     | RustcRelation::Diagnostic
+                    | RustcRelation::DiagnosticChild
+                    | RustcRelation::DiagnosticSpan
+                    | RustcRelation::DiagnosticSuggestion
+                    | RustcRelation::DiagnosticEdit
                     | RustcRelation::Coverage
                     | RustcRelation::Remainder
             ) {
@@ -1248,6 +1252,12 @@ const fn rustc_upstream_symbol(relation: RustcRelation) -> &'static str {
         RustcRelation::Call => "rustc_public::Instance::resolve",
         RustcRelation::Access => "rustc_public::mir::Place",
         RustcRelation::Diagnostic => "rustc_errors::json::JsonEmitter",
+        RustcRelation::DiagnosticChild | RustcRelation::DiagnosticSuggestion => {
+            "rustc_errors::DiagInner"
+        }
+        RustcRelation::DiagnosticSpan | RustcRelation::DiagnosticEdit => {
+            "rustc_errors::DiagInner / rustc_span::source_map::SourceMap"
+        }
         RustcRelation::Coverage => "codefabric::rustc::coverage",
         RustcRelation::Remainder => "codefabric::rustc::remainder",
     }
@@ -2333,9 +2343,37 @@ fn compiled_provider_field_role(
             "source_content_digest" => Some(CONTENT_DIGEST_ROLE),
             "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
             "diagnostic_ordinal" => Some(PROVIDER_FACT_ROLE),
-            "severity" | "reason_code" | "message" | "structured_compiler_diagnostic" => {
-                Some(DIAGNOSTIC_ROLE)
+            "severity"
+            | "reason_code"
+            | "message"
+            | "structured_compiler_diagnostic"
+            | "suggestions_state" => Some(DIAGNOSTIC_ROLE),
+            _ => None,
+        },
+        ProviderRelation::Rustc(
+            RustcRelation::DiagnosticChild
+            | RustcRelation::DiagnosticSpan
+            | RustcRelation::DiagnosticSuggestion
+            | RustcRelation::DiagnosticEdit,
+        ) => match name {
+            "provider_run_id" | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "compilation_unit_id" | "owner_id" => Some(CANONICAL_KEY_ROLE),
+            "source_file_id" | "location_file_id" => Some(FILE_IDENTITY_ROLE),
+            "source_content_digest" | "location_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "stable_crate_id" | "def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
+            "span_file" | "span_file_bytes" | "span_start_byte" | "span_end_byte" => {
+                Some(PROVIDER_COORDINATE_ROLE)
             }
+            "diagnostic_ordinal"
+            | "child_ordinal"
+            | "span_ordinal"
+            | "suggestion_ordinal"
+            | "alternative_ordinal"
+            | "part_ordinal"
+            | "alternative_count"
+            | "part_count" => Some(PROVIDER_FACT_ROLE),
+            "severity" | "message" | "is_primary" | "label" | "style" | "applicability"
+            | "replacement_text" | "expansion_kind" | "location_state" => Some(DIAGNOSTIC_ROLE),
             _ => None,
         },
         ProviderRelation::Rustc(RustcRelation::Coverage) => match name {
@@ -2434,8 +2472,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(release.observation().provider_lanes, 5);
-        assert_eq!(release.observation().provider_relations, 62);
-        assert_eq!(release.observation().transformations, 62);
+        assert_eq!(release.observation().provider_relations, 66);
+        assert_eq!(release.observation().transformations, 66);
         assert_eq!(release.observation().query_forms, 8);
     }
 

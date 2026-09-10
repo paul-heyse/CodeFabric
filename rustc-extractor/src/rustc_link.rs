@@ -428,6 +428,12 @@ fn authority_surface(relation: RustcRelation) -> &'static str {
         | RustcRelation::Call
         | RustcRelation::Access => "rustc_public-1.100.0-nightly",
         RustcRelation::Diagnostic => "rustc_errors::json::JsonEmitter",
+        RustcRelation::DiagnosticChild | RustcRelation::DiagnosticSuggestion => {
+            "rustc_errors::DiagInner"
+        }
+        RustcRelation::DiagnosticSpan | RustcRelation::DiagnosticEdit => {
+            "rustc_errors::DiagInner / rustc_span::source_map::SourceMap"
+        }
         RustcRelation::Coverage | RustcRelation::Remainder => "codefabric-adapter-v1",
     }
 }

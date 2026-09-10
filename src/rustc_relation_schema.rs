@@ -40,10 +40,14 @@ pub enum RustcRelation {
     Diagnostic = 136,
     Coverage = 137,
     Remainder = 138,
+    DiagnosticChild = 139,
+    DiagnosticSpan = 140,
+    DiagnosticSuggestion = 141,
+    DiagnosticEdit = 142,
 }
 
 impl RustcRelation {
-    pub(crate) const ALL: [Self; 18] = [
+    pub(crate) const ALL: [Self; 22] = [
         Self::Compilation,
         Self::PublicItem,
         Self::Type,
@@ -62,6 +66,10 @@ impl RustcRelation {
         Self::Diagnostic,
         Self::Coverage,
         Self::Remainder,
+        Self::DiagnosticChild,
+        Self::DiagnosticSpan,
+        Self::DiagnosticSuggestion,
+        Self::DiagnosticEdit,
     ];
 
     pub const fn family_code(self) -> u32 {
@@ -88,6 +96,10 @@ impl RustcRelation {
             Self::Diagnostic => "provider.rustc.diagnostic.v1",
             Self::Coverage => "provider.rustc.coverage.v1",
             Self::Remainder => "provider.rustc.remainder.v1",
+            Self::DiagnosticChild => "provider.rustc.diagnostic_child.v1",
+            Self::DiagnosticSpan => "provider.rustc.diagnostic_span.v1",
+            Self::DiagnosticSuggestion => "provider.rustc.diagnostic_suggestion.v1",
+            Self::DiagnosticEdit => "provider.rustc.diagnostic_edit.v1",
         }
     }
 
@@ -416,7 +428,47 @@ impl RustcRelation {
                 utf8("reason_code", false),
                 utf8("message", false),
                 bool_field("structured_compiler_diagnostic", false),
+                utf8("suggestions_state", false),
             ],
+            Self::DiagnosticChild => vec![
+                u64_field("diagnostic_ordinal", false),
+                u64_field("child_ordinal", false),
+                utf8("severity", false),
+                utf8("message", false),
+            ],
+            Self::DiagnosticSpan => {
+                let mut fields = vec![
+                    u64_field("diagnostic_ordinal", false),
+                    u64_field("child_ordinal", true),
+                    u64_field("span_ordinal", false),
+                    bool_field("is_primary", false),
+                    utf8("label", true),
+                ];
+                fields.extend(diagnostic_location_fields());
+                fields
+            }
+            Self::DiagnosticSuggestion => vec![
+                u64_field("diagnostic_ordinal", false),
+                u64_field("suggestion_ordinal", false),
+                utf8("message", false),
+                utf8("style", false),
+                utf8("applicability", false),
+                u64_field("alternative_count", false),
+                // A suggestion without alternatives has one null-alternative row.
+                u64_field("alternative_ordinal", true),
+                u64_field("part_count", false),
+            ],
+            Self::DiagnosticEdit => {
+                let mut fields = vec![
+                    u64_field("diagnostic_ordinal", false),
+                    u64_field("suggestion_ordinal", false),
+                    u64_field("alternative_ordinal", false),
+                    u64_field("part_ordinal", false),
+                    utf8("replacement_text", false),
+                ];
+                fields.extend(diagnostic_location_fields());
+                fields
+            }
             Self::Coverage => vec![
                 utf8("fact_family", false),
                 utf8("authority_surface", false),
@@ -438,6 +490,25 @@ impl RustcRelation {
         fields.extend(specific);
         fields
     }
+}
+
+// Diagnostic locations retain the native range even when it has no captured source binding.
+// The common source fields still identify the compilation owner, not the diagnostic location.
+fn diagnostic_location_fields() -> Vec<FieldSpec> {
+    vec![
+        utf8("span_file", true),
+        FieldSpec {
+            name: "span_file_bytes",
+            data_type: DataType::Binary,
+            nullable: true,
+        },
+        u64_field("span_start_byte", true),
+        u64_field("span_end_byte", true),
+        utf8("expansion_kind", false),
+        utf8("location_state", false),
+        utf8("location_file_id", true),
+        fixed_binary("location_content_digest", 32, true),
+    ]
 }
 
 /// Deterministic identity of the complete rustc provider-native schema bundle.

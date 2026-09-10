@@ -702,6 +702,69 @@ impl CapturedCompilerSources {
     }
 }
 
+/// Diagnostic locations can be outside this run's captured universe. Preserve that limitation,
+/// while retaining the ordinary hard rejection for changed or aliased captured source inputs.
+fn bind_diagnostic_locations(
+    owner: &mut OwnedRustcOwner,
+    sources: &mut CapturedCompilerSources,
+) -> Result<(), String> {
+    use std::os::unix::ffi::OsStrExt as _;
+    for relation in &mut owner.relations {
+        if !matches!(
+            relation.relation,
+            RustcRelation::DiagnosticSpan | RustcRelation::DiagnosticEdit
+        ) {
+            continue;
+        }
+        for row in &mut relation.rows {
+            let Some(OwnedCell::Binary(raw_path)) = row.0.get("span_file_bytes") else {
+                continue;
+            };
+            let path = Path::new(OsStr::from_bytes(raw_path));
+            let path = if path.is_absolute() {
+                path.to_owned()
+            } else {
+                std::env::current_dir()
+                    .map_err(|error| error.to_string())?
+                    .join(path)
+            };
+            let state = match path.strip_prefix(&sources.root) {
+                Err(_) => "outside-captured-inputs",
+                Ok(relative)
+                    if !sources
+                        .manifest
+                        .files
+                        .contains_key(relative.as_os_str().as_encoded_bytes()) =>
+                {
+                    "uncaptured-file"
+                }
+                Ok(_) => {
+                    let (file, digest, length) = sources.resolve(&path)?;
+                    let (Some(OwnedCell::UInt64(start)), Some(OwnedCell::UInt64(end))) =
+                        (row.0.get("span_start_byte"), row.0.get("span_end_byte"))
+                    else {
+                        return Err(
+                            "compiler diagnostic has a file path without its native range".into(),
+                        );
+                    };
+                    if start > end || *end > length {
+                        return Err(
+                            "compiler diagnostic range is outside its captured source".into()
+                        );
+                    }
+                    row.0.insert("location_file_id", OwnedCell::Utf8(file));
+                    row.0
+                        .insert("location_content_digest", OwnedCell::Fixed32(digest));
+                    "captured-source"
+                }
+            };
+            row.0
+                .insert("location_state", OwnedCell::Utf8(state.into()));
+        }
+    }
+    Ok(())
+}
+
 fn owner_source_span(owner: &OwnedRustcOwner) -> Option<(&Path, u64, u64)> {
     use std::os::unix::ffi::OsStrExt as _;
     let row = owner
@@ -900,7 +963,10 @@ fn run_protocol(
     rustc_arguments.extend(argument_strings);
     let extracted = crate::rustc_link::extract_owned(&rustc_arguments);
     let compiler_exit_status = i32::from(!extracted.compiler_succeeded);
-    let owners = extracted.owners;
+    let mut owners = extracted.owners;
+    for owner in &mut owners {
+        bind_diagnostic_locations(owner, &mut captured_sources)?;
+    }
     let mut sequence = 1_u64;
     let mut closed_owners = Vec::new();
     if !cancelled.load(Ordering::Acquire) {
@@ -1591,6 +1657,69 @@ mod tests {
         assert!(reader.next().is_none());
     }
 
+    fn assert_diagnostic_source_bindings(
+        environment: &WrapperEnvironment,
+        source: &Path,
+        unlisted: &Path,
+    ) {
+        let row = |path: &Path| {
+            OwnedRow(BTreeMap::from([
+                (
+                    "span_file_bytes",
+                    OwnedCell::Binary(path.as_os_str().as_encoded_bytes().to_vec()),
+                ),
+                ("span_start_byte", OwnedCell::UInt64(0)),
+                ("span_end_byte", OwnedCell::UInt64(3)),
+            ]))
+        };
+        let mut owner = OwnedRustcOwner {
+            qualified_name: "diagnostics".into(),
+            owner_kind: "COMPILATION".into(),
+            compiler_key: None,
+            relations: vec![OwnedRustcRelation {
+                relation: RustcRelation::DiagnosticSpan,
+                rows: vec![
+                    row(source),
+                    row(unlisted),
+                    row(Path::new("/outside/captured.rs")),
+                ],
+            }],
+        };
+        bind_diagnostic_locations(
+            &mut owner,
+            &mut CapturedCompilerSources::open(environment).unwrap(),
+        )
+        .unwrap();
+        let rows = &owner.relations[0].rows;
+        assert_eq!(
+            rows[0].0["location_state"],
+            OwnedCell::Utf8("captured-source".into())
+        );
+        assert_eq!(
+            rows[0].0["location_file_id"],
+            OwnedCell::Utf8(format!("file:{}", "02".repeat(16)))
+        );
+        assert_eq!(
+            rows[1].0["location_state"],
+            OwnedCell::Utf8("uncaptured-file".into())
+        );
+        assert_eq!(
+            rows[2].0["location_state"],
+            OwnedCell::Utf8("outside-captured-inputs".into())
+        );
+        assert!(!rows[1].0.contains_key("location_file_id"));
+        let original = std::fs::read(source).unwrap();
+        std::fs::write(source, b"changed").unwrap();
+        assert!(
+            bind_diagnostic_locations(
+                &mut owner,
+                &mut CapturedCompilerSources::open(environment).unwrap()
+            )
+            .is_err()
+        );
+        std::fs::write(source, original).unwrap();
+    }
+
     #[test]
     #[allow(clippy::too_many_lines)]
     fn wp34_ops_rustc_relation_ipc_process_round_trip_is_exact_and_repeatable() {
@@ -1629,7 +1758,7 @@ mod tests {
         let source = temporary.path().join("wrapper-probe.rs");
         std::fs::write(
             &source,
-            b"pub fn normalized_total(mut values: Vec<i64>) -> i64 { values.sort_unstable(); values.into_iter().sum() }\n",
+            b"pub fn normalized_total(mut values: Vec<i64>) -> i64 { values.sort_unstable(); values.into_iter().sum() }\npub fn Uppercase() {}\n",
         )
         .unwrap();
         let output = temporary.path().join("output");
@@ -1715,6 +1844,7 @@ mod tests {
         let unlisted = temporary.path().join("unlisted.rs");
         std::fs::write(&unlisted, "pub fn unlisted() {}\n").unwrap();
         assert!(captured.resolve(&unlisted).is_err());
+        assert_diagnostic_source_bindings(&environment, &probe_source, &unlisted);
         std::fs::write(&probe_source, "pub fn changed() {}\n").unwrap();
         assert!(
             CapturedCompilerSources::open(&environment)
@@ -1795,7 +1925,12 @@ mod tests {
             assert_eq!(reader.schema(), relation.schema());
             let batch = reader.next().unwrap().unwrap();
             assert_eq!(batch.num_rows() as u64, first.row_count);
-            if relation == RustcRelation::PublicItem {
+            if matches!(
+                relation,
+                RustcRelation::PublicItem
+                    | RustcRelation::DiagnosticSpan
+                    | RustcRelation::DiagnosticEdit
+            ) {
                 let paths = batch
                     .column_by_name("span_file_bytes")
                     .unwrap()
@@ -1828,6 +1963,10 @@ mod tests {
             .collect::<BTreeSet<_>>();
         for required in [
             RustcRelation::Compilation,
+            RustcRelation::DiagnosticChild,
+            RustcRelation::DiagnosticSpan,
+            RustcRelation::DiagnosticSuggestion,
+            RustcRelation::DiagnosticEdit,
             RustcRelation::PublicItem,
             RustcRelation::Type,
             RustcRelation::MirBody,

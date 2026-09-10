@@ -45,15 +45,12 @@ async fn contained_cargo_observations(compile_failure: bool) {
     )
     .unwrap();
 
-    fs::write(
-        workspace.join("src/other.rs"),
-        if compile_failure {
-            "pub fn target(v: u32) -> u32 { v + 1 }\npub fn caller() -> u32 { missing_function(4) }\n"
-        } else {
-            "pub fn target(v: u32) -> u32 { v + 1 }\npub fn caller() -> u32 { target(4) }\npub fn Uppercase() {}\n"
-        },
-    )
-    .unwrap();
+    let diagnostic_source = if compile_failure {
+        "\u{feff}// original CRLF bytes\r\npub fn target(v: u32) -> u32 { v + 1 }\r\npub fn caller() -> u32 { missing_function(4) }\r\n"
+    } else {
+        "\u{feff}// original CRLF bytes\r\npub fn target(v: u32) -> u32 { v + 1 }\r\npub fn caller() -> u32 { target(4) }\r\npub fn Uppercase() {}\r\n"
+    };
+    fs::write(workspace.join("src/other.rs"), diagnostic_source).unwrap();
 
     let sysroot = std::process::Command::new("rustup")
         .args(["run", "nightly-2026-08-18", "rustc", "--print", "sysroot"])
@@ -329,6 +326,7 @@ async fn contained_cargo_observations(compile_failure: bool) {
         "{:?}\n{stderr}",
         result.result().gaps().first()
     );
+    assert_native_diagnostic_details(&result, diagnostic_source, compile_failure);
     if compile_failure {
         assert_eq!(result.result().terminal(), ProviderTerminalStatus::Failed);
         assert!(
@@ -486,4 +484,168 @@ async fn contained_cargo_observations(compile_failure: bool) {
         "nested module owner must retain its captured file identity"
     );
     assert!(!harness.paths.extractor_socket_path.exists());
+}
+
+/// The compiler owner is the crate root, while this diagnostic points into another captured file.
+fn assert_native_diagnostic_details(result: &RustcProviderRunResult, source: &str, failed: bool) {
+    use arrow_array::{BooleanArray, FixedSizeBinaryArray, StringArray, UInt64Array};
+    let (code, witness) = if failed {
+        ("E0425", "missing_function")
+    } else {
+        ("non_snake_case", "Uppercase")
+    };
+    let mut found = false;
+    for owner in result
+        .compilations()
+        .iter()
+        .flat_map(|run| &run.accepted().owners)
+    {
+        let Some(diagnostics) = owner
+            .relations
+            .iter()
+            .find(|item| item.relation == RustcRelation::Diagnostic)
+        else {
+            continue;
+        };
+        let strings = |batch: &RecordBatch, name: &str| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+                .clone()
+        };
+        let integers = |batch: &RecordBatch, name: &str| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap()
+                .clone()
+        };
+        let Some(index) = strings(&diagnostics.batch, "reason_code")
+            .iter()
+            .position(|value| value == Some(code))
+        else {
+            continue;
+        };
+        found = true;
+        let ordinal = integers(&diagnostics.batch, "diagnostic_ordinal").value(index);
+        let spans = &owner
+            .relations
+            .iter()
+            .find(|item| item.relation == RustcRelation::DiagnosticSpan)
+            .unwrap()
+            .batch;
+        let primary = spans
+            .column_by_name("is_primary")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .unwrap();
+        let span = integers(spans, "diagnostic_ordinal")
+            .iter()
+            .enumerate()
+            .find(|(row, value)| *value == Some(ordinal) && primary.value(*row))
+            .unwrap()
+            .0;
+        assert_eq!(
+            strings(spans, "location_state").value(span),
+            "captured-source"
+        );
+        let expected_file = encode_public_id(
+            IdentityDomain::SourceFile,
+            None,
+            crate::integrity::digest_bytes(b"src/other.rs")[..16]
+                .try_into()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            strings(spans, "location_file_id").value(span),
+            expected_file
+        );
+        assert_ne!(strings(spans, "source_file_id").value(span), expected_file);
+        let start = source.find(witness).unwrap() as u64;
+        assert_eq!(integers(spans, "span_start_byte").value(span), start);
+        assert_eq!(
+            integers(spans, "span_end_byte").value(span),
+            start + witness.len() as u64
+        );
+        let digests = spans
+            .column_by_name("location_content_digest")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<FixedSizeBinaryArray>()
+            .unwrap();
+        assert_eq!(
+            digests.value(span),
+            blake3::hash(source.as_bytes()).as_bytes()
+        );
+        if !failed {
+            assert_native_lint_edit(owner, ordinal, start);
+        }
+    }
+    assert!(found, "expected the exact native diagnostic code {code}");
+}
+
+fn assert_native_lint_edit(owner: &AcceptedRustcOwner, ordinal: u64, start: u64) {
+    use arrow_array::{StringArray, UInt64Array};
+    let relation = |kind| {
+        &owner
+            .relations
+            .iter()
+            .find(|item| item.relation == kind)
+            .unwrap()
+            .batch
+    };
+    let children = relation(RustcRelation::DiagnosticChild);
+    assert!(
+        children
+            .column_by_name("message")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+            .iter()
+            .any(|value| value.is_some_and(|value| value.contains("warn(non_snake_case)")))
+    );
+    let suggestions = relation(RustcRelation::DiagnosticSuggestion);
+    assert!(
+        suggestions
+            .column_by_name("applicability")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+            .iter()
+            .any(|value| value == Some("MaybeIncorrect"))
+    );
+    let edits = relation(RustcRelation::DiagnosticEdit);
+    let integers = |name| {
+        edits
+            .column_by_name(name)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .unwrap()
+    };
+    let strings = |name| {
+        edits
+            .column_by_name(name)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+    };
+    let row = integers("diagnostic_ordinal")
+        .iter()
+        .position(|value| value == Some(ordinal))
+        .unwrap();
+    assert_eq!(strings("replacement_text").value(row), "uppercase");
+    assert_eq!(integers("span_start_byte").value(row), start);
+    assert_eq!(integers("span_end_byte").value(row), start + 9);
+    assert_eq!(strings("location_state").value(row), "captured-source");
 }

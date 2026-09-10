@@ -5,7 +5,12 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use rustc_driver::{Callbacks, Compilation};
-use rustc_errors::emitter::{ColorConfig, HumanReadableErrorType};
+use rustc_errors::emitter::{ColorConfig, Emitter, HumanReadableErrorType, TimingEvent};
+use rustc_errors::timings::TimingRecord;
+use rustc_errors::{DiagInner, Suggestions};
+use rustc_span::source_map::SourceMap;
+
+mod details;
 use rustc_errors::json::JsonEmitter;
 use rustc_interface::interface;
 use rustc_middle::ty::TyCtxt;
@@ -19,6 +24,8 @@ const MAX_DIAGNOSTICS: usize = 20_000;
 #[derive(Default)]
 struct Capture {
     rows: Vec<OwnedRow>,
+    details: details::Details,
+    detail_count: usize,
     captured_bytes: usize,
     initialized: bool,
     incomplete: bool,
@@ -67,58 +74,50 @@ impl Capture {
                     diagnostic.code.map_or_else(String::new, |code| code.code),
                 )
                 .utf8("message", message)
-                .boolean("structured_compiler_diagnostic", true),
+                .boolean("structured_compiler_diagnostic", true)
+                .utf8("suggestions_state", "unavailable"),
         );
     }
 
     fn append_to(&mut self, owner: &mut OwnedRustcOwner) {
         let complete = self.initialized && !self.incomplete;
-        let count = self.rows.len();
-        owner.relations.push(OwnedRustcRelation {
-            relation: RustcRelation::Diagnostic,
-            rows: std::mem::take(&mut self.rows),
-        });
-        let coverage = OwnedRow::default()
-            .utf8("fact_family", RustcRelation::Diagnostic.relation_id())
-            .utf8(
-                "authority_surface",
-                "rustc_errors::json::JsonEmitter primary diagnostic messages",
-            )
-            .u64("requested_units", 1)
-            .u64("completed_units", usize::from(complete))
-            .u64("emitted_rows", count)
-            .utf8(
-                "completeness",
-                if complete {
-                    "complete"
-                } else {
-                    "partial-characterized"
-                },
-            )
-            .u64("remainder_count", usize::from(!complete))
-            .boolean("unknown_semantics", !complete);
-        append_row(owner, RustcRelation::Coverage, coverage);
-        if !complete {
+        let mut relations = std::mem::take(&mut self.details.rows);
+        relations.insert(RustcRelation::Diagnostic, std::mem::take(&mut self.rows));
+        for relation in std::iter::once(RustcRelation::Diagnostic).chain(details::RELATIONS) {
+            let rows = relations.remove(&relation).unwrap_or_default();
+            let count = rows.len();
+            owner.relations.push(OwnedRustcRelation { relation, rows });
             append_row(
                 owner,
-                RustcRelation::Remainder,
+                RustcRelation::Coverage,
                 OwnedRow::default()
-                    .utf8("fact_family", RustcRelation::Diagnostic.relation_id())
+                    .utf8("fact_family", relation.relation_id())
                     .utf8(
-                        "reason_code",
-                        if self.initialized {
-                            "STRUCTURED_DIAGNOSTIC_CAPTURE_LIMIT_OR_INVALID_FRAME"
+                        "authority_surface",
+                        "rustc_errors::DiagInner / JsonEmitter / SourceMap",
+                    )
+                    .u64("requested_units", 1)
+                    .u64("completed_units", usize::from(complete))
+                    .u64("emitted_rows", count)
+                    .utf8(
+                        "completeness",
+                        if complete {
+                            "complete"
                         } else {
-                            "STRUCTURED_DIAGNOSTIC_SINK_NOT_INITIALIZED"
+                            "partial-characterized"
                         },
                     )
-                    .utf8("authority_surface", "rustc_errors::json::JsonEmitter")
-                    .boolean("bounded", true)
-                    .utf8(
-                        "detail",
-                        "primary diagnostic capture is incomplete; missing diagnostics are unknown",
-                    ),
+                    .u64("remainder_count", usize::from(!complete))
+                    .boolean("unknown_semantics", !complete),
             );
+            if !complete {
+                append_row(owner, RustcRelation::Remainder, OwnedRow::default()
+                    .utf8("fact_family", relation.relation_id())
+                    .utf8("reason_code", if self.initialized { "STRUCTURED_DIAGNOSTIC_CAPTURE_LIMIT_OR_INVALID_FRAME" } else { "STRUCTURED_DIAGNOSTIC_SINK_NOT_INITIALIZED" })
+                    .utf8("authority_surface", "rustc_errors::DiagInner / JsonEmitter")
+                    .boolean("bounded", true)
+                    .utf8("detail", "diagnostic capture is incomplete; missing messages, locations and edits are unknown"));
+            }
         }
     }
 }
@@ -191,6 +190,85 @@ impl Drop for DiagnosticWriter {
     }
 }
 
+/// Capture typed details before the native emitter consumes the diagnostic. The native JSON
+/// primary remains authoritative for lint names, which are private in this compiler revision.
+/// Both the pending detail bundle and retained capture are bounded independently.
+struct StructuredEmitter {
+    inner: JsonEmitter,
+    capture: Arc<Mutex<Capture>>,
+}
+
+impl Emitter for StructuredEmitter {
+    fn emit_diagnostic(&mut self, diag: DiagInner) {
+        let ordinal = self
+            .capture
+            .lock()
+            .expect("diagnostic capture is not poisoned")
+            .rows
+            .len();
+        let details = details::Details::capture(&diag, self.inner.source_map(), ordinal);
+        let suggestions_state = match &diag.suggestions {
+            Suggestions::Enabled(_) => "enabled",
+            Suggestions::Sealed(_) => "sealed",
+            Suggestions::Disabled => "disabled",
+        };
+        self.inner.emit_diagnostic(diag);
+        let mut capture = self
+            .capture
+            .lock()
+            .expect("diagnostic capture is not poisoned");
+        if capture.rows.len() != ordinal + 1 {
+            capture.incomplete = true;
+            return;
+        }
+        capture.rows[ordinal].0.insert(
+            "suggestions_state",
+            super::OwnedCell::Utf8(suggestions_state.into()),
+        );
+        capture.incomplete |= details.incomplete;
+        if details.count > MAX_DIAGNOSTICS.saturating_sub(capture.detail_count)
+            || details.bytes > MAX_CAPTURE_BYTES.saturating_sub(capture.captured_bytes)
+        {
+            capture.incomplete = true;
+            return;
+        }
+        capture.captured_bytes += details.bytes;
+        capture.detail_count += details.count;
+        for (relation, rows) in details.rows {
+            capture
+                .details
+                .rows
+                .entry(relation)
+                .or_default()
+                .extend(rows);
+        }
+    }
+
+    fn source_map(&self) -> Option<&SourceMap> {
+        self.inner.source_map()
+    }
+    fn emit_artifact_notification(&mut self, path: &std::path::Path, kind: &str) {
+        self.inner.emit_artifact_notification(path, kind);
+    }
+    fn emit_timing_section(&mut self, record: TimingRecord, event: TimingEvent) {
+        self.inner.emit_timing_section(record, event);
+    }
+    fn emit_future_breakage_report(&mut self, diags: Vec<DiagInner>) {
+        // The regular emission supplies these diagnostic observations. This report is Cargo's
+        // separate compatibility envelope, not an additional set of compiler occurrences.
+        self.inner.emit_future_breakage_report(diags);
+    }
+    fn emit_unused_externs(&mut self, level: rustc_lint_defs::Level, names: &[&str]) {
+        self.inner.emit_unused_externs(level, names);
+    }
+    fn should_show_explain(&self) -> bool {
+        self.inner.should_show_explain()
+    }
+    fn supports_color(&self) -> bool {
+        self.inner.supports_color()
+    }
+}
+
 struct ExtractorCallbacks {
     capture: Arc<Mutex<Capture>>,
     extraction: Option<OwnedRustcExtraction>,
@@ -215,7 +293,10 @@ impl Callbacks for ExtractorCallbacks {
                 },
                 ColorConfig::Never,
             );
-            session.dcx().set_emitter(Box::new(emitter));
+            session.dcx().set_emitter(Box::new(StructuredEmitter {
+                inner: emitter,
+                capture: Arc::clone(&capture),
+            }));
             capture
                 .lock()
                 .expect("diagnostic capture is not poisoned")

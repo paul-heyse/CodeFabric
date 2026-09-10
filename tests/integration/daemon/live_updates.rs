@@ -482,6 +482,39 @@ fn mixed_live_updates_equal_independent_clean_public_queries() {
     supervisor.stop();
 }
 
+fn rust_diagnostic_details(fixture: &ProductionFixture) -> BTreeMap<String, Vec<Value>> {
+    ["child", "span", "suggestion", "edit"]
+        .into_iter()
+        .map(|kind| {
+            let relation = format!("provider.rustc.diagnostic_{kind}.v1");
+            let batches = fresh_activation_relation_batches(fixture, &relation);
+            let mut writer = arrow::json::WriterBuilder::new()
+                .with_explicit_nulls(true)
+                .build::<_, arrow::json::writer::JsonArray>(Vec::new());
+            writer
+                .write_batches(&batches.iter().collect::<Vec<_>>())
+                .unwrap();
+            writer.finish().unwrap();
+            let mut rows: Vec<Value> = serde_json::from_slice(&writer.into_inner()).unwrap();
+            for row in &mut rows {
+                let fields = row.as_object_mut().unwrap();
+                // These identify separate executions. Keep file identities, digests, complete message/
+                // alternative/part relationships and native coordinates in the semantic comparison.
+                for field in [
+                    "provider_run_id",
+                    "source_generation",
+                    "compilation_unit_id",
+                    "owner_id",
+                ] {
+                    fields.remove(field);
+                }
+            }
+            rows.sort_by_cached_key(Value::to_string);
+            (relation, rows)
+        })
+        .collect()
+}
+
 fn assert_compiler_diagnostics_and_reopen(
     fixture: &ProductionFixture,
     clean: &ProductionFixture,
@@ -492,6 +525,12 @@ fn assert_compiler_diagnostics_and_reopen(
     mut supervisor: RunningSupervisor,
 ) -> RunningSupervisor {
     let diagnostics = rust_diagnostic_messages(fixture);
+    let details = rust_diagnostic_details(fixture);
+    assert_eq!(
+        details,
+        rust_diagnostic_details(clean),
+        "{phase}: native diagnostic details match independent clean publication"
+    );
     assert_eq!(
         diagnostics,
         rust_diagnostic_messages(clean),
@@ -505,6 +544,12 @@ fn assert_compiler_diagnostics_and_reopen(
                     && level == "error"
                     && message.contains("missing"))
         );
+        let locations = &details["provider.rustc.diagnostic_span.v1"];
+        assert!(
+            locations
+                .iter()
+                .any(|row| row["location_state"] == "captured-source" && row["is_primary"] == true)
+        );
         let activation = all_activation_control_rows(fixture);
         supervisor.stop();
         supervisor = fixture.start_supervisor_with(&stack.codefabric);
@@ -513,6 +558,7 @@ fn assert_compiler_diagnostics_and_reopen(
             incremental
         );
         assert_eq!(rust_diagnostic_messages(fixture), diagnostics);
+        assert_eq!(rust_diagnostic_details(fixture), details);
         assert_eq!(
             all_activation_control_rows(fixture),
             activation,
