@@ -110,6 +110,23 @@ impl EntityQueryScope {
                         all_languages_known = false;
                     }
                 }
+                SemanticReference::Phrase(value) => {
+                    let named =
+                        super::super::programmatic_ingress_port::code_literals::named_subject(
+                            value,
+                        )
+                        .ok_or("source input has no supported literal entity meaning")?;
+                    families.insert(if named.selector == "python:module" {
+                        "modules"
+                    } else {
+                        "function-declarations"
+                    });
+                    if let Some((language, _)) = named.selector.split_once(':') {
+                        languages.insert(language.to_owned());
+                    } else {
+                        all_languages_known = false;
+                    }
+                }
                 _ => {
                     return Err(
                         "source processing needs canonical entities or typed entity results".into(),
@@ -231,6 +248,33 @@ mod tests {
             .for_source_subjects(&clause(vec![function]), &[], false)
             .unwrap();
         assert_eq!(selected.families, BTreeSet::from(["function-declarations"]));
+    }
+
+    #[test]
+    fn literal_source_subjects_preserve_declared_language_and_module_family() {
+        let selected = scope()
+            .for_source_subjects(
+                &clause(vec![SemanticReference::Phrase(
+                    "Python module `package`".into(),
+                )]),
+                &[],
+                true,
+            )
+            .unwrap();
+        assert_eq!(selected.languages, BTreeSet::from(["python".into()]));
+        assert_eq!(selected.families, BTreeSet::from(["modules"]));
+        let mixed = scope()
+            .for_source_subjects(
+                &clause(vec![
+                    SemanticReference::Phrase("Python function `target`".into()),
+                    SemanticReference::Phrase("Rust function `crate::target`".into()),
+                ]),
+                &[],
+                true,
+            )
+            .unwrap();
+        assert_eq!(mixed.languages, scope().languages);
+        assert_eq!(mixed.families, BTreeSet::from(["function-declarations"]));
     }
 
     #[test]

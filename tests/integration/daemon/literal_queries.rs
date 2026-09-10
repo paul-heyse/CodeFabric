@@ -23,7 +23,15 @@ fn query_literals(fixture: &ProductionFixture, stack: &InstalledProductionStack,
         {"request":"find code entities","query_id":"contradiction","looking_for":"Python function `target`","where":[predicate("name","does not equal","target")]},
         {"request":"retrieve facts about code","query_id":"facts","about":[{"results_of":"ambiguous","select":"entities"}],"facts":["declarations"],"where":[predicate("qualified name","equals","literal_queries::inner::target")]},
         {"request":"follow code relationships","query_id":"calls","starting_from":[{"results_of":"rust","select":"entities"}],"relationship":"calls","direction":"outgoing","distance":"one step","where":[predicate("resolution","equals","resolved_declaration")]},
-        {"request":"retrieve source and syntax context","query_id":"source","about":[{"results_of":"python","select":"entities"}],"context":"exact source span","where":[predicate("name","equals","safe_to_refactor")],"return":{"maximum_source_bytes":128}}
+        {"request":"retrieve source and syntax context","query_id":"source","about":[{"results_of":"python","select":"entities"}],"context":"exact source span","where":[predicate("name","equals","safe_to_refactor")],"return":{"maximum_source_bytes":128}},
+        {"request":"retrieve facts about code","query_id":"named_python","about":[{"semantic_reference":"Python function `safe_to_refactor`"}],"facts":["declarations"]},
+        {"request":"retrieve facts about code","query_id":"named_rust","about":["Rust function `target`"],"facts":["declarations"]},
+        {"request":"retrieve facts about code","query_id":"named_empty","about":["Python function `absent`"],"facts":["declarations"]},
+        {"request":"retrieve facts about code","query_id":"named_mixed","about":["Rust function `literal_queries::inner::target`","Rust function `literal_queries::inner::target`",{"results_of":"python","select":"entities"}],"facts":["declarations"]},
+        {"request":"follow code relationships","query_id":"named_calls","starting_from":["Rust function `safe_to_refactor`"],"relationship":"calls","direction":"outgoing","distance":"one step","where":[predicate("resolution","equals","resolved_declaration")]},
+        {"request":"follow code relationships","query_id":"named_incoming","starting_from":["Rust function `literal_queries::inner::target`"],"relationship":"calls","direction":"incoming","distance":"one step"},
+        {"request":"retrieve source and syntax context","query_id":"named_source","about":["Python function `safe_to_refactor`"],"context":"exact source span","return":{"maximum_source_bytes":128}},
+        {"request":"retrieve source and syntax context","query_id":"named_rust_source","about":["Rust function `literal_queries::inner::target`"],"context":"exact source span","return":{"maximum_source_bytes":128}}
     ]);
     let count = queries.as_array().unwrap().len();
     request["queries"] = queries;
@@ -149,6 +157,30 @@ fn query_literals(fixture: &ProductionFixture, stack: &InstalledProductionStack,
     assert_eq!(
         rows("source")[0]["source_context"]["text"],
         "safe_to_refactor"
+    );
+    assert_eq!(rows("named_python").len(), 1);
+    assert_eq!(
+        rows("named_python")[0]["public_entity_id"],
+        rows("python")[0]["public_entity_id"]
+    );
+    assert_eq!(rows("named_rust").len(), 2);
+    assert!(rows("named_empty").is_empty());
+    assert_eq!(
+        rows("named_mixed").len(),
+        2,
+        "named and prior subjects are a set"
+    );
+    assert_eq!(rows("named_calls"), rows("calls"));
+    assert_eq!(rows("named_incoming").len(), 1);
+    assert_eq!(rows("named_source"), rows("source"));
+    assert_eq!(rows("named_rust_source").len(), 1);
+    assert_eq!(
+        rows("named_rust_source")[0]["source_context"]["text"],
+        "pub fn target() -> u8"
+    );
+    assert_eq!(
+        binding("named_calls")["resolved_semantics"]["named_subject"][0]["selector"],
+        "rust:function"
     );
 }
 

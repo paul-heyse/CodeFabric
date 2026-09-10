@@ -46,6 +46,7 @@ use crate::semantic_query_contract::{COMPILED_V2_0_SCOPE_DEFINITIONS, ResultRole
 use crate::semantic_release::{CompiledQueryProgram, SemanticQueryForm};
 
 mod facts;
+mod named;
 mod prior;
 mod properties;
 use crate::relational_semantic_query::EpochBoundSelectionTarget;
@@ -520,6 +521,7 @@ const SEMANTIC_ENTITY_ID_ROLE: &str = "semantic.entity.identity";
 const SEMANTIC_ENTITY_KIND_ROLE: &str = "semantic.entity.kind";
 const SEMANTIC_ENTITY_NAME_ROLE: &str = "semantic.entity.name";
 
+#[derive(Clone)]
 struct EpochSemanticRelation {
     relation_id: RelationId,
     fields: Vec<FieldId>,
@@ -552,7 +554,7 @@ fn compiled_released_form_programs(
                 detail: "canonical entity selection requires selected processing scope".to_owned(),
             });
         }
-        let mut programs = vec![compiled_find_entities_program(source)?];
+        let mut programs = vec![compiled_find_entities_program(source.clone())?];
         // Older persisted epochs remain readable; a new form needs its actual field contract.
         if let Some(program) = facts::declarations(epoch)? {
             programs.push(program);
@@ -565,6 +567,7 @@ fn compiled_released_form_programs(
         if let Some(program) = facts::source_context(epoch)? {
             programs.push(program);
         }
+        named::install(&source, &mut programs);
         return validate_form_coverage(programs);
     }
     let binding_family = NativeSyntaxRelation::RuffBinding.as_str();
@@ -1483,7 +1486,8 @@ fn validate_program_bindings(
                 EpochBoundSelectionTarget::Predicate { input_field_id, .. } => {
                     !input.output_fields.contains(input_field_id)
                 }
-                EpochBoundSelectionTarget::TextProperties { fields } => {
+                EpochBoundSelectionTarget::TextProperties { fields }
+                | EpochBoundSelectionTarget::NamedEntities { fields } => {
                     fields.is_empty()
                         || fields
                             .values()
@@ -2431,8 +2435,19 @@ fn encode_selection(value: &ProductionSelectionDefinition) -> CanonicalIdentityF
             frame.text(6, input_field_id.as_str());
             frame.u64(7, scalar_operator_code(*scalar_operator));
         }
-        EpochBoundSelectionTarget::TextProperties { fields } => {
-            frame.text(10, "text-property-predicates");
+        EpochBoundSelectionTarget::TextProperties { fields }
+        | EpochBoundSelectionTarget::NamedEntities { fields } => {
+            frame.text(
+                10,
+                if matches!(
+                    value.target,
+                    EpochBoundSelectionTarget::NamedEntities { .. }
+                ) {
+                    "named-entity-predicates"
+                } else {
+                    "text-property-predicates"
+                },
+            );
             frame.frames(
                 11,
                 fields.iter().map(|(name, field)| {

@@ -7,6 +7,7 @@
 //! function-registry, or object-store-registry handle.
 
 pub mod resource_governance;
+mod schema_metadata;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -1647,7 +1648,10 @@ impl AuthorizedChildSession {
             let bounded_plan = LogicalPlanBuilder::from(compiled.plan)
                 .limit(0, Some(probe_limit))?
                 .build()?;
-            let optimized = self.state.optimize(&bounded_plan)?;
+            let (optimized, deferred_metadata) = schema_metadata::preserve_result_metadata(
+                self.state.optimize(&bounded_plan)?,
+                &expected_schema,
+            )?;
             let cached = self.logical_plan_cache.try_insert(
                 cache_key,
                 CachedLogicalPlan::new(
@@ -1655,7 +1659,8 @@ impl AuthorizedChildSession {
                     optimized,
                     expected_schema,
                     compiled.observations,
-                ),
+                )
+                .with_deferred_result_metadata(deferred_metadata),
             )?;
             (cached, LogicalPlanCacheOutcome::Miss)
         };
@@ -1663,9 +1668,14 @@ impl AuthorizedChildSession {
         let physical_plan = self
             .state
             .query_planner()
-            .create_physical_plan(cached.optimized_plan(), &self.state)
+            .create_physical_plan(cached.physical_planning_plan(), &self.state)
             .await?;
         let expected_schema = Arc::clone(cached.output_schema());
+        let physical_plan = if cached.deferred_result_metadata() {
+            schema_metadata::preserve_physical_metadata(physical_plan, &expected_schema)?
+        } else {
+            physical_plan
+        };
         let observations = cached.observations().clone();
         let plan = execution_observation(&cached, cache_outcome);
         if physical_plan.schema().as_ref() != expected_schema.as_ref() {
@@ -1880,13 +1890,17 @@ impl AuthorizedChildSession {
         let bounded_plan = LogicalPlanBuilder::from(compiled.plan)
             .limit(0, Some(probe_limit))?
             .build()?;
-        let optimized = query_state.optimize(&bounded_plan)?;
+        let (optimized, deferred_metadata) = schema_metadata::preserve_result_metadata(
+            query_state.optimize(&bounded_plan)?,
+            &expected_schema,
+        )?;
         let query_local_plan = CachedLogicalPlan::new(
             bounded_plan,
             optimized,
             expected_schema,
             compiled.observations,
-        );
+        )
+        .with_deferred_result_metadata(deferred_metadata);
         self.validate_request_owned_plan_authority(
             &query_local_plan,
             request_inputs,
@@ -1898,9 +1912,14 @@ impl AuthorizedChildSession {
         // digest/validation carrier and is never looked up in or inserted into the epoch cache.
         let physical_plan = query_state
             .query_planner()
-            .create_physical_plan(query_local_plan.optimized_plan(), &query_state)
+            .create_physical_plan(query_local_plan.physical_planning_plan(), &query_state)
             .await?;
         let expected_schema = Arc::clone(query_local_plan.output_schema());
+        let physical_plan = if query_local_plan.deferred_result_metadata() {
+            schema_metadata::preserve_physical_metadata(physical_plan, &expected_schema)?
+        } else {
+            physical_plan
+        };
         let observations = query_local_plan.observations().clone();
         let plan = execution_observation(&query_local_plan, LogicalPlanCacheOutcome::Miss);
         if physical_plan.schema().as_ref() != expected_schema.as_ref() {

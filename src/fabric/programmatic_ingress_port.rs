@@ -1179,6 +1179,20 @@ impl ApplicationOwnedSemanticIngressPort {
         catalog: &EpochBoundSemanticIngressCatalog,
         projection: &mut IngressProjection,
     ) -> Result<(), ProgrammaticQueryPortError> {
+        if parent.is_none()
+            && let ReferenceValue::Semantic(SemanticReference::Phrase(value)) = &reference
+            && let Some(named) = code_literals::named_subject(value)
+            && catalog.selections.iter().any(|selection| {
+                selection.program_binding_id == binding.program_binding_id
+                    && selection.selection_id.as_ref() == "selection.named-subject"
+            })
+        {
+            return projection.push_selection(
+                query_id,
+                &Arc::from("selection.named-subject"),
+                text(&serde_json::to_string(&named).map_err(|error| rejected(error.to_string()))?)?,
+            );
+        }
         let mut fields = Vec::with_capacity(parent.map_or(3, |_| 4));
         if let Some((field_id, value)) = parent {
             fields.push(field_value(field_id, text(value)?));
@@ -2183,7 +2197,7 @@ fn released_form(clause: &SemanticQueryClause) -> ReleasedSemanticForm {
     }
 }
 
-mod code_literals;
+pub(crate) mod code_literals;
 mod family_selection;
 
 fn select_clause_program<'a>(

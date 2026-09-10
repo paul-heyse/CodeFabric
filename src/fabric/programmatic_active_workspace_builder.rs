@@ -286,7 +286,10 @@ impl ProductionActiveWorkspaceBuilder {
         let recipe = self
             .release
             .compile_semantic_query_recipe(&epoch, query_input, &execution)
-            .map_err(|_error| Self::invalid("query-recipe-compile"))?;
+            .map_err(|error| {
+                tracing::warn!(error = %error, "selected epoch query recipe compilation failed");
+                Self::invalid("query-recipe-compile")
+            })?;
 
         let table_relations = epoch.relation_ids().cloned().collect::<BTreeSet<_>>();
         let query_ports = self
@@ -298,7 +301,10 @@ impl ProductionActiveWorkspaceBuilder {
                 table_relations.clone(),
                 self.config.maximum_output_rows,
             )
-            .map_err(|_| Self::invalid("query-ports-compose"))?;
+            .map_err(|error| {
+                tracing::warn!(error = %error, "selected epoch query port composition failed");
+                Self::invalid("query-ports-compose")
+            })?;
 
         if pins.resource_envelope != self.resources.policy_ref() {
             return Err(Self::invalid("resource-policy-substitution"));

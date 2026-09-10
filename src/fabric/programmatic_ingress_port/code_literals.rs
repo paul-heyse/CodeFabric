@@ -2,7 +2,31 @@
 
 use crate::relational_semantic_query::property_predicate::{TextComparison, TextPropertyPredicate};
 
+pub(crate) fn named_subject(
+    value: &str,
+) -> Option<crate::relational_semantic_query::property_predicate::NamedEntityPredicate> {
+    let (meaning, predicate) = parsed_entity_selection(value)?;
+    let selector = crate::production_query_recipe::CANONICAL_ENTITY_SELECTORS
+        .iter()
+        .find(|(phrase, _)| *phrase == meaning)?
+        .1;
+    Some(
+        crate::relational_semantic_query::property_predicate::NamedEntityPredicate {
+            selector: selector.into(),
+            predicate,
+        },
+    )
+}
+
 pub(super) fn entity_selection(value: &str) -> Option<(String, String)> {
+    let (meaning, predicate) = parsed_entity_selection(value)?;
+    Some((
+        meaning.into(),
+        serde_json::to_string(&predicate).expect("literal predicate serializes"),
+    ))
+}
+
+fn parsed_entity_selection(value: &str) -> Option<(&'static str, TextPropertyPredicate)> {
     let (phrase, quoted) = value.split_once('`')?;
     let name = quoted.strip_suffix('`')?;
     if name.is_empty() || name.contains('`') || name.chars().any(char::is_control) {
@@ -32,10 +56,7 @@ pub(super) fn entity_selection(value: &str) -> Option<(String, String)> {
         operator: TextComparison::Equal,
         value: name.into(),
     };
-    Some((
-        meaning.into(),
-        serde_json::to_string(&predicate).expect("literal predicate serializes"),
-    ))
+    Some((meaning, predicate))
 }
 
 pub(super) fn without_literal_values(value: &mut serde_json::Value) {
@@ -56,6 +77,11 @@ pub(super) fn without_literal_values(value: &mut serde_json::Value) {
                     }
                 }
             }
+            for key in ["about", "starting_from", "for"] {
+                if let Some(subjects) = fields.get_mut(key) {
+                    mask_subjects(subjects);
+                }
+            }
             for child in fields.values_mut() {
                 without_literal_values(child);
             }
@@ -63,6 +89,21 @@ pub(super) fn without_literal_values(value: &mut serde_json::Value) {
         serde_json::Value::Array(values) => {
             for child in values {
                 without_literal_values(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn mask_subjects(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(phrase) if named_subject(phrase).is_some() => {
+            *phrase = "literal code subject".into();
+        }
+        serde_json::Value::Array(subjects) => subjects.iter_mut().for_each(mask_subjects),
+        serde_json::Value::Object(fields) => {
+            if let Some(phrase) = fields.get_mut("semantic_reference") {
+                mask_subjects(phrase);
             }
         }
         _ => {}
@@ -106,6 +147,13 @@ mod tests {
         ));
         assert!(!check(
             serde_json::json!({"queries":[{"where":[r#"{"property":"name","operator":"equals","value":"should_change"}"#]}]})
+        ));
+        assert!(!check(serde_json::json!({"queries":[
+            {"about":[{"semantic_reference":"Python function `safe_to_refactor`"}]},
+            {"starting_from":["Rust function `should_change`"]}
+        ]})));
+        assert!(check(
+            serde_json::json!({"queries":[{"about":["high risk functions"]}]})
         ));
         assert!(check(
             serde_json::json!({"queries":[{"facts":["safe_to_refactor"]}]})

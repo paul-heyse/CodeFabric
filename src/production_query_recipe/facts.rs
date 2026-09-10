@@ -529,13 +529,19 @@ pub(crate) fn validate_canonical_fact_references(
             _ => continue,
         };
         for reference in references {
+            if let SemanticReference::Phrase(value) = reference
+                && crate::fabric::programmatic_ingress_port::code_literals::named_subject(value)
+                    .is_some()
+            {
+                continue;
+            }
             if let SemanticReference::PriorResult(prior) = reference
                 && prior.select == ResultRole::Entities
             {
                 continue;
             }
             let SemanticReference::Entity { entity_id } = reference else {
-                return Err("subject-bound facts require canonical entity IDs or typed entity results; phrase and fact subject resolution is unavailable".to_owned());
+                return Err("subject-bound facts require canonical entity IDs, typed entity results or supported backtick-quoted names; other phrase and fact subject resolution is unavailable".to_owned());
             };
             let slug = entity_id
                 .split(':')

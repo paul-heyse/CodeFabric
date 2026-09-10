@@ -22,6 +22,49 @@ pub(crate) enum TextComparison {
     NotEqual,
 }
 
+/// Ingress separates controlled kind selection from a literal name before native lowering.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct NamedEntityPredicate {
+    pub selector: String,
+    pub predicate: TextPropertyPredicate,
+}
+
+impl NamedEntityPredicate {
+    pub(crate) fn expression(
+        value: &SemanticClauseValue,
+        fields: &BTreeMap<Arc<str>, FieldId>,
+    ) -> Result<ScalarExpression, String> {
+        let SemanticClauseValue::Text(value) = value else {
+            return Err("named entity predicate is not text".into());
+        };
+        let named: Self =
+            serde_json::from_str(value).map_err(|_| "invalid named entity predicate")?;
+        if !matches!(named.predicate.property.as_str(), "name" | "qualified name")
+            || !matches!(named.predicate.operator, TextComparison::Equal)
+        {
+            return Err("named subjects require literal name equality".into());
+        }
+        let selector = fields
+            .get("selector")
+            .ok_or("entity selector field is unavailable")?;
+        let name = named.predicate.lower(fields)?;
+        Ok(ScalarExpression::Call {
+            operator: ScalarOperator::And,
+            arguments: vec![
+                ScalarExpression::Call {
+                    operator: ScalarOperator::Equal,
+                    arguments: vec![
+                        ScalarExpression::Field(selector.clone()),
+                        ScalarExpression::Literal(ScalarValue::Utf8(Some(named.selector))),
+                    ],
+                },
+                name,
+            ],
+        })
+    }
+}
+
 impl TextPropertyPredicate {
     pub(crate) fn parse(value: &str) -> Result<Self, String> {
         serde_json::from_str(value).map_err(|_| {
@@ -36,7 +79,11 @@ impl TextPropertyPredicate {
         let SemanticClauseValue::Text(value) = value else {
             return Err("text property predicate is not text".into());
         };
-        let predicate = Self::parse(value)?;
+        Self::parse(value)?.lower(fields)
+    }
+
+    fn lower(&self, fields: &BTreeMap<Arc<str>, FieldId>) -> Result<ScalarExpression, String> {
+        let predicate = self;
         let field = fields
             .get(predicate.property.as_str())
             .ok_or("property is unavailable in the selected result meaning")?;

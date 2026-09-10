@@ -48,6 +48,39 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The named-subject continuation passes installed-client validation after `ff89d115`. Facts,
+relationships and source accept supported backtick-quoted declaration/module names, including
+structured `semantic_reference` objects. The compiler selects canonical entities by kind and
+literal name, then uses native identity/context semi-joins and distinct unions with explicit/prior
+subjects. Existing entity-subject inputs are filtered directly. Absent named input compiles to
+false; ambiguous namespace candidates remain separate. Source processing retains the named
+language/family, and manifests record the resolved subject predicate.
+
+The expanded 18-block positive/negative installed-client and exact-reopen scenario passes in
+109.83 s; canonical fact-family retrieval passes in 113.87 s (`/tmp/codefabric-p03-named-native-7.log`,
+sequential execution). Existing prior-entity reuse (58.09 s), relationships/occurrence source
+(145.90 s) and the eight-form authorized-child scenario also pass
+(`/tmp/codefabric-p03-named-native-6.log`). That parallel run exposed a fixture expectation for the
+Rust exact span (its provider span is the signature) and hit the fact-family runner's 120-second
+bound. The corrected authored-span expectation passes; fact-family validation now has the same
+finite five-minute runner bound as the other expanded public-query scenarios.
+
+Initial runs 1/2 exposed duplicate selector declarations in diagnostic-fact programs; the new path
+now reuses them. Runs 3/4 then found schema-level metadata drift after native empty-union branch
+elimination; all output fields matched. A focused native reproduction also caught physical
+projection pushdown discarding an identity metadata projection. The child retains the compiler's
+logical metadata envelope and applies native `ProjectionExec::try_new_with_schema_metadata` after
+physical optimization. Field metadata/types/nullability and final schemas remain exact; buffers
+remain native Arrow. The reproduction passes (`/tmp/codefabric-p03-named-metadata-unit-3.log`).
+Compact recipe/port failure diagnostics now expose activation composition causes in daemon logs.
+
+All 43 affected cache/child-authority/recipe/ingress/source-scope cases pass (0.40 s,
+`/tmp/codefabric-p03-named-final-units.log`). Default/featureless root checks pass
+(`/tmp/codefabric-p03-named-final-root-check.log`). Affected Clippy has no new-file/changed-line
+findings (`/tmp/codefabric-p03-named-final-clippy.jsonl`); the existing backlog remains. Documentation,
+spelling and diff checks pass. Broad reference and source-location meanings, directives, source/
+syntax scope and independent branch failure remain P03 work; no package exit is claimed.
+
 The literal/filter continuation now separates quoted identifiers from entity-kind phrases. For
 example, a Rust function request with a backtick-quoted `target` becomes a declaration meaning and a
 literal name predicate; all namespace-qualified matches remain candidates. Native DataFusion
@@ -76,8 +109,7 @@ wire classification. `literal-identifiers` resolves to exactly one native case.
 Default/featureless root checks and focused tooling tests/lint pass. Final affected Clippy
 (`/tmp/codefabric-p03-literals-final-clippy-2.jsonl`) reports no new-file/changed-line findings;
 the existing repository backlog remains. Documentation/link, spelling and diff checks pass.
-Broader literal reference subjects, source/syntax
-meanings, scope/projection/directive behavior and independent branch failure remain P03 work.
+Broader reference subjects, source/syntax meanings, scope/projection/directive behavior and independent branch failure remain P03 work.
 
 The source continuation extends exact captured source descriptors to call/reference/import
 occurrences, lexical references and Python modules. Native exact-pin joins and span/provenance

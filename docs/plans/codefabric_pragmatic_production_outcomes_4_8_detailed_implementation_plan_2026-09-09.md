@@ -612,6 +612,26 @@ planning §43/§44 and resolved DataFusion 55 `Expr::Like`/`Like::new` APIs guid
 field authority. This remains a P03 continuation; broader scopes, reference subjects, directives,
 source/syntax meanings and independent block failures are not closed.
 
+**P03 named subjects pass native validation, 2026-09-10.** Supported quoted declaration
+and module names now reuse the first-four canonical selector in facts, relationships and source.
+Kind/name predicates are literal typed operands; native identity/context semi-joins preserve the
+selected epoch and all candidates. Named, explicit and prior subjects form a distinct union.
+No named input produces an explicit false predicate. Source processing infers known language and
+family; resolved subject predicates are retained in the manifest. Native DataFusion filter/join
+APIs and the planning reference §43 guide this extension without a separate resolution executor.
+Initial installed startup exposed duplicate selector declarations in diagnostic-family programs;
+the integration now reuses them and directly filters already-bound entity subjects. Native union
+branch elimination also changes schema-level metadata. The child preserves the compiled logical
+envelope and defers its native physical metadata projection until after optimization, maintaining
+exact field and final schema checks. Resolved DataFusion 55 `Projection::try_new_with_schema`,
+`ProjectionExec::try_new_with_schema_metadata` and the physical projection optimizer establish the
+required seam. The 18-block installed-client positive/negative scenario and exact reopen pass
+(109.83 s), as do canonical fact families (113.87 s), existing prior-entity/relationship scenarios,
+the eight-form child execution and all 43 affected units. Default/featureless root checks pass;
+affected Clippy has no new findings. STATUS records exact evidence, corrected fixture/runner bounds
+and the focused native metadata reproduction. This does not close source-location/fact references,
+broad directives, or independent branch failures.
+
 **Next:** remaining first-four scopes/meanings, precise dependency scope and independent block
 execution/failure, then proceed to P04 in package order.
 Full source/syntax selection and remaining P03 acceptance are still open.

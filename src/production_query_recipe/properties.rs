@@ -10,11 +10,10 @@ pub(super) fn install(
     programs: &mut BTreeMap<(ReleasedSemanticForm, Arc<str>), ProductionSemanticFormProgram>,
 ) {
     for program in programs.values_mut() {
-        let Some(filter) = program
-            .operators
-            .iter()
-            .find(|node| matches!(node.operator, ProgramRelationalOperator::Filter))
-        else {
+        let Some(filter) = program.operators.iter().find(|node| {
+            matches!(node.operator, ProgramRelationalOperator::Filter)
+                && !node.node_id.ends_with(".named-filter")
+        }) else {
             continue;
         };
         let properties = filter
@@ -121,6 +120,10 @@ pub(crate) fn validate_inputs(
                                     | "constructor-constant"
                             )
                         )
+                }
+                R::Phrase(value) => {
+                    crate::fabric::programmatic_ingress_port::code_literals::named_subject(value)
+                        .is_some_and(|named| supported(&named.selector, source))
                 }
                 _ => false,
             })

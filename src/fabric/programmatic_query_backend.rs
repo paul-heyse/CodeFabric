@@ -1805,7 +1805,10 @@ fn resolved_semantic_selections(
             SemanticClauseValue::Int64(value) => serde_json::json!(value),
             SemanticClauseValue::UInt64(value) => serde_json::json!(value),
             SemanticClauseValue::Text(value)
-                if selection.selection_id.as_ref() == "selection.where" =>
+                if matches!(
+                    selection.selection_id.as_ref(),
+                    "selection.where" | "selection.named-subject"
+                ) =>
             {
                 serde_json::from_str(value).unwrap_or_else(|_| serde_json::json!(value))
             }

@@ -1177,6 +1177,10 @@ pub(crate) mod property_predicate;
 /// Program selection remains an ingress-validated dependency; it creates no artificial fact column.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EpochBoundSelectionTarget {
+    /// Named subjects select canonical entities; an absent selection admits no subjects.
+    NamedEntities {
+        fields: BTreeMap<Arc<str>, FieldId>,
+    },
     /// Literal property predicates use only the selected program's semantic field map.
     TextProperties {
         fields: BTreeMap<Arc<str>, FieldId>,
@@ -4857,7 +4861,8 @@ fn validate_epoch_execution_catalog<'a>(
             EpochBoundSelectionTarget::Predicate { input_field_id, .. } => {
                 !input.output_fields.contains(input_field_id)
             }
-            EpochBoundSelectionTarget::TextProperties { fields } => {
+            EpochBoundSelectionTarget::TextProperties { fields }
+            | EpochBoundSelectionTarget::NamedEntities { fields } => {
                 fields.is_empty()
                     || fields
                         .values()
@@ -5384,6 +5389,16 @@ fn lower_epoch_execution_program(
                         })
                         .collect::<Vec<_>>();
                     let mut value_predicates = VecDeque::new();
+                    if values.is_empty()
+                        && matches!(
+                            binding.target,
+                            EpochBoundSelectionTarget::NamedEntities { .. }
+                        )
+                    {
+                        value_predicates.push_back(ScalarExpression::Literal(
+                            ScalarValue::Boolean(Some(false)),
+                        ));
+                    }
                     for value in values {
                         dependencies.insert(SemanticCompilerDependency::EpochBoundSelection {
                             selection_id: Arc::clone(&binding.selection_id),
@@ -5406,6 +5421,20 @@ fn lower_epoch_execution_program(
                             EpochBoundSelectionTarget::TextProperties { fields } => {
                                 value_predicates.push_back(
                                     property_predicate::TextPropertyPredicate::expression(
+                                        &value.value,
+                                        fields,
+                                    )
+                                    .map_err(|detail| {
+                                        EpochBoundSemanticCompileError::InvalidNode {
+                                            node: binding.operator_node_id.to_string(),
+                                            detail,
+                                        }
+                                    })?,
+                                );
+                            }
+                            EpochBoundSelectionTarget::NamedEntities { fields } => {
+                                value_predicates.push_back(
+                                    property_predicate::NamedEntityPredicate::expression(
                                         &value.value,
                                         fields,
                                     )

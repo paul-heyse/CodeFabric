@@ -1130,6 +1130,7 @@ fn retained_logical_capabilities(plan: &LogicalPlan) -> Vec<RetainedLogicalCapab
 pub(super) struct CachedLogicalPlan {
     compiled_plan: LogicalPlan,
     optimized_plan: LogicalPlan,
+    deferred_result_metadata: bool,
     output_schema: SchemaRef,
     observations: CompilationObservations,
     compiled_plan_digest: [u8; 32],
@@ -1178,6 +1179,7 @@ impl CachedLogicalPlan {
         Self {
             compiled_plan,
             optimized_plan,
+            deferred_result_metadata: false,
             output_schema,
             observations,
             compiled_plan_digest,
@@ -1196,6 +1198,28 @@ impl CachedLogicalPlan {
     #[must_use]
     pub(super) const fn optimized_plan(&self) -> &LogicalPlan {
         &self.optimized_plan
+    }
+
+    /// The owner inserts this identity projection after logical optimization. Materialize its
+    /// metadata only after physical optimization, which otherwise removes identity projections.
+    pub(super) fn with_deferred_result_metadata(mut self, deferred: bool) -> Self {
+        assert!(!deferred || matches!(self.optimized_plan, LogicalPlan::Projection(_)));
+        self.deferred_result_metadata = deferred;
+        self
+    }
+
+    pub(super) fn physical_planning_plan(&self) -> &LogicalPlan {
+        if self.deferred_result_metadata
+            && let LogicalPlan::Projection(projection) = &self.optimized_plan
+        {
+            &projection.input
+        } else {
+            &self.optimized_plan
+        }
+    }
+
+    pub(super) const fn deferred_result_metadata(&self) -> bool {
+        self.deferred_result_metadata
     }
 
     #[must_use]
@@ -1226,6 +1250,7 @@ impl CachedLogicalPlan {
     fn same_materialization(&self, other: &Self) -> bool {
         self.compiled_plan == other.compiled_plan
             && self.optimized_plan == other.optimized_plan
+            && self.deferred_result_metadata == other.deferred_result_metadata
             && self.compiled_capabilities == other.compiled_capabilities
             && self.optimized_capabilities == other.optimized_capabilities
             && self.output_schema == other.output_schema
