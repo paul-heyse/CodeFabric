@@ -132,9 +132,9 @@ slow-timeout = { period = "60s", terminate-after = 5 }
 # native stack and reopen it. Source authorization additionally revokes a retained page and
 # waits for a source/semantic successor before reading old bytes. Keep a finite outer bound.
 [[profile.default.overrides]]
-filter = 'test(relationship_queries::) | test(pragmatic_literal_identifiers_and_property_filters_survive_public_reopen) | test(pragmatic_source_boundaries_narrow_first_four_forms_and_survive_reopen) | test(fact_families::) | test(pragmatic_syntax_nodes_properties_parents_and_source_survive_public_reopen) | test(location_queries::) | test(ordering_queries::) | test(branch_queries::) | test(pragmatic_public_source_context_is_exact_and_separately_authorized)'
+filter = 'test(first_release::) | test(relationship_queries::) | test(pragmatic_literal_identifiers_and_property_filters_survive_public_reopen) | test(pragmatic_source_boundaries_narrow_first_four_forms_and_survive_reopen) | test(fact_families::) | test(pragmatic_syntax_nodes_properties_parents_and_source_survive_public_reopen) | test(location_queries::) | test(ordering_queries::) | test(branch_queries::) | test(pragmatic_public_source_context_is_exact_and_separately_authorized)'
 slow-timeout = { period = "60s", terminate-after = 5 }
 
 [[profile.ci.overrides]]
-filter = 'test(relationship_queries::) | test(pragmatic_literal_identifiers_and_property_filters_survive_public_reopen) | test(pragmatic_source_boundaries_narrow_first_four_forms_and_survive_reopen) | test(fact_families::) | test(pragmatic_syntax_nodes_properties_parents_and_source_survive_public_reopen) | test(location_queries::) | test(ordering_queries::) | test(branch_queries::) | test(pragmatic_public_source_context_is_exact_and_separately_authorized)'
+filter = 'test(first_release::) | test(relationship_queries::) | test(pragmatic_literal_identifiers_and_property_filters_survive_public_reopen) | test(pragmatic_source_boundaries_narrow_first_four_forms_and_survive_reopen) | test(fact_families::) | test(pragmatic_syntax_nodes_properties_parents_and_source_survive_public_reopen) | test(location_queries::) | test(ordering_queries::) | test(branch_queries::) | test(pragmatic_public_source_context_is_exact_and_separately_authorized)'
 slow-timeout = { period = "60s", terminate-after = 5 }

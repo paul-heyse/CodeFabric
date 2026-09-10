@@ -19,6 +19,9 @@ CASES = {
     "reopen": "wp63_ops_installed_restart_reconstructs_only_exact_activation_authority",
     "cancellation": "wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation",
     "rust-failure": "pragmatic_rust_target_failure_retains_other_targets",
+    "first-release-queries": (
+        "first_release::pragmatic_plan_corpus_first_four_forms_and_independent_expectations_survive_reopen"
+    ),
     "canonical-diagnostics": "pragmatic_all_rust_targets_failed_retains_diagnostics_and_source",
     "canonical-python-references": "semantic_references::pragmatic_python_canonical_modules_imports_references_and_reopen",
     "canonical-python-types": "types::pragmatic_python_canonical_structural_types_and_reopen",
@@ -132,6 +135,7 @@ def main(argv=None) -> int:
                     600
                     if name
                     in {
+                        "first-release-queries",
                         "mixed-clean-live",
                         "python-context-live",
                         "python-stubs-live",

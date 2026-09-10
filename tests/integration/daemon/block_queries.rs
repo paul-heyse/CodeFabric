@@ -1,5 +1,14 @@
 use super::*;
 
+pub(super) fn hex_bytes(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(encoded, "{byte:02x}").unwrap();
+    }
+    encoded
+}
+
 pub(super) fn resource_bytes(report: &Value, step: &str) -> Vec<u8> {
     let item = &modern_step(report, step)[0];
     if let Some(blob) = item["blob"].as_str() {
@@ -11,10 +20,30 @@ pub(super) fn resource_bytes(report: &Value, step: &str) -> Vec<u8> {
 
 pub(super) fn block_rows(report: &Value, page: usize) -> Vec<Value> {
     let bytes = resource_bytes(report, &format!("page{page}"));
-    let batches = arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None)
-        .unwrap()
-        .map(Result::unwrap)
-        .collect::<Vec<_>>();
+    let reader =
+        arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None).unwrap();
+    let schema = reader.schema();
+    if let Ok(subject) = schema.field_with_name("related_subject_id") {
+        let role = codefabric::schema_contract::SEMANTIC_ROLE_METADATA_KEY;
+        assert_eq!(subject.metadata()[role], "semantic.source.related-subject");
+        let public_ids = schema
+            .fields()
+            .iter()
+            .filter(|field| {
+                field
+                    .metadata()
+                    .get(role)
+                    .is_some_and(|value| value == "semantic.entity.public-identity")
+            })
+            .map(|field| field.name().as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            public_ids,
+            ["public_entity_id"],
+            "the returned occurrence owns the reusable identity"
+        );
+    }
+    let batches = reader.map(Result::unwrap).collect::<Vec<_>>();
     let mut writer = arrow::json::WriterBuilder::new()
         .with_explicit_nulls(true)
         .build::<_, arrow::json::writer::JsonArray>(Vec::new());
@@ -23,6 +52,63 @@ pub(super) fn block_rows(report: &Value, page: usize) -> Vec<Value> {
         .unwrap();
     writer.finish().unwrap();
     serde_json::from_slice(&writer.into_inner()).unwrap()
+}
+
+pub(super) fn resource_query(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    request: &Value,
+) -> (Value, BTreeMap<String, Vec<Value>>) {
+    let scenario = modern_client_scenario(
+        fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id":"query","operation":"call_tool","name":"query_code_graph","arguments":{"request":request,"delivery":"resource"}},
+            {"id":"manifest","operation":"read_resource","uri":{"$ref":"query.structured_content.manifest.uri"}}
+        ]),
+    );
+    let path = write_modern_client_scenario(fixture, phase, &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    let result = modern_structured(modern_step(&report, "query"));
+    assert_eq!(result["execution_state"], "SUCCEEDED", "{result}");
+    for block in result["query_results"].as_array().unwrap() {
+        assert_ne!(block["execution_state"], "FAILED", "{block}");
+    }
+    let manifest: Value = serde_json::from_slice(&resource_bytes(&report, "manifest")).unwrap();
+    let pages = result["pages"].as_array().unwrap();
+    assert!(pages.len() <= 128);
+    let steps = pages
+        .iter()
+        .enumerate()
+        .map(|(i, p)| json!({"id":format!("page{i}"),"operation":"read_resource","uri":p["uri"]}))
+        .collect::<Vec<_>>();
+    let scenario = modern_client_scenario(fixture, stack, "policy-one", json!([]), json!(steps));
+    let path = write_modern_client_scenario(fixture, &format!("{phase}-pages"), &scenario);
+    let page_report = modern_client_report(&run_modern_client(stack, &path));
+    let mut rows: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    for block in manifest["canonical_semantic_response"]["queries"]
+        .as_array()
+        .unwrap()
+    {
+        let relation = manifest["relations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["relation_id"] == block["relation_id"])
+            .unwrap();
+        let start = usize::try_from(relation["page_start"].as_u64().unwrap()).unwrap();
+        let count = usize::try_from(relation["page_count"].as_u64().unwrap()).unwrap();
+        rows.insert(
+            block["query_id"].as_str().unwrap().to_owned(),
+            (start..start + count)
+                .flat_map(|i| block_rows(&page_report, i))
+                .collect(),
+        );
+    }
+    (report, rows)
 }
 
 fn repeated_blocks(fixture: &ProductionFixture, stack: &InstalledProductionStack, phase: &str) {

@@ -175,6 +175,7 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "case",
     [
+        "first-release-queries",
         "mixed-clean-live",
         "python-context-live",
         "python-stubs-live",

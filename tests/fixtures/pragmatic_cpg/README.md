@@ -6,4 +6,12 @@
 
 `analysis_cases.json` preserves the source examples and target fact/absence expectations from the retired runtime proof program. The Rust test currently exercises real syntax and explicit missing-analysis scope for its branch, loop, return and nested-callable cases. The target semantic assertions still need the outcome 7 analysis adapter; they are not claimed to pass today.
 
-Current harness support and runtime-dependent adapters are described in [product tooling](../../../tooling/product/README.md). These fixtures do not claim the current daemon already provides the expected semantics. Extend them alongside the production backlog; no automatically accepted snapshots or generated expectations.
+The `first-release-queries` case in [product tooling](../../../tooling/product/README.md) now copies
+this workspace and reads `expectations.json` through the installed Python/Rust provider, daemon and
+FastMCP stack. All four initial forms, declarations, parameter/return types, imports, resolved and
+unknown calls, definition bytes/positions and exact reopen pass (2026-09-10). The test preserves
+canonical identities and validates disclosure-bound source handles separately. Optional exhaustion
+observations remain optional; source-authored expectations establish the required facts.
+
+The edit corpus and advanced `analysis_cases.json` remain separate acceptance work. Extend them
+alongside the production backlog; no automatically accepted snapshots or generated expectations.

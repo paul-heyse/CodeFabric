@@ -40,6 +40,7 @@ mod location_queries;
 mod ordering_queries;
 mod branch_queries;
 mod types;
+mod first_release;
 
 struct InstalledProductionStack {
     _root: tempfile::TempDir,
