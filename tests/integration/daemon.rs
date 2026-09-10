@@ -3169,6 +3169,7 @@ enum RustFixtureDependency {
     Directory,
 }
 
+#[cfg(target_os = "linux")]
 fn rust_semantics_publication(dependency: Option<RustFixtureDependency>, with_failure: bool) {
     let with_dependency = dependency.is_some();
     let fixture = if with_failure {
