@@ -56,6 +56,7 @@ pub(super) fn dependencies(pyrefly: bool, rust: super::RustInputs) -> Vec<&'stat
         super::semantic_references::RELATION,
         super::imports::RELATION,
         super::types::OBSERVATION,
+        super::types::CALLABLE,
         super::types::GRAPH,
         super::types::RUST_GRAPH,
         super::DECLARATION,
@@ -333,6 +334,7 @@ fn qualify_references(
         (super::types::GRAPH, Some("python")),
         (super::types::RUST_GRAPH, Some("rust")),
         (super::types::OBSERVATION, None),
+        (super::types::CALLABLE, None),
     ] {
         let observations = plan(inputs, relation)?;
         let observations = if let Some(language) = language {

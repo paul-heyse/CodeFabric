@@ -73,6 +73,13 @@ pub(crate) const FAMILIES: &[Family] = &[
         keys: Some(("file_id", "file_id")),
     },
     Family {
+        slug: "callable-types",
+        relation: "fact.code_callable_type",
+        meaning: "parameter and return type observations",
+        coverage: "types",
+        keys: Some(("owner_entity_id", "entity_id")),
+    },
+    Family {
         slug: "diagnostics",
         relation: "fact.code_diagnostic",
         meaning: "diagnostic messages in analysis contexts",

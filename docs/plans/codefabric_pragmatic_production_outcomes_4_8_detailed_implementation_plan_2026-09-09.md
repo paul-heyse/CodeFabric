@@ -933,6 +933,33 @@ relational writes unfinished after 93.22 s). This mixed fixture now uses the exi
 Broader Find scopes, specialization subjects, owned parameter/return/member facts and full P03
 acceptance remain open.
 
+**P03 callable parameter/return observations pass native validation, 2026-09-10.**
+Expose a canonical owner-scoped relation over existing native structures. Pyrefly reference §10.1
+(whole-file extraction) and §12.2 (structured type access) support reusing the single native type
+walk; pinned `query/type_graph.rs` supplies `Type::Function`, `FunctionKind::definition_id`,
+`KeyUndecoratedFunctionRange` and native `Callable.params`/`ret`. Join those exact definition
+anchors and canonical component rows by context, workspace, run, digest, generation, file and local
+index. Rust MIR reference §8 (Body anatomy) and §9 (locals and arguments), checked against the
+pinned `rustc_public` consumer, justify the MIR argument/return slot mapping. These retain compiler owner,
+compilation unit and native type-key provenance. Do not label these observed types as a complete
+source signature or parse native display strings.
+
+The new `fact.code_callable_type` relation exposes role, ordinal, structural type ID, parameter
+kind/name/requiredness when known, evidence kind and unknown reasons. Public `parameter and return
+type observations` uses an exact owner semi join and existing prior-entity materialization. Native
+DataFusion left anti joins emit unknown rows for canonical functions/methods with no callable
+evidence, and existing type-processing qualification counts those gaps. Existing raw/type schemas
+and provider frames remain unchanged; old epochs simply lack this family program. Focused
+context/workspace/owner isolation and all 29 canonical/recipe cases pass, along with
+default/featureless checks and affected Clippy. The first native run passes initial family retrieval
+and independent Python type assertions before a Rust qualified-name fixture lookup failure; the
+lookup is corrected. The final installed run passes in 167.659 s, independently matching Python
+`int` and Rust `u8` type identities for parameters/returns, selecting exact owners from prior
+FindEntities blocks, and preserving every fact across exact-version reopen. The mixed fixture
+uses the existing separate 180-second preparation helper. STATUS records commands, logs and the
+remaining startup qualification limit. Full declaration signatures, members, callable specializations,
+update/clean acceptance and P03/P06 remain open.
+
 **Next:** remaining first-four scopes/meanings, reusable subject roles and precise dependency
 scope, then proceed to P04 in package order.
 Full source/syntax selection and remaining P03 acceptance are still open.
@@ -1201,7 +1228,7 @@ Implement compositional typed plans for:
 | RetrieveFacts | Family-selected joins, properties, provenance and point/context filters; expanded family scope for broad requests | Parameter/return types, members, call resolution and unknown reasons from actual semantic providers |
 | RetrieveSourceContext | Exact snapshot source descriptors and independent disclosure authorization; byte/line bounds and syntax joins | Correct source span after current disk changes, Unicode positions and exact omitted bytes on truncation |
 
-FindEntities now uses canonical declaration semantics, including Python class/parameter/binding/import/type-alias/type-parameter and Rust constant/static queries. P03 additionally exposes Python/Rust call, semantic-reference and import occurrences through an explicit occurrence-capable snapshot profile. New results carry reusable public entity IDs; installed clients use them for declaration fact retrieval. Guard choices have readable labels without changing their submitted opaque identities. Retain that path and extend its remaining kinds/scopes. Reuse the existing form/request infrastructure but remove assumptions that a form can exist only when every producer is globally complete. Unsupported semantic meanings must yield a typed gap, never a syntax/name fallback.
+FindEntities now uses canonical declaration semantics, including Python class/parameter/binding/import/type-alias/type-parameter and Rust constant/static queries. P03 additionally exposes Python/Rust call, semantic-reference and import occurrences through an explicit occurrence-capable snapshot profile. New results carry reusable public entity IDs; installed clients use them for declaration fact retrieval. Guard choices have readable labels without changing their submitted opaque identities. Owner-scoped Python callable and Rust MIR parameter/return observations now pass public prior-result consumption and exact reopen with independent primitive type identities. Retain that path and extend its remaining kinds/scopes. Reuse the existing form/request infrastructure but remove assumptions that a form can exist only when every producer is globally complete. Unsupported semantic meanings must yield a typed gap, never a syntax/name fallback.
 
 Connect `tests/fixtures/pragmatic_cpg/expectations.json` to `tests/integration/daemon.rs` and the modern client driver. Use the existing registered-supervisor fixture and installed provider binaries. Check at least one real Pyrefly and one real rustc semantic result through the public adapter, plus partial and empty cases. This closes the static mixed-language vertical, while the first useful release still awaits outcome 6.
 

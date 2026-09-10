@@ -1,5 +1,6 @@
 //! Canonical structural types and source propositions over admitted native type graphs.
 
+mod callable;
 mod normalize;
 mod rust;
 mod udf;
@@ -21,6 +22,7 @@ pub(super) const RUST_GRAPH: &str = rust::GRAPH;
 pub(super) const TYPE: &str = "fact.code_type";
 pub(super) const OBSERVATION: &str = "fact.code_type_observation";
 pub(super) const COMPONENT: &str = "fact.code_type_component";
+pub(super) const CALLABLE: &str = "fact.code_callable_type";
 
 #[derive(Clone, Copy)]
 #[allow(
@@ -52,6 +54,7 @@ pub(super) enum Relation {
     Type,
     Observation,
     Component,
+    Callable,
 }
 
 impl Relation {
@@ -62,11 +65,13 @@ impl Relation {
             Self::Type => TYPE,
             Self::Observation => OBSERVATION,
             Self::Component => COMPONENT,
+            Self::Callable => CALLABLE,
         }
     }
 
     pub fn fields(self) -> Vec<FieldSpec> {
         match self {
+            Self::Callable => callable::fields(),
             Self::Graph => graph::fields(),
             Self::RustGraph => rust::fields(),
             Self::Type => vec![
@@ -130,6 +135,18 @@ impl Relation {
 
     pub fn dependencies(self, available: Inputs) -> Vec<&'static str> {
         let mut result = match self {
+            Self::Callable => {
+                let mut dependencies = vec![DECLARATION, OBSERVATION];
+                if available.python {
+                    dependencies.extend([
+                        SOURCE,
+                        RUN,
+                        COMPONENT,
+                        PyreflyRelation::TypeNode.relation_id(),
+                    ]);
+                }
+                dependencies
+            }
             Self::Graph if available.python => vec![
                 SOURCE,
                 RUN,
@@ -182,6 +199,7 @@ impl Relation {
         available: Inputs,
     ) -> Result<LogicalPlan, TransformationPlanError> {
         match self {
+            Self::Callable => callable::build(inputs, available.python),
             Self::Graph if available.python => graph::build(inputs),
             Self::Graph => empty(self.fields()),
             Self::RustGraph => rust::build(workspace, inputs, available.rust),

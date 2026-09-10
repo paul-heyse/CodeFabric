@@ -119,25 +119,33 @@ fn record(alias: &str, fields: &[&str]) -> Expr {
     )
 }
 
+pub(super) fn definition_nodes(
+    inputs: &TransformationInputs,
+) -> Result<LogicalPlanBuilder, TransformationPlanError> {
+    Ok(
+        accepted(raw(inputs, PyreflyRelation::TypeNode)?, inputs)?.join_on(
+            definitions(inputs)?,
+            JoinType::Left,
+            vec![
+                col("r.context_id").eq(col("d.context_id")),
+                file_id_udf()
+                    .call(vec![col("p.definition_file_id")])
+                    .eq(col("d.file_id")),
+                col("p.definition_content_digest").eq(col("d.content_digest")),
+                col("p.source_generation").eq(col("d.source_generation")),
+                col("p.definition_start_byte").eq(col("d.start_byte")),
+                col("p.definition_end_byte").eq(col("d.end_byte")),
+            ],
+        )?,
+    )
+}
+
 #[allow(
     clippy::too_many_lines,
-    reason = "one graph plan keeps exact scope joins, typed aggregation and normalization together"
+    reason = "typed graph aggregation and normalization share one scope"
 )]
 pub(super) fn build(inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
-    let nodes = accepted(raw(inputs, PyreflyRelation::TypeNode)?, inputs)?.join_on(
-        definitions(inputs)?,
-        JoinType::Left,
-        vec![
-            col("r.context_id").eq(col("d.context_id")),
-            file_id_udf()
-                .call(vec![col("p.definition_file_id")])
-                .eq(col("d.file_id")),
-            col("p.definition_content_digest").eq(col("d.content_digest")),
-            col("p.source_generation").eq(col("d.source_generation")),
-            col("p.definition_start_byte").eq(col("d.start_byte")),
-            col("p.definition_end_byte").eq(col("d.end_byte")),
-        ],
-    )?;
+    let nodes = definition_nodes(inputs)?;
     let fields = [
         "local_type_index",
         "type_kind",

@@ -48,6 +48,30 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The callable-type continuation after `b6fa5af8` passes native validation. A new canonical
+`fact.code_callable_type` relation binds Python callable components through Pyrefly's native
+function-definition anchors and exact run/context/source keys, and Rust parameter/return types
+through admitted MIR owners and slots. It preserves component order, Python parameter kind/name/
+requiredness, native evidence kind and unknown reasons. Public `parameter and return type
+observations` retrieval selects the exact canonical owner; existing prior-entity consumers apply.
+
+A native anti join emits an explicit unknown for canonical functions/methods with no callable
+evidence. Those gaps qualify the existing type-processing family. A body slot is identified as
+MIR evidence; observed Python function types are not asserted to be a complete declaration-signature
+census. The new relation leaves existing persisted type schemas and provider frames unchanged.
+Default/featureless root checks pass. All 29 canonical/recipe cases pass in 13.681 s
+(`/tmp/codefabric-p03-callable-focused-all.log`), including native unknown-owner/context/workspace
+isolation and absent-provider behavior. Final affected Clippy has zero diagnostics. The first
+installed run passes all initial family retrievals and independent Python primitive/parameter
+checks, then exposes a fixture lookup that omitted Rust qualified names; the lookup is corrected.
+The final installed family/prior/reopen run passes in 167.659 s
+(`/tmp/codefabric-p03-callable-native-final.log`): independently constructed Python `int` and Rust
+`u8` identities match parameter/return facts, prior FindEntities subjects select only their owners,
+and all canonical facts remain identical after exact-version reopen. The mixed fixture uses the
+existing 180-second preparation helper. Logs retain earlier compile and plan-dependency failures,
+both corrected before this run. Final affected Clippy, docs, spelling and diff checks pass. Full
+declaration signatures, members, update/clean comparisons and the remaining P03–P14 scope stay open.
+
 The semantic-reference scope continuation after `1cba8112` adds a catalog-selected FindEntities
 program for references targeting prior or named canonical entities. DataFusion 55 left semi joins
 bind canonical target/reference IDs, exact analysis contexts and workspace identity before existing

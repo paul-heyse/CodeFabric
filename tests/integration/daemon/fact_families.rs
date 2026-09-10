@@ -1,5 +1,7 @@
 use super::*;
 
+mod callables;
+
 const FAMILIES: &[(&str, &str, &str, Option<&str>)] = &[
     ("modules", "module metadata", "modules", Some("entity_id")),
     (
@@ -61,6 +63,12 @@ const FAMILIES: &[(&str, &str, &str, Option<&str>)] = &[
         "diagnostic edits in analysis contexts",
         "diagnostic-suggestions",
         None,
+    ),
+    (
+        "callable_type",
+        "parameter and return type observations",
+        "types",
+        Some("owner_entity_id"),
     ),
 ];
 
@@ -231,7 +239,10 @@ fn pragmatic_canonical_fact_families_through_installed_clients_and_reopen() {
     .unwrap();
     let stack = InstalledProductionStack::build();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let selected = wait_for_semantic_activation_with_timeout(&fixture, Duration::from_secs(180));
     let first = public_families(&fixture, &stack, "initial");
+    callables::assert_facts(&fixture, first.last().unwrap());
+    let scoped = callables::scoped(&fixture, &stack, "initial");
     assert!(first[1].iter().any(|row| row["language"] == "python"
         && row["alias_name"] == "alias"
         && row["resolution"] == "resolved"));
@@ -255,7 +266,6 @@ fn pragmatic_canonical_fact_families_through_installed_clients_and_reopen() {
     );
     assert!(first[6].iter().any(|row| row["language"] == "python"
         && row["message"].as_str().is_some_and(|s| s.contains("str"))));
-    let selected = wait_for_semantic_activation(&fixture);
     supervisor.stop();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
     assert_eq!(
@@ -263,5 +273,6 @@ fn pragmatic_canonical_fact_families_through_installed_clients_and_reopen() {
         wait_for_semantic_activation(&fixture).table_versions()
     );
     assert_eq!(first, public_families(&fixture, &stack, "reopened"));
+    assert_eq!(scoped, callables::scoped(&fixture, &stack, "reopened"));
     supervisor.stop();
 }
