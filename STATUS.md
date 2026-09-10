@@ -48,6 +48,37 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The P03 bounded-call continuation after `04b48f22` passes installed public validation. Exact
+walks of two through eight steps return the final-hop witnesses; cumulative walks return distinct
+witnesses from every included hop. Incoming and outgoing programs use DataFusion frontier
+projections and left semi joins, retaining separate call sites without enumerating paths. Filters
+apply to every edge, and source boundaries prune every traversal input, including paths that leave
+and re-enter a selected file. Each program has its own result authority and field namespace.
+Repeated projection IDs require identical epoch lineage. Older one-step contracts remain available
+when their snapshots lack the fields needed for walks. Multi-step processing keeps broader scope
+until all visited owners can be accounted for.
+
+Storage scans now preserve their declared metadata with the existing schema identity execution
+node, including native statistics, ordering and partitioning delegation. Native projections at
+aggregate inputs after logical optimization preserve internal metadata through composed plans;
+type/nullability checks remain enabled. A direct aggregate probe reproduced the omitted-metadata
+failure before the fix. Eight focused metadata/provider checks now pass, including exact native
+walk edges and logical field identity metadata. Nine compiler/processing checks passed in 1.359 s
+(`/tmp/codefabric-p03-distance-focused.log`). Default/featureless checks, affected Clippy (zero
+affected diagnostics), docs/navigation, spelling and diff checks pass.
+
+The installed Python/Rust walk, per-edge filters, repeated/empty priors, cycles, source-boundary
+leave/re-entry case, every advertised page and exact-version reopen pass in 191.384 s
+(`/tmp/codefabric-p03-distance-native-expected.log`). This fixture explicitly selects resolved
+call observations for its independent expected edge sets. Earlier catalog/field-namespace,
+metadata and fixture expectation failures remain in the `/tmp/codefabric-p03-distance-*.log`
+logs; the current walk passes. Validation uses the existing installed provider binaries and a
+delegated user-systemd scope. The existing first-four-form public scenario passes in 176.262 s,
+and all 11 child-session checks pass (12 total in 178.160 s), in
+`/tmp/codefabric-p03-distance-legacy-regression.log`.
+Stop conditions, transitive closure, further relationship families/directives, precise multi-step
+processing, remaining P03 source/query scope and P04–P14 remain open.
+
 The P03 owner-processing continuation after `9a5d8e0b` passes public validation. Native
 DataFusion groups associated member observations by exact class owner/workspace/context/source
 generation, counts class census rows and local unknowns, and preserves pending/failed provider

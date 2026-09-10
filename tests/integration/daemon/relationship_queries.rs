@@ -2,6 +2,7 @@ use super::block_queries::{block_rows, resource_bytes};
 use super::*;
 
 mod scopes;
+mod distance;
 
 fn occurrence_id(row: &Value, field: &str, kind: &str) -> String {
     let value = row[field].as_str().unwrap();

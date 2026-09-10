@@ -288,14 +288,9 @@ impl SchemaContractStorageProvider {
                 target.fields().len()
             )));
         }
-        // DataFusion's physical `ProjectionPushdown` deliberately removes an
-        // identity projection. A projection whose only effect is Arrow
-        // metadata would therefore be removed and then rejected as a schema
-        // metadata mismatch. Keep the native plan when values, names, and
-        // ordering already match; `TableProvider::schema` remains the logical
-        // metadata boundary, and result/resource boundaries reattach that
-        // application-owned metadata. A real storage-to-logical type cast is
-        // represented by the projection below and cannot be optimized away.
+        // Native aggregate planning validates its input metadata before any final result
+        // adaptation. The existing schema identity node keeps this exact scan contract through
+        // physical projection optimization while preserving native ordering and partitioning.
         let needs_value_projection =
             input
                 .fields()
@@ -305,7 +300,13 @@ impl SchemaContractStorageProvider {
                     storage.name() != logical.name() || storage.data_type() != logical.data_type()
                 });
         if !needs_value_projection {
-            return Ok(plan);
+            return if input == target {
+                Ok(plan)
+            } else {
+                Ok(Arc::new(
+                    super::programmatic_schema::SchemaIdentityExec::try_new(plan, target)?,
+                ))
+            };
         }
         let expressions = target
             .fields()
@@ -333,11 +334,14 @@ impl SchemaContractStorageProvider {
                 })
             })
             .collect::<datafusion::common::Result<Vec<_>>>()?;
-        Ok(Arc::new(ProjectionExec::try_new_with_schema_metadata(
+        let projected = Arc::new(ProjectionExec::try_new_with_schema_metadata(
             expressions,
             plan,
             &target,
-        )?))
+        )?);
+        Ok(Arc::new(
+            super::programmatic_schema::SchemaIdentityExec::try_new(projected, target)?,
+        ))
     }
 }
 

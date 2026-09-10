@@ -942,7 +942,7 @@ pub(super) struct IdentityPreservingViewTable {
 /// Keeping the node opaque prevents optimizer rewrites from conflating distinct
 /// relation identities while leaving the complete child plan optimizer-visible.
 #[derive(Clone, Debug)]
-struct SchemaIdentityExec {
+pub(super) struct SchemaIdentityExec {
     input: Arc<dyn ExecutionPlan>,
     schema: SchemaRef,
     properties: Arc<PlanProperties>,
@@ -951,7 +951,10 @@ struct SchemaIdentityExec {
 }
 
 impl SchemaIdentityExec {
-    fn try_new(input: Arc<dyn ExecutionPlan>, schema: SchemaRef) -> Result<Self, DataFusionError> {
+    pub(super) fn try_new(
+        input: Arc<dyn ExecutionPlan>,
+        schema: SchemaRef,
+    ) -> Result<Self, DataFusionError> {
         validate_schema_identity_shape(input.schema().as_ref(), schema.as_ref(), "planning")?;
         let equivalence = input
             .equivalence_properties()

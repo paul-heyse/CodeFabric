@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+mod distance;
 pub(crate) mod families;
 pub(crate) mod relationships;
 
@@ -26,8 +27,13 @@ pub(super) fn declarations(
 
 pub(super) fn calls(
     epoch: &ProgrammaticFabricEpoch,
-) -> Result<Option<ProductionSemanticFormProgram>, ProductionQueryRecipeError> {
-    subject_facts(epoch, true, false)
+) -> Result<Vec<ProductionSemanticFormProgram>, ProductionQueryRecipeError> {
+    let Some(program) = subject_facts(epoch, true, false)? else {
+        return Ok(Vec::new());
+    };
+    let mut programs = distance::calls(&program)?;
+    programs.push(program);
+    Ok(programs)
 }
 
 pub(super) fn source_context(

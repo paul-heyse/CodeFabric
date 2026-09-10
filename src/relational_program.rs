@@ -20,6 +20,8 @@ use datafusion::logical_expr::{Expr, ExprSchemable, JoinType, LogicalPlan, Logic
 use crate::schema_contract::{SchemaContract, SchemaRole};
 
 mod remap;
+#[cfg(all(test, feature = "daemon"))]
+mod walk_tests;
 
 /// A stable application-owned relation identity.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

@@ -15,28 +15,30 @@ use crate::relational_semantic_query::{
 };
 
 pub(crate) fn known_meaning(value: &str) -> bool {
-    matches!(
-        value,
-        "calls"
-            | "call targets"
-            | "call-targets"
-            | "call relationships"
-            | "lexical references"
-            | "lexical-references"
-            | "semantic references"
-            | "semantic-references"
-            | "imports"
-            | "syntax parents"
-            | "syntax-nodes"
-            | "incoming"
-            | "outgoing"
-            | "one relationship step"
-            | "one step"
-    )
+    super::distance::known_meaning(value)
+        || matches!(
+            value,
+            "calls"
+                | "call targets"
+                | "call-targets"
+                | "call relationships"
+                | "lexical references"
+                | "lexical-references"
+                | "semantic references"
+                | "semantic-references"
+                | "imports"
+                | "syntax parents"
+                | "syntax-nodes"
+                | "incoming"
+                | "outgoing"
+                | "one relationship step"
+                | "one step"
+        )
 }
 
 pub(crate) fn is_result(relation: &str) -> bool {
     relation.starts_with("query.result.relationship-")
+        || relation.starts_with("query.result.call-walk-")
 }
 
 pub(in crate::production_query_recipe) fn programs(

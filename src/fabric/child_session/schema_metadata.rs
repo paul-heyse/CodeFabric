@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use arrow_schema::Schema;
+use datafusion::common::tree_node::Transformed;
 use datafusion::common::{DFSchema, DataFusionError, Result};
 use datafusion::logical_expr::{Expr, LogicalPlan, Projection};
 
@@ -10,6 +11,7 @@ pub(super) fn preserve_result_metadata(
     plan: LogicalPlan,
     expected: &Schema,
 ) -> Result<(LogicalPlan, bool)> {
+    let plan = preserve_aggregate_inputs(plan)?;
     if plan.schema().fields() != expected.fields() {
         return Err(DataFusionError::Plan(
             "optimized output fields differ from the compiled result contract".into(),
@@ -43,6 +45,33 @@ pub(super) fn preserve_result_metadata(
         )?),
         true,
     ))
+}
+
+/// Native aggregate planning compares the complete logical and physical input schema. Branch
+/// pruning and physical join selection can change inherited metadata inside a composed plan.
+/// Install native identity projections after logical optimization, at the inputs where the
+/// physical planner checks that contract. `ProjectionExec` derives value types/nullability from
+/// its actual input and applies the logical metadata; the native aggregate check stays enabled.
+fn preserve_aggregate_inputs(plan: LogicalPlan) -> Result<LogicalPlan> {
+    Ok(plan
+        .transform_up_with_subqueries(|mut plan| {
+            let LogicalPlan::Aggregate(aggregate) = &mut plan else {
+                return Ok(Transformed::no(plan));
+            };
+            let input = Arc::clone(&aggregate.input);
+            aggregate.input = Arc::new(LogicalPlan::Projection(Projection::try_new_with_schema(
+                input
+                    .schema()
+                    .columns()
+                    .into_iter()
+                    .map(Expr::Column)
+                    .collect(),
+                Arc::clone(&input),
+                Arc::clone(input.schema()),
+            )?));
+            Ok(Transformed::yes(plan))
+        })?
+        .data)
 }
 
 pub(super) fn preserve_physical_metadata(

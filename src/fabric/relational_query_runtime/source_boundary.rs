@@ -193,6 +193,15 @@ impl super::SelectedQueryOutput {
             )),
             predicate: boundaries.predicate(&field("relative_path")?),
         };
+        if binding
+            .relation_id()
+            .as_str()
+            .starts_with("query.result.call-walk-")
+        {
+            // Every traversed witness must belong to the selected source universe. Filtering
+            // only the returned hop would admit paths that leave and then re-enter that universe.
+            narrow_walk_inputs(&mut self.program.root, &selected, &field("file_id")?)?;
+        }
         let predicate = E::Call {
             operator: O::Equal,
             arguments: vec![
@@ -209,6 +218,54 @@ impl super::SelectedQueryOutput {
         self.program.root = super::result_order::before_order(self.program.root, narrow);
         Ok(self)
     }
+}
+
+fn narrow_walk_inputs(
+    expression: &mut crate::relational_program::RelationalExpression,
+    selected_files: &crate::relational_program::RelationalExpression,
+    selected_file_id: &FieldId,
+) -> Result<(), String> {
+    use crate::relational_program::{JoinKind, RelationalExpression as R};
+    match expression {
+        R::Input(relation)
+            if matches!(
+                relation.as_str(),
+                "fact.code_relationship_selector" | "fact.code_call_selector"
+            ) =>
+        {
+            let input = expression.clone();
+            let R::Input(relation) = &input else {
+                unreachable!()
+            };
+            let input_file_id = FieldId::new(format!("{}.file_id", relation.as_str()))
+                .map_err(|error| error.to_string())?;
+            *expression = R::Join {
+                left: Box::new(input),
+                right: Box::new(selected_files.clone()),
+                kind: JoinKind::LeftSemi,
+                predicates: vec![E::Call {
+                    operator: O::Equal,
+                    arguments: vec![E::Field(input_file_id), E::Field(selected_file_id.clone())],
+                }],
+            };
+        }
+        R::Input(_) => {}
+        R::Projection { input, .. }
+        | R::Filter { input, .. }
+        | R::Aggregate { input, .. }
+        | R::Sort { input, .. }
+        | R::Limit { input, .. } => narrow_walk_inputs(input, selected_files, selected_file_id)?,
+        R::Join { left, right, .. } => {
+            narrow_walk_inputs(left, selected_files, selected_file_id)?;
+            narrow_walk_inputs(right, selected_files, selected_file_id)?;
+        }
+        R::Union { inputs, .. } => {
+            for input in inputs {
+                narrow_walk_inputs(input, selected_files, selected_file_id)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

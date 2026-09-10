@@ -579,9 +579,7 @@ fn compiled_released_form_programs(
         }
         programs.extend(facts::families::programs(epoch)?);
         programs.extend(facts::relationships::programs(epoch)?);
-        if let Some(program) = facts::calls(epoch)? {
-            programs.push(program);
-        }
+        programs.extend(facts::calls(epoch)?);
         if let Some(program) = facts::source_context(epoch)? {
             programs.push(program);
         }
@@ -1098,9 +1096,12 @@ fn compiled_program_result_bindings(
                 for projection in fields {
                     if projection_sources
                         .insert(projection.output_field_id.clone(), projection)
-                        .is_some()
+                        .is_some_and(|previous| previous != projection)
                     {
-                        return invalid(program, "program-result projection field is repeated");
+                        return invalid(
+                            program,
+                            "program-result projection field has conflicting lineage",
+                        );
                     }
                 }
             }
@@ -3021,6 +3022,39 @@ mod tests {
     ) -> Result<ProductionSemanticQueryRecipe, ProductionQueryRecipeError> {
         let release = crate::fabric::production_kernel::compile_test_semantic_release();
         ProductionSemanticQueryRecipe::assemble(&release, epoch, input, closure())
+    }
+
+    #[tokio::test]
+    async fn repeated_result_projection_requires_identical_epoch_lineage() {
+        let epoch = epoch().await;
+        let mut programs = compiled_released_form_programs(&epoch, &closure()).unwrap();
+        let pins = programs
+            .keys()
+            .cloned()
+            .map(|key| (key, [0x27; 32]))
+            .collect();
+        let program = programs.values_mut().next().unwrap();
+        let mut repeated = program
+            .operators
+            .iter()
+            .find(|node| matches!(node.operator, ProgramRelationalOperator::Projection { .. }))
+            .unwrap()
+            .clone();
+        repeated.node_id = Arc::from("test.repeated-projection");
+        program.operators.push(repeated);
+        assert!(compiled_program_result_bindings(&epoch, &programs, &pins).is_ok());
+        let program = programs.values_mut().next().unwrap();
+        let ProgramRelationalOperator::Projection { fields } =
+            &mut program.operators.last_mut().unwrap().operator
+        else {
+            unreachable!()
+        };
+        fields[0].input_field_id = release_field_id("test.different-epoch-lineage").unwrap();
+        assert!(matches!(
+            compiled_program_result_bindings(&epoch, &programs, &pins),
+            Err(ProductionQueryRecipeError::InvalidProgram { detail, .. })
+                if detail.contains("conflicting lineage")
+        ));
     }
 
     #[tokio::test]

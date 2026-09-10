@@ -494,9 +494,14 @@ impl EntityProcessingSnapshot {
             SemanticQueryClause::FollowRelationships {
                 starting_from,
                 direction,
+                distance,
                 ..
             } if scope.family == "call-targets"
-                && direction.as_deref().unwrap_or("outgoing") == "outgoing" =>
+                && direction.as_deref().unwrap_or("outgoing") == "outgoing"
+                && matches!(
+                    distance.as_deref(),
+                    None | Some("one step" | "one relationship step")
+                ) =>
             {
                 starting_from
             }
@@ -1230,7 +1235,19 @@ mod tests {
             (both.requested_partitions, both.remaining_partitions),
             (2, 1)
         );
-        for query in [clause(&[10, 12], "outgoing"), clause(&[10], "incoming")] {
+        let mut multiple_steps = clause(&[10], "outgoing");
+        if let crate::semantic_query_contract::SemanticQueryClause::FollowRelationships {
+            distance,
+            ..
+        } = &mut multiple_steps
+        {
+            *distance = Some("two relationship steps".into());
+        }
+        for query in [
+            clause(&[10, 12], "outgoing"),
+            clause(&[10], "incoming"),
+            multiple_steps,
+        ] {
             let mut fallback = scope();
             processing
                 .select_subject_owners(&mut fallback, &query)
