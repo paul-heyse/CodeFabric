@@ -220,6 +220,20 @@ pub struct StreamedResultPackageManifest {
     pub pages: Vec<ResultPageManifestEntry>,
 }
 
+impl StreamedResultPackageManifest {
+    pub(crate) fn requires_source_disclosure(&self) -> bool {
+        self.relations.iter().any(|relation| {
+            // Retain the historical output check. New block IDs are opaque; their sealed
+            // native input provenance carries the source dependency through output rebinding.
+            relation.relation_id == "query.result.source-context"
+                || relation.provenance.iter().any(|dependency| {
+                    dependency.kind == "relation"
+                        && dependency.identity == "source.exact_source_bytes"
+                })
+        })
+    }
+}
+
 /// Exact create/read/delete capabilities required from result object storage.
 #[async_trait]
 pub trait ResultObjectSink: fmt::Debug + Send + Sync + 'static {
@@ -2575,6 +2589,29 @@ mod tests {
         assert_eq!(paths.last(), Some(&sealed.manifest_path().to_string()));
         assert_eq!(sealed.manifest().total_rows, 5);
         assert_eq!(sealed.manifest().total_pages, 3);
+        assert!(!sealed.manifest().requires_source_disclosure());
+        let mut source_manifest = sealed.manifest().clone();
+        source_manifest.relations[0].relation_id = "query.block.opaque".into();
+        source_manifest.relations[0]
+            .provenance
+            .push(ResultProvenance {
+                kind: "relation".into(),
+                identity: "source.exact_source_bytes".into(),
+            });
+        let restored: StreamedResultPackageManifest =
+            serde_json::from_slice(&serde_json::to_vec(&source_manifest).unwrap()).unwrap();
+        assert!(restored.requires_source_disclosure());
+        source_manifest.relations[0]
+            .provenance
+            .last_mut()
+            .unwrap()
+            .kind = "field".into();
+        assert!(!source_manifest.requires_source_disclosure());
+        source_manifest.relations[0].relation_id = "query.result.source-context".into();
+        assert!(
+            source_manifest.requires_source_disclosure(),
+            "historical source outputs remain protected"
+        );
         assert!(sealed.retained_object_bytes() > sealed.manifest().total_bytes);
 
         let (epoch, query, lease) = pins();
@@ -2721,6 +2758,7 @@ mod tests {
                 languages: vec!["rust".to_owned()],
                 next_offset: None,
                 remainder: vec![ProcessingRemainder {
+                    fact_family: None,
                     language: "rust".to_owned(),
                     scope_kind: "cargo_target".to_owned(),
                     path: None,

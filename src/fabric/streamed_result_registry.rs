@@ -911,9 +911,7 @@ impl StreamedResultRegistry {
                         .as_ref()
                         .ok_or(StreamedResultRegistryError::Released)?
                         .manifest()
-                        .relations
-                        .iter()
-                        .any(|relation| relation.relation_id == "query.result.source-context")
+                        .requires_source_disclosure()
                     {
                         let authority = super::source_disclosure::SourceDisclosureAuthority::new(
                             self.source_disclosure_reader

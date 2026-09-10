@@ -376,7 +376,8 @@ impl Canonical {
             fields,
         );
         if matches!(kind, Kind::SourceContext { .. }) {
-            output = output.with_semantic_role("canonical.source-context.line-window");
+            output =
+                output.with_semantic_role(crate::production_query_recipe::SOURCE_OCCURRENCES_ROLE);
         }
         if matches!(kind, Kind::Entity) {
             // Kept distinct from the predecessor Ruff-only role until scoped public queries
@@ -1177,6 +1178,7 @@ mod tests {
     mod rust_references;
     mod rust_types;
     mod semantic_references;
+    mod source_context;
     mod types;
     use super::*;
     use crate::fabric::epoch_runtime::{FabricEpochId, FabricEpochRuntimeConfig};

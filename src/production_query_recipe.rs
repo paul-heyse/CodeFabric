@@ -61,6 +61,8 @@ const PRODUCTION_SEMANTIC_QUERY_RELEASE_ID: &str =
 const RELEASE_FACTUAL_SEMANTIC_CLASS_ID: &str = "semantic.fact.v2";
 const RELEASE_SELECTION_MAXIMUM_VALUES: usize = 64;
 
+pub(crate) const SOURCE_OCCURRENCES_ROLE: &str = "canonical.source-context.occurrences.v1";
+
 pub(crate) const CANONICAL_OCCURRENCE_SELECTOR_ROLE: &str =
     "canonical.entity-selector.occurrences.v1";
 

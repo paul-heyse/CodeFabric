@@ -1394,6 +1394,35 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                         Ok(scope) => scope,
                         Err(error) => return failed(&artifacts, "processing_scope", error),
                     };
+                let mut occurrence_sources = false;
+                if source_context {
+                    let clause = request
+                        .parsed()
+                        .request
+                        .queries
+                        .iter()
+                        .find(|clause| clause.query_id() == query_id.as_ref())
+                        .expect("compiled source clause");
+                    occurrence_sources = authority
+                        .epoch()
+                        .relation(&ProgrammaticRelationId::new("fact.code_source_context"))
+                        .and_then(|relation| {
+                            relation
+                                .contract
+                                .relation_semantic_role(crate::schema_contract::SchemaRole::Logical)
+                                .ok()
+                                .flatten()
+                        })
+                        == Some(crate::production_query_recipe::SOURCE_OCCURRENCES_ROLE);
+                    scope = match scope.for_source_subjects(
+                        clause,
+                        &validated.ingress().selections,
+                        occurrence_sources,
+                    ) {
+                        Ok(scope) => scope,
+                        Err(error) => return failed(&artifacts, "source_dependency_scope", error),
+                    };
+                }
                 if let Some(clause) = request
                     .parsed()
                     .request
@@ -1404,7 +1433,9 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 {
                     return failed(&artifacts, "processing_scope", error);
                 }
-                let predicate = match if declarations || calls || canonical_family.is_some() {
+                let predicate = match if source_context && occurrence_sources {
+                    scope.source_predicate_for(output.relation_id().as_str())
+                } else if declarations || calls || canonical_family.is_some() {
                     scope.predicate_for(output.relation_id().as_str(), "language", "context_id")
                 } else {
                     scope.predicate()

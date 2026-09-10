@@ -110,7 +110,9 @@ fn subject_facts(
         .fields()
         .iter()
         .zip(&fields)
-        .filter(|(field, _)| !matches!(field.name().as_str(), "subject_kind" | "fact_family"))
+        .filter(|(field, _)| {
+            field.name() != "subject_kind" && (source_context || field.name() != "fact_family")
+        })
         .map(|(field, id)| {
             Ok(ProgramProjectionField {
                 output_name: None,
@@ -163,14 +165,15 @@ fn subject_facts(
             (
                 "selection.context",
                 "context_kind",
-                if source
-                    .contract
-                    .relation_semantic_role(SchemaRole::Logical)
-                    .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
-                        detail: error.to_string(),
-                    })?
-                    == Some("canonical.source-context.line-window")
-                {
+                if matches!(
+                    source
+                        .contract
+                        .relation_semantic_role(SchemaRole::Logical)
+                        .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+                            detail: error.to_string(),
+                        })?,
+                    Some("canonical.source-context.line-window" | super::SOURCE_OCCURRENCES_ROLE)
+                ) {
                     &[
                         "exact source span",
                         "function definition",

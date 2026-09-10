@@ -94,6 +94,18 @@ def test_typed_processing_rejects_inconsistent_scope_and_preserves_unknown_exhau
             )
         ],
     )
+    assert not message.remainder[0].HasField("fact_family")
+    assert _processing_summary(message).remainder[0].fact_family is None
+    message.remainder[0].fact_family = "semantic-references"
+    restored = query_pb.QueryProcessingSummary.FromString(message.SerializeToString())
+    assert restored.remainder[0].HasField("fact_family")
+    assert _processing_summary(restored).remainder[0].fact_family == "semantic-references"
+    message.remainder[0].fact_family = ""
+    assert message.remainder[0].HasField("fact_family")
+    with pytest.raises(DaemonProtocolError):
+        _processing_summary(message)
+    message.remainder[0].ClearField("fact_family")
+    assert _processing_summary(message).remainder[0].fact_family is None
     assert _processing_summary(message).remainder[0].rust_build is None
     message.remainder[0].rust_build.profile = "checking"
     message.remainder[0].rust_build.features.extend(["chosen"])

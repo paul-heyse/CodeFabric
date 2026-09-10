@@ -562,9 +562,33 @@ All 24 affected regressions pass (104.39 s), including eleven public fact famili
 first-four/source queries. Default/featureless checks pass. STATUS records logs and the initial
 fixture-envelope correction. This is still a P03 slice, not package/outcome completion.
 
-**Next:** exact occurrence source retrieval with matching processing/disclosure dependencies,
-then the remaining first-four scopes/meanings and block execution work. Occurrence source reads
-are not implemented by the entity/relationship continuation above.
+**P03 occurrence/module source continuation, 2026-09-10.** Exact source descriptors now cover
+canonical call/reference/import occurrences, lexical references and Python module file extents.
+Native joins require workspace/generation/file/digest agreement; present provenance and valid
+ranges are prerequisites, and no declaration identity is fabricated. Family-aware selection
+preserves provider witnesses and aligns returned rows with processing dependencies. Resolved
+prior subjects narrow language and family; mixed source subjects retain all required families.
+The optional protobuf `fact_family` preserves absent historical values through prost, grpcio and
+Pydantic; retained processing selectors read the historical single-family shape as well.
+A distinct source-capability role protects older snapshots from false occurrence/module support.
+DataFusion native joins/projections/UNION/distinct/coalesce and Arrow typed nullability, plus
+Protobuf reference §7 (explicit field presence), guide these concrete boundaries.
+
+The expanded 70-block installed-client/reopen case passes in 120.41 s, covering both languages'
+occurrences, module extents, mixed line windows, exact authored bytes/coordinates and prior subjects.
+Sixteen canonical regressions and the independent invalid-pin/range/provenance/deduplication case
+pass. Thirty-seven recipe/processing/package cases, default/featureless root checks, 28 protobuf
+checks and 109 adapter tests pass. STATUS records exact commands/logs and the fixture, witness
+filter and test-duration corrections. The source authorization regression exposed a retired
+form-name check on retained reads; the implementation now follows sealed exact-source input
+provenance, with historical fallback. All 29 registry/package and installed disclosure cases now
+pass (107.77 s), including Unicode truncation, live revocation of a retained page and exact reopen.
+Final all-target Clippy has no diagnostics on new modules/changed lines; document navigation,
+focused spelling and diff checks pass. This continuation is not P03 or outcome closure.
+
+**Next:** remaining first-four scopes/meanings, precise dependency scope and independent block
+execution/failure, then proceed to P04 in package order.
+Full source/syntax selection and remaining P03 acceptance are still open.
 
 Evolve the existing schema descriptor/version checks and released wire deliberately. For each
 schema-changing slice, identify its raw producer, canonical consumers, persisted reader, public

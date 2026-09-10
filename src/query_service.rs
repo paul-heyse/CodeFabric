@@ -4147,6 +4147,7 @@ fn processing_page_summary(
             };
             Ok(ProcessingRemainder {
                 language: row.language,
+                fact_family: row.fact_family,
                 scope_kind: row.scope_kind,
                 path: row.path,
                 path_bytes: row.path_bytes,

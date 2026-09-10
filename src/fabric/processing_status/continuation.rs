@@ -24,6 +24,8 @@ pub(crate) struct ProcessingSelection {
     table_version: u64,
     workspace: [u8; 16],
     family: String,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    families: BTreeSet<String>,
     languages: BTreeSet<String>,
     contexts: BTreeSet<[u8; 16]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -50,6 +52,11 @@ impl ProcessingSelection {
             table_version: pin.version(),
             workspace,
             family: scope.family.to_owned(),
+            families: scope
+                .families
+                .iter()
+                .map(|family| (*family).to_owned())
+                .collect(),
             languages: scope.languages.clone(),
             contexts: scope.contexts.clone(),
             owners: scope.owners.clone(),
@@ -61,9 +68,17 @@ impl ProcessingSelection {
             && self.workspace != [0; 16]
             && self.languages.iter().eq(summary.languages.iter())
             && super::canonical_processing_family(&self.family).is_some()
+            && self
+                .families
+                .iter()
+                .all(|family| super::canonical_processing_family(family).is_some())
+            && (self.families.is_empty() || self.families.contains(&self.family))
             && self.contexts.len() <= 4096
             && self.owners.as_ref().is_none_or(|owners| {
-                !owners.is_empty() && owners.len() <= 4096 && self.family == "call-targets"
+                !owners.is_empty()
+                    && owners.len() <= 4096
+                    && self.family == "call-targets"
+                    && (self.families.is_empty() || self.families.len() == 1)
             })
     }
 
@@ -72,6 +87,14 @@ impl ProcessingSelection {
             .ok_or("invalid retained processing family")?;
         Ok(EntityQueryScope {
             family,
+            families: self
+                .families
+                .iter()
+                .map(|family| {
+                    super::canonical_processing_family(family)
+                        .ok_or_else(|| "invalid retained dependency family".to_owned())
+                })
+                .collect::<Result<_, _>>()?,
             languages: self.languages.clone(),
             contexts: self.contexts.clone(),
             owners: self.owners.clone(),
@@ -132,7 +155,14 @@ fn selected_remainder(
     generation: u64,
 ) -> Result<DataFrame, String> {
     let mut predicate = col("family")
-        .eq(lit(selection.family.clone()))
+        .in_list(
+            if selection.families.is_empty() {
+                vec![lit(selection.family.clone())]
+            } else {
+                selection.families.iter().cloned().map(lit).collect()
+            },
+            false,
+        )
         .and(col("language").in_list(
             selection.languages.iter().cloned().map(lit).collect(),
             false,
@@ -371,6 +401,7 @@ mod tests {
             table_version: 0,
             workspace: [1; 16],
             family: "call-targets".into(),
+            families: BTreeSet::new(),
             languages: BTreeSet::from(["rust".into()]),
             contexts: BTreeSet::new(),
             owners: None,
@@ -424,5 +455,64 @@ mod tests {
                 .owners
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn retained_family_set_filters_native_rows_and_reads_legacy_selections() {
+        let snapshot = super::super::tests::fixture();
+        let original = &snapshot.batches[0];
+        let mut batches = vec![(**original).clone()];
+        for family in ["call-targets", "types"] {
+            let mut columns = original.columns().to_vec();
+            columns[original.schema().index_of("family").unwrap()] =
+                Arc::new(StringArray::from(vec![family; original.num_rows()]));
+            batches.push(RecordBatch::try_new(original.schema(), columns).unwrap());
+        }
+        let context = SessionContext::new();
+        let provider = Arc::new(
+            datafusion::datasource::MemTable::try_new(original.schema(), vec![batches]).unwrap(),
+        );
+        let frame = context.read_table(provider).unwrap();
+        let legacy = serde_json::json!({"table_root":"/private/exact/processing", "table_version":7,
+            "workspace":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], "family":"function-declarations", "languages":["rust"], "contexts":[]});
+        for (families, expected) in [
+            (None, 130),
+            (Some(vec!["function-declarations", "call-targets"]), 260),
+        ] {
+            let mut value = legacy.clone();
+            if let Some(families) = families {
+                value["families"] = serde_json::json!(families);
+            }
+            let selected: ProcessingSelection = serde_json::from_value(value).unwrap();
+            let restored: ProcessingSelection =
+                serde_json::from_slice(&serde_json::to_vec(&selected).unwrap()).unwrap();
+            assert_eq!(selected, restored);
+            let rows = selected_remainder(frame.clone(), &restored, 3)
+                .unwrap()
+                .collect()
+                .await
+                .unwrap();
+            assert_eq!(
+                rows.iter().map(RecordBatch::num_rows).sum::<usize>(),
+                expected
+            );
+            let scope = restored.scope().unwrap();
+            assert!(scope.selects_family("function-declarations"));
+            assert_eq!(scope.selects_family("call-targets"), expected == 260);
+            assert!(!scope.selects_family("types"));
+            for batch in rows {
+                assert!(
+                    strings(&batch, "family")
+                        .unwrap()
+                        .iter()
+                        .flatten()
+                        .all(|family| scope.selects_family(family))
+                );
+            }
+        }
+        let mut invalid = legacy;
+        invalid["families"] = serde_json::json!(["unknown-family"]);
+        let invalid: ProcessingSelection = serde_json::from_value(invalid).unwrap();
+        assert!(invalid.scope().is_err());
     }
 }

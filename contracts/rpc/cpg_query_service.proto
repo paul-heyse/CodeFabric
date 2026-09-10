@@ -3,7 +3,7 @@
 // version: 2.0
 // compatible_suite_major: 2
 // status: released
-// canonical_digest: b3:4d8b357463c016bbf75e5fe3979b3499e3880a83265e54d65d0dc348fa5b0d30
+// canonical_digest: b3:e59786c90044225c4fb4fc894473b14cab543af9738da3c791cfccb1c402f37c
 // digest_projection: proto-descriptor-v2
 syntax = "proto3";
 
@@ -613,6 +613,9 @@ message ProcessingRemainder {
   // Selected Cargo platform; a custom target can be a captured target-specification path.
   optional string target_platform = 11;
   optional ProcessingRustBuildSelection rust_build = 12;
+  // Identifies the dependency when a query requires more than one fact family.
+  // Absent on processing records retained from earlier service versions.
+  optional string fact_family = 13;
 }
 
 message QueryProcessingSummary {

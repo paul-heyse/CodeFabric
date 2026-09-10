@@ -2806,6 +2806,19 @@
               "proto3_optional": true,
               "type": "TYPE_MESSAGE",
               "type_name": ".codefabric.cpgd.v2.ProcessingRustBuildSelection"
+            },
+            {
+              "default_value": null,
+              "has_presence": true,
+              "json_name": "factFamily",
+              "label": "LABEL_OPTIONAL",
+              "name": "fact_family",
+              "number": 13,
+              "oneof": "_fact_family",
+              "options": {},
+              "proto3_optional": true,
+              "type": "TYPE_STRING",
+              "type_name": ""
             }
           ],
           "full_name": "codefabric.cpgd.v2.ProcessingRemainder",
@@ -2836,6 +2849,10 @@
             },
             {
               "name": "_rust_build",
+              "options": {}
+            },
+            {
+              "name": "_fact_family",
               "options": {}
             }
           ],

@@ -229,7 +229,17 @@ fn find_occurrences(fixture: &ProductionFixture, stack: &InstalledProductionStac
             queries.push(json!({"request":"find code entities","query_id":query,"looking_for":format!("{label} {phrase}")}));
             queries.push(json!({"request":"follow code relationships","query_id":format!("{query}-facts"),
                 "starting_from":[{"results_of":query,"select":"entities"}], "relationship":meaning,"direction":"outgoing","distance":"one step"}));
+            queries.push(json!({"request":"retrieve source and syntax context","query_id":format!("{query}-source"),
+                "about":[{"results_of":query,"select":"entities"}], "context":"exact source span", "return":{"maximum_source_bytes":4096}}));
         }
+        queries.push(json!({"request":"retrieve source and syntax context","query_id":"mixed-source",
+            "about":[{"results_of":"calls","select":"entities"},{"results_of":"imports","select":"entities"}], "context":"surrounding lines", "return":{"maximum_source_bytes":4096,"source_lines_before":1,"source_lines_after":1}}));
+        if language == "python" {
+            queries.push(json!({"request":"find code entities","query_id":"modules","looking_for":"Python modules"}));
+            queries.push(json!({"request":"retrieve source and syntax context","query_id":"modules-source",
+                "about":[{"results_of":"modules","select":"entities"}], "context":"exact source span", "return":{"maximum_source_bytes":4096}}));
+        }
+        let count = queries.len();
         let mut request = semantic_request(
             &fixture.workspace.public_id(),
             &format!("request:occurrences-{language}-{phase}"),
@@ -241,7 +251,7 @@ fn find_occurrences(fixture: &ProductionFixture, stack: &InstalledProductionStac
             json!({"id":"query","operation":"call_tool","name":"query_code_graph","arguments":{"request":request,"delivery":"resource"}}),
             json!({"id":"manifest","operation":"read_resource","uri":{"$ref":"query.structured_content.manifest.uri"}}),
         ];
-        for page in 0..6 {
+        for page in 0..count {
             steps.push(json!({"id":format!("page{page}"),"operation":"read_resource","uri":{"$ref":format!("query.structured_content.pages.{page}.uri")}}));
         }
         let scenario =
@@ -303,6 +313,32 @@ fn find_occurrences(fixture: &ProductionFixture, stack: &InstalledProductionStac
                 .find(|p| p["query_id"] == query)
                 .unwrap();
             assert_eq!(status["family"], coverage);
+            let sources = rows(&format!("{query}-source"));
+            assert_eq!(
+                sources.len(),
+                expected_ids.len(),
+                "one {language}/{query} source per occurrence"
+            );
+            let mut source_ids = BTreeSet::new();
+            for source in &sources {
+                verify_exact_source(fixture, source);
+                assert!(source["declaration_id"].is_null());
+                assert_eq!(source["source_mapping"], "exact-occurrence-span");
+                source_ids.insert(source["public_entity_id"].as_str().unwrap().to_owned());
+            }
+            assert_eq!(source_ids, expected_ids);
+            let source_status = result["processing"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["query_id"] == format!("{query}-source"))
+                .unwrap();
+            assert_eq!(source_status["family"], "source-context");
+            assert_eq!(
+                source_status["requested_partitions"],
+                status["requested_partitions"]
+            );
+            assert_eq!(source_status["languages"], json!([language]));
             let facts = rows(&format!("{query}-facts"));
             assert_eq!(facts.len(), expected.len());
             let source_fields = expected[0]
@@ -333,7 +369,78 @@ fn find_occurrences(fixture: &ProductionFixture, stack: &InstalledProductionStac
             expected.sort();
             assert_eq!(projected, expected, "{language}/{query}");
         }
+        let mixed = rows("mixed-source");
+        assert_eq!(
+            mixed.len(),
+            rows("calls-source").len() + rows("imports-source").len()
+        );
+        for source in &mixed {
+            verify_exact_source(fixture, source);
+        }
+        let processing = result["processing"].as_array().unwrap();
+        let status = |query| processing.iter().find(|p| p["query_id"] == query).unwrap();
+        assert_eq!(
+            status("mixed-source")["requested_partitions"]
+                .as_u64()
+                .unwrap(),
+            status("calls-source")["requested_partitions"]
+                .as_u64()
+                .unwrap()
+                + status("imports-source")["requested_partitions"]
+                    .as_u64()
+                    .unwrap()
+        );
+        let reasons = status("mixed-source")["remainder"].as_array().unwrap();
+        if language == "python" {
+            assert!(!reasons.is_empty());
+        }
+        assert!(
+            reasons
+                .iter()
+                .all(|r| matches!(r["fact_family"].as_str(), Some("call-targets" | "imports")))
+        );
+        if language == "python" {
+            let modules = rows("modules-source");
+            assert_eq!(modules.len(), rows("modules").len());
+            assert!(!modules.is_empty());
+            for source in modules {
+                verify_exact_source(fixture, &source);
+                assert_eq!(source["source_mapping"], "exact-module-file");
+                assert_eq!(source["start_byte"], 0);
+                assert!(source["declaration_id"].is_null());
+            }
+        }
     }
+}
+
+#[allow(
+    clippy::naive_bytecount,
+    reason = "independent line oracle over a small authored fixture"
+)]
+fn verify_exact_source(fixture: &ProductionFixture, row: &Value) {
+    let hex = row["relative_path"].as_str().unwrap();
+    let path = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+        .collect::<Vec<_>>();
+    let source = fs::read(
+        Path::new(&fixture.workspace.root_path_display).join(String::from_utf8(path).unwrap()),
+    )
+    .unwrap();
+    let context = &row["source_context"];
+    let start = usize::try_from(context["start_byte"].as_u64().unwrap()).unwrap();
+    let end = usize::try_from(context["end_byte"].as_u64().unwrap()).unwrap();
+    assert_eq!(
+        context["text"],
+        std::str::from_utf8(&source[start..end]).unwrap()
+    );
+    assert_eq!(context["complete"], true);
+    assert_eq!(context["anchor_start_byte"], row["start_byte"]);
+    assert_eq!(context["anchor_end_byte"], row["end_byte"]);
+    assert_eq!(
+        context["start_line"].as_u64().unwrap(),
+        1 + source[..start].iter().filter(|b| **b == b'\n').count() as u64
+    );
 }
 
 #[test]
@@ -362,6 +469,12 @@ fn pragmatic_semantic_relationships_through_installed_clients_and_reopen() {
         "pub fn target(value: u8) -> u8 { value }\n",
     )
     .unwrap();
+    {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, true)
+            .unwrap();
+    }
     let stack = InstalledProductionStack::build();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
     relationships(&fixture, &stack, "initial");

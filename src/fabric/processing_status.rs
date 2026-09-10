@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 mod continuation;
 mod rust_build;
+mod source;
 pub(crate) use continuation::{ProcessingPageReader, ProcessingSelection};
 pub(crate) use rust_build::ProcessingRustBuildSelection;
 use rust_build::RustBuildColumns;
@@ -119,6 +120,10 @@ impl QueryProcessing {
                 .all(|language| matches!(language.as_str(), "python" | "rust"))
             && value.remainder.iter().all(|row| {
                 value.languages.contains(&row.language)
+                    && row
+                        .fact_family
+                        .as_ref()
+                        .is_none_or(|family| canonical_processing_family(family).is_some())
                     && !row.scope_kind.is_empty()
                     && !row.reason.is_empty()
                     && row
@@ -154,12 +159,39 @@ impl QueryProcessing {
 
 pub(crate) struct EntityQueryScope {
     family: &'static str,
+    // Empty preserves the historical single-family selection.
+    families: BTreeSet<&'static str>,
     languages: BTreeSet<String>,
     contexts: BTreeSet<[u8; 16]>,
     owners: Option<BTreeSet<[u8; 16]>>,
 }
 
 impl EntityQueryScope {
+    pub(crate) fn with_families(
+        mut self,
+        families: BTreeSet<&'static str>,
+    ) -> Result<Self, String> {
+        if families.is_empty()
+            || families
+                .iter()
+                .any(|family| canonical_processing_family(family).is_none())
+        {
+            return Err("query processing dependency family is unavailable".into());
+        }
+        self.family = *families.first().expect("nonempty family selection");
+        self.families = families;
+        self.owners = None;
+        Ok(self)
+    }
+
+    fn selects_family(&self, family: &str) -> bool {
+        if self.families.is_empty() {
+            self.family == family
+        } else {
+            self.families.contains(family)
+        }
+    }
+
     fn selects_owner(&self, owner: Option<&[u8]>) -> bool {
         match (&self.owners, owner) {
             (Some(selected), Some(owner)) => selected.iter().any(|id| id == owner),
@@ -249,6 +281,7 @@ impl EntityQueryScope {
                 "lexical-references" => "lexical-references",
                 _ => "function-declarations",
             },
+            families: BTreeSet::new(),
             languages,
             contexts,
             owners: None,
@@ -315,6 +348,9 @@ impl EntityQueryScope {
 #[serde(deny_unknown_fields)]
 pub struct ProcessingRemainder {
     pub language: String,
+    /// Missing on historical result packages produced before dependency-family projection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fact_family: Option<String>,
     pub scope_kind: String,
     pub path: Option<String>,
     pub path_bytes: Vec<u8>,
@@ -512,7 +548,7 @@ impl EntityProcessingSnapshot {
                 if !scope.selects_owner(owner) {
                     continue;
                 }
-                if families.value(row) != scope.family
+                if !scope.selects_family(families.value(row))
                     || !scope.languages.contains(languages.value(row))
                 {
                     continue;
@@ -539,6 +575,7 @@ impl EntityProcessingSnapshot {
                 }
                 summary.remainder.push(ProcessingRemainder {
                     language: languages.value(row).to_owned(),
+                    fact_family: Some(families.value(row).to_owned()),
                     scope_kind: kinds.value(row).to_owned(),
                     path: String::from_utf8(paths.value(row).to_vec()).ok(),
                     path_bytes: paths.value(row).to_vec(),
@@ -721,7 +758,7 @@ mod tests {
     use arrow_array::ArrayRef;
     use arrow_schema::{Field, Schema};
 
-    fn fixture() -> EntityProcessingSnapshot {
+    pub(super) fn fixture() -> EntityProcessingSnapshot {
         let rows = 131;
         let columns: Vec<(&str, ArrayRef)> = vec![
             (
@@ -802,6 +839,7 @@ mod tests {
     fn processing_scope_keeps_python_complete_and_paginates_rust_remainder() {
         let processing = fixture();
         let python = EntityQueryScope {
+            families: BTreeSet::new(),
             family: "function-declarations",
             languages: BTreeSet::from(["python".to_owned()]),
             contexts: BTreeSet::new(),
@@ -821,6 +859,7 @@ mod tests {
             ResultCompleteness::Complete
         );
         let rust = EntityQueryScope {
+            families: BTreeSet::new(),
             family: "function-declarations",
             languages: BTreeSet::from(["rust".to_owned()]),
             contexts: BTreeSet::new(),
@@ -868,6 +907,7 @@ mod tests {
             };
             let summary = processing.summarize(
                 &EntityQueryScope {
+                    families: BTreeSet::new(),
                     family: "function-declarations",
                     languages: BTreeSet::from(["python".to_owned()]),
                     contexts: BTreeSet::new(),
@@ -896,6 +936,7 @@ mod tests {
         validate(&calls, [1; 16], 3).unwrap();
         processing.batches.push(ChargedValue::for_test(calls));
         let mut scope = EntityQueryScope {
+            families: BTreeSet::new(),
             family: "function-declarations",
             languages: BTreeSet::from(["python".to_owned()]),
             contexts: BTreeSet::new(),
@@ -920,6 +961,26 @@ mod tests {
             (1, 0, 1)
         );
         assert_eq!(calls.remainder[0].reason, "unresolved_targets");
+        let both = scope
+            .with_families(BTreeSet::from(["function-declarations", "call-targets"]))
+            .unwrap();
+        let summary = processing.summarize(&both, 0);
+        assert_eq!(
+            (
+                summary.requested_partitions,
+                summary.completed_partitions,
+                summary.remaining_partitions
+            ),
+            (2, 1, 1)
+        );
+        assert_eq!(
+            summary.remainder[0].fact_family.as_deref(),
+            Some("call-targets")
+        );
+        assert!(
+            both.with_families(BTreeSet::from(["unknown-family"]))
+                .is_err()
+        );
     }
 
     #[test]
@@ -929,6 +990,7 @@ mod tests {
         assert!(!processing.matches([1; 16], processing.epoch, 4));
         assert!(validate(&processing.batches[0], [1; 16], 4).is_err());
         let scope = EntityQueryScope {
+            families: BTreeSet::new(),
             family: "function-declarations",
             languages: BTreeSet::from(["python".to_owned(), "rust".to_owned()]),
             contexts: BTreeSet::from([[8; 16]]),
@@ -940,6 +1002,7 @@ mod tests {
             (0, 130)
         );
         let empty = EntityQueryScope {
+            families: BTreeSet::new(),
             family: "function-declarations",
             languages: BTreeSet::new(),
             contexts: BTreeSet::new(),
@@ -991,6 +1054,7 @@ mod tests {
             row(Some(&[11; 16]), "partial", "unresolved_targets"),
         ];
         let scope = || EntityQueryScope {
+            families: BTreeSet::new(),
             family: "call-targets",
             languages: BTreeSet::from(["rust".into()]),
             contexts: BTreeSet::new(),

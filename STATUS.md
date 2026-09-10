@@ -9,7 +9,9 @@ The Rust type and HIR reference slices are committed in `ba35b4c7` and `1b515b7b
 P02 public family selection is committed in `f7adca03`. P03 repeated-block output isolation is
 committed in `7eefd2ea`, and typed prior-entity result consumption in `bd7f3752`.
 Semantic-reference/import traversal is committed in `2ca3d45b`. First-class occurrence
-selection and typed outgoing traversal now pass mixed native validation.
+selection and typed outgoing traversal are committed in `fe0d17fe`.
+The occurrence/module source continuation now passes mixed native query/reopen validation;
+retained source revocation also passes after the block-provenance correction.
 The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
 Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
 
@@ -46,6 +48,42 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The source continuation extends exact captured source descriptors to call/reference/import
+occurrences, lexical references and Python modules. Native exact-pin joins and span/provenance
+checks exclude invalid mappings. Candidate multiplicity is deduplicated within a provider family;
+lexical and semantic witnesses remain distinct. Resolved subject families now filter both source
+rows and processing, and mixed-family remainders expose an optional `fact_family` through Rust,
+protobuf and Pydantic. Retained single-family selections and absent historical wire fields still
+read. A distinct source role prevents older retained profiles from claiming occurrence/module
+source support. Existing source byte bounds and independent disclosure authorization still apply.
+
+The 70-block installed-client scenario passes initial publication and exact reopen in 120.41 s
+(`/tmp/codefabric-p03-occurrence-source-native-4.log`). It covers both languages' occurrence source,
+Python module extents, mixed-family line windows, authored bytes/coordinates, prior entity subjects
+and earlier relationship cases. The first run lacked required line-window bounds; the second
+exposed lexical witnesses entering semantic-reference source rows; the third hit the runner's
+120-second bound. These are retained in the corresponding `native-1/2/3.log` files. The native
+family filter fixes the witness mismatch; this expanded test now has a finite five-minute bound
+with the existing one-minute slow signal. All 16 canonical regressions passed in run 2, and the
+independent invalid-pin/range/provenance/deduplication case passes (0.38 s in run 3).
+
+All 37 affected recipe/processing/package unit cases pass
+(`/tmp/codefabric-p03-source-unit-1.log`). The source regression run passed 34 of 35 cases,
+including repeated blocks (58.72 s) and prior-result reuse/reopen (58.43 s), but found a retained
+source revocation bug: the read check still recognized the retired form-wide output name.
+It now follows sealed exact-source input provenance, retaining the historical name fallback;
+all 29 registry/package and installed disclosure cases now pass (107.77 s;
+`/tmp/codefabric-p03-source-disclosure.log`). The source case verifies denied access, authorized
+Unicode/bounded bytes, live revocation of a retained page, exact reopen and revocation again.
+Default/featureless `just root-check` passes (`/tmp/codefabric-p03-source-root-check.log`).
+`just proto-check` passes, including 28 compatibility/generator/wire cases
+(`/tmp/codefabric-p03-source-proto-check.log`). All 109 adapter tests, adapter lint/types and
+37 Rust units pass. Final all-target Clippy completes with the existing backlog and no diagnostics
+on new modules or changed lines (`/tmp/codefabric-p03-source-clippy-final.jsonl`). Document
+navigation, focused spelling and diff checks pass. The final four scope/retained-manifest cases
+pass after cleanup (`/tmp/codefabric-p03-source-final-units.log`). Source processing
+still uses conservative file/context scope when exact owner dependencies are unavailable.
+
 The occurrence continuation adds calls, semantic references and imports to the existing canonical
 entity universe. Candidate/namespace multiplicity stays in the fact relations. Calls have an
 occurrence label independent of resolved target names. Six Python/Rust FindEntities meanings
@@ -70,9 +108,8 @@ existing backlog and no diagnostics on new modules/changed lines
 (`/tmp/codefabric-p03-occurrences-clippy-final.jsonl`). Document navigation, focused spelling
 and diff checks pass.
 
-Exact occurrence source retrieval and its processing/disclosure dependencies are next. This
-continuation does not yet make occurrence source reads or full source/syntax selection available.
-The remainder of P03 and P04–P14 remains open.
+The source continuation above extends this occurrence slice. Full source/syntax meanings,
+remaining P03 scope/directive/block work and P04–P14 remain open.
 
 The preceding reference/import continuation adds four immutable native query templates over the existing
 canonical relations, covering incoming denotations and outgoing source occurrences. Exact

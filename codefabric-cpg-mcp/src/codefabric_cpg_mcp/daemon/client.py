@@ -1033,6 +1033,7 @@ def _processing_summary(value: query_pb.QueryProcessingSummary) -> QueryProcessi
                 ProcessingRemainder(
                     language=cast(Literal["python", "rust"], row.language),
                     scope_kind=row.scope_kind,
+                    fact_family=row.fact_family if row.HasField("fact_family") else None,
                     path_bytes=tuple(row.path_bytes),
                     path=row.path if row.HasField("path") else None,
                     target=row.target if row.HasField("target") else None,

@@ -7,6 +7,8 @@ use super::{
 
 use crate::provider_native_rust_syntax::RustSyntaxRelation;
 
+mod occurrences;
+
 pub(super) const RELATION: &str = "fact.code_source_context";
 
 pub(super) fn fields() -> Vec<FieldSpec> {
@@ -21,7 +23,15 @@ pub(super) fn fields() -> Vec<FieldSpec> {
 }
 
 pub(super) fn dependencies(python: bool, rust: bool) -> Vec<&'static str> {
-    let mut inputs = vec![super::DECLARATION, super::SOURCE];
+    let mut inputs = vec![
+        super::DECLARATION,
+        super::SOURCE,
+        super::calls::RELATION,
+        super::semantic_references::RELATION,
+        super::imports::RELATION,
+        super::REFERENCE,
+        super::modules::RELATION,
+    ];
     if python {
         inputs.push(super::NativeSyntaxRelation::TreeSitterCstNode.as_str());
     }
@@ -64,7 +74,9 @@ pub(super) fn build(
             )?)?
             .build()?;
     }
-    Ok(result)
+    let mut branches = vec![result];
+    branches.extend(occurrences::descriptors(inputs)?);
+    super::canonical_union(RELATION, fields(), branches)
 }
 
 fn exact(
@@ -102,7 +114,13 @@ fn exact(
         .project(
             super::declaration_fields()
                 .iter()
-                .map(|(name, _, _)| col(format!("d.{name}")))
+                .map(|(name, _, _)| {
+                    if *name == "fact_family" {
+                        lit("function-declarations").alias(*name)
+                    } else {
+                        col(format!("d.{name}"))
+                    }
+                })
                 .chain([
                     col("s.relative_path"),
                     lit(kind).alias("context_kind"),
@@ -203,6 +221,7 @@ fn functions(
                 super::declaration_fields()
                     .iter()
                     .map(|(name, _, _)| match *name {
+                        "fact_family" => lit("function-source-context").alias(*name),
                         "start_byte" | "end_byte" => col(format!("{node}.{name}")).alias(*name),
                         _ => col(format!("d.{name}")),
                     })

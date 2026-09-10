@@ -200,6 +200,7 @@ class ProcessingRustBuildSelection(StrictWireModel):
 
 class ProcessingRemainder(StrictWireModel):
     language: Literal["python", "rust"]
+    fact_family: NonEmptyString | None = None
     scope_kind: NonEmptyString
     path_bytes: tuple[Annotated[int, Field(ge=0, le=255)], ...]
     path: str | None = None
