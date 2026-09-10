@@ -46,7 +46,7 @@ use super::command::EpochId;
 /// Current immutable package contract.
 pub const STREAMED_RESULT_PACKAGE_FORMAT: &str = "codefabric.streamed-result-package.v1";
 
-/// Monotonically growing manifest-last object set recorded before each newly included write.
+/// Manifest-last object set recorded before writes and reconciled after owned trailing cleanup.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PendingResultObjectSet {
@@ -63,6 +63,16 @@ pub trait ResultPublicationIntentRecorder: fmt::Debug + Send + Sync {
         &self,
         intent: PendingResultObjectSet,
     ) -> Result<(), ResultPublicationIntentError>;
+
+    /// Reconcile only after the owned writer has deleted the removed trailing pages.
+    /// A recorder without this capability must fail the request and retain its cleanup intent.
+    async fn reconcile_after_cleanup(
+        &self,
+        _previous: PendingResultObjectSet,
+        _retained: PendingResultObjectSet,
+    ) -> Result<(), ResultPublicationIntentError> {
+        Err(ResultPublicationIntentError)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Error)]
@@ -782,15 +792,18 @@ impl StreamedResultPackageBuilder {
                 limit: self.limits.max_relations.get(),
             });
         }
-        let response: serde_json::Value = serde_json::from_slice(canonical_semantic_response)
-            .map_err(StreamedResultPackageError::CanonicalResponse)?;
+        let mut response: serde_json::Value =
+            serde_json::from_slice(canonical_semantic_response)
+                .map_err(StreamedResultPackageError::CanonicalResponse)?;
         let recanonicalized = serde_json_canonicalizer::to_vec(&response)
             .map_err(StreamedResultPackageError::CanonicalResponse)?;
         if recanonicalized != canonical_semantic_response {
             return Err(StreamedResultPackageError::NonCanonicalResponse);
         }
+        let mut block_outcomes = super::query_block_outcomes::QueryBlockOutcomes::parse(&response)?;
         if relations.is_empty()
-            && !super::query_block_outcomes::QueryBlockOutcomes::parse(&response)?
+            && !block_outcomes
+                .as_ref()
                 .is_some_and(|outcomes| outcomes.all_failed())
         {
             return Err(StreamedResultPackageError::RelationLimit {
@@ -818,6 +831,7 @@ impl StreamedResultPackageBuilder {
             let mut relation_entries = Vec::with_capacity(relations.len());
             let mut total_rows = 0_u64;
             let mut total_bytes = 0_u64;
+            let mut publication_recorded = false;
 
             for mut relation in relations {
                 check_cancel_deadline(cancellation, deadline)?;
@@ -835,15 +849,28 @@ impl StreamedResultPackageBuilder {
                 }
                 let page_start = u64::try_from(pages.len())
                     .map_err(|_| StreamedResultPackageError::CounterOverflow)?;
+                let page_offset = pages.len();
+                let created_offset = created.len();
+                let previous_totals = (total_rows, total_bytes, metadata_bytes);
                 let mut relation_rows = 0_u64;
                 let mut observed_rows = 0_u64;
                 let mut relation_pages = 0_u64;
                 let mut saw_batch = false;
+                let mut execution_failed = false;
                 while let Some(batch) =
                     next_batch(&mut relation.stream, cancellation, deadline).await?
                 {
                     check_cancel_deadline(cancellation, deadline)?;
-                    let batch = batch.map_err(StreamedResultPackageError::DataFusion)?;
+                    let batch = match batch {
+                        Ok(batch) => batch,
+                        Err(error) if block_outcomes.is_some()
+                            && super::query_block_outcomes::isolated_execution_error(&error) => {
+                            tracing::warn!(relation = relation.relation_id.as_str(), %error, "streamed query block execution failed");
+                            execution_failed = true;
+                            break;
+                        }
+                        Err(error) => return Err(StreamedResultPackageError::DataFusion(error)),
+                    };
                     // A conservative additional residency envelope covers this received batch
                     // and its zero-copy page slices. Upstream native Arrow ownership may already
                     // charge the backing; we do not replace an unknown upstream owner or claim
@@ -942,7 +969,30 @@ impl StreamedResultPackageBuilder {
                         )
                         .await?;
                         created.push(object_path);
+                        publication_recorded = true;
                     }
+                }
+                if execution_failed {
+                    // Stop native production before deleting its private trailing pages. Until
+                    // reconciliation succeeds the old checkpoint still owns every attempted path.
+                    drop(relation.stream);
+                    for path in created[created_offset..].iter().rev() {
+                        self.storage.delete(path, self.limits.max_page_bytes.get() as u64).await?;
+                    }
+                    if pages.len() > page_offset {
+                        let intent = |selected: &[ResultPageManifestEntry]| PendingResultObjectSet {
+                            manifest_object_path: manifest_path.to_string(),
+                            page_object_paths: selected.iter().map(|page| page.object_path.clone()).collect(),
+                            epoch_id: epoch_hex.clone(), query_execution: query_hex.clone(),
+                        };
+                        publication_intent.reconcile_after_cleanup(intent(&pages), intent(&pages[..page_offset])).await?;
+                    }
+                    created.truncate(created_offset);
+                    pages.truncate(page_offset);
+                    (total_rows, total_bytes, metadata_bytes) = previous_totals;
+                    block_outcomes.as_mut().expect("outcome presence checked")
+                        .fail_execution(relation.relation_id.as_str())?;
+                    continue;
                 }
                 if let Some(selection) = &relation.row_selection {
                     let summary = processing
@@ -1006,6 +1056,7 @@ impl StreamedResultPackageBuilder {
                     )
                     .await?;
                     created.push(object_path);
+                    publication_recorded = true;
                 }
                 let relation_entry = ResultRelationManifestEntry {
                     relation_id: relation.relation_id.as_str().to_owned(),
@@ -1028,6 +1079,11 @@ impl StreamedResultPackageBuilder {
                     self.limits.max_manifest_bytes.get(),
                 )?;
                 relation_entries.push(relation_entry);
+            }
+
+            if let Some(outcomes) = &block_outcomes {
+                outcomes.write_response(&mut response)?;
+                outcomes.retain_processing(&mut processing);
             }
 
             let manifest = StreamedResultPackageManifest {
@@ -1066,7 +1122,7 @@ impl StreamedResultPackageBuilder {
                 ..ResourceAmounts::default()
             })?;
             check_cancel_deadline(cancellation, deadline)?;
-            if manifest.pages.is_empty() {
+            if !publication_recorded {
                 publication_intent
                     .record_publication_intent(PendingResultObjectSet {
                         manifest_object_path: manifest_path.to_string(),
@@ -1851,6 +1907,75 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct CleanupRecorder {
+        sink: Arc<RecordingSink>,
+        latest: Mutex<Option<PendingResultObjectSet>>,
+        reconciliations: AtomicU64,
+        reject_cleanup: bool,
+    }
+
+    impl CleanupRecorder {
+        fn new(sink: Arc<RecordingSink>, reject_cleanup: bool) -> Self {
+            Self {
+                sink,
+                latest: Mutex::new(None),
+                reconciliations: AtomicU64::new(0),
+                reject_cleanup,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ResultPublicationIntentRecorder for CleanupRecorder {
+        async fn record_publication_intent(
+            &self,
+            intent: PendingResultObjectSet,
+        ) -> Result<(), ResultPublicationIntentError> {
+            let mut latest = self.latest.lock().unwrap();
+            if let Some(previous) = latest.as_ref() {
+                assert!(intent.page_object_paths.len() > previous.page_object_paths.len());
+                assert!(
+                    intent
+                        .page_object_paths
+                        .starts_with(&previous.page_object_paths)
+                );
+            }
+            *latest = Some(intent);
+            Ok(())
+        }
+
+        async fn reconcile_after_cleanup(
+            &self,
+            previous: PendingResultObjectSet,
+            retained: PendingResultObjectSet,
+        ) -> Result<(), ResultPublicationIntentError> {
+            assert!(previous.page_object_paths.len() > retained.page_object_paths.len());
+            assert!(
+                previous
+                    .page_object_paths
+                    .starts_with(&retained.page_object_paths)
+            );
+            for path in &previous.page_object_paths[retained.page_object_paths.len()..] {
+                assert!(
+                    matches!(
+                        self.sink.store.head(&ObjectPath::from(path.clone())).await,
+                        Err(object_store::Error::NotFound { .. })
+                    ),
+                    "cleanup must precede checkpoint replacement"
+                );
+            }
+            let mut latest = self.latest.lock().unwrap();
+            assert_eq!(latest.as_ref(), Some(&previous));
+            if self.reject_cleanup {
+                return Err(ResultPublicationIntentError);
+            }
+            *latest = Some(retained);
+            self.reconciliations.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
     #[async_trait]
     impl ResultObjectSink for RecordingSink {
         async fn create(
@@ -2014,6 +2139,278 @@ mod tests {
                 publication_intent,
             )
             .await
+    }
+
+    fn failing_relation(error: datafusion::common::DataFusionError) -> StreamedRelationInput {
+        let mut input = relation(&[90, 91], 1);
+        input.relation_id = RelationId::new("b.failed").unwrap();
+        input.stream = Box::pin(RecordBatchStreamAdapter::new(
+            input.schema.clone(),
+            input.stream.chain(stream::once(async move { Err(error) })),
+        ));
+        input
+    }
+
+    fn block_response(relations: &[StreamedRelationInput]) -> Vec<u8> {
+        let queries = relations
+            .iter()
+            .map(|input| {
+                serde_json::json!({
+                    "query_id":input.relation_id.as_str(), "relation_id":input.relation_id.as_str()
+                })
+            })
+            .collect::<Vec<_>>();
+        let outcomes = relations
+            .iter()
+            .map(|input| {
+                serde_json::json!({
+                    "query_id":input.relation_id.as_str(), "execution_state":"COMPLETE", "errors":[]
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json_canonicalizer::to_vec(
+            &serde_json::json!({"queries":queries,"query_results":outcomes}),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // Exercise write, rollback, exact reopen and resource release together.
+    async fn failed_block_pages_are_deleted_before_checkpoint_reconciliation_and_exact_reopen() {
+        use super::super::processing_status::{EntityProcessingSummary, QueryProcessing};
+        for independent in [true, false] {
+            let sink = Arc::new(RecordingSink::new(None));
+            let budget = test_resource_budget();
+            let builder =
+                StreamedResultPackageBuilder::new(sink.clone(), limits(1), budget.clone());
+            let recorder = CleanupRecorder::new(sink.clone(), false);
+            let mut relations = vec![failing_relation(
+                arrow_schema::ArrowError::DivideByZero.into(),
+            )];
+            if independent {
+                let mut first = relation(&[1, 2], 2);
+                first.relation_id = RelationId::new("a.first").unwrap();
+                relations.insert(0, first);
+                let mut last = relation(&[3], 1);
+                last.relation_id = RelationId::new("c.last").unwrap();
+                relations.push(last);
+            }
+            let response = block_response(&relations);
+            let processing = relations
+                .iter()
+                .map(|input| QueryProcessing {
+                    selection: None,
+                    query_id: input.relation_id.as_str().into(),
+                    maximum_rows: None,
+                    additional_rows: None,
+                    processing: EntityProcessingSummary {
+                        source_generation: 7,
+                        requested_partitions: 1,
+                        completed_partitions: 1,
+                        remaining_partitions: 0,
+                        scope: "python_files".into(),
+                        family: "function-declarations".into(),
+                        languages: vec!["python".into()],
+                        next_offset: None,
+                        remainder: Vec::new(),
+                    },
+                })
+                .collect();
+            let (epoch, query, lease) = pins();
+            let sealed = builder
+                .seal_with_processing(
+                    epoch,
+                    query,
+                    &response,
+                    processing,
+                    relations,
+                    lease,
+                    &Cancellation::default(),
+                    Instant::now() + Duration::from_secs(5),
+                    &recorder,
+                )
+                .await
+                .unwrap();
+            assert_eq!(recorder.reconciliations.load(Ordering::Relaxed), 1);
+            assert_eq!(
+                sealed.manifest().total_rows,
+                if independent { 3 } else { 0 }
+            );
+            assert_eq!(
+                sealed.manifest().relations.len(),
+                if independent { 2 } else { 0 }
+            );
+            let outcomes = sealed.manifest().query_results().unwrap().unwrap();
+            assert_eq!(
+                sealed
+                    .manifest()
+                    .processing
+                    .iter()
+                    .map(|summary| summary.query_id.as_str())
+                    .collect::<Vec<_>>(),
+                if independent {
+                    vec!["a.first", "c.last"]
+                } else {
+                    vec![]
+                }
+            );
+            assert_eq!(
+                outcomes
+                    .iter()
+                    .find(|row| row.query_id == "b.failed")
+                    .unwrap()
+                    .errors[0]
+                    .code,
+                "QUERY_EXECUTION_FAILED"
+            );
+            let mut values = Vec::new();
+            for (ordinal, page) in sealed.manifest().pages.iter().enumerate() {
+                assert_eq!(page.page_ordinal, ordinal as u64);
+                let bytes = sink
+                    .store
+                    .get(&ObjectPath::from(page.object_path.clone()))
+                    .await
+                    .unwrap()
+                    .bytes()
+                    .await
+                    .unwrap();
+                for batch in StreamReader::try_new(Cursor::new(bytes), None).unwrap() {
+                    values.extend(
+                        batch
+                            .unwrap()
+                            .column(0)
+                            .as_any()
+                            .downcast_ref::<Int64Array>()
+                            .unwrap()
+                            .values()
+                            .iter()
+                            .copied(),
+                    );
+                }
+            }
+            assert_eq!(values, if independent { vec![1, 2, 3] } else { vec![] });
+            let objects = sealed.manifest().pages.len() + 1;
+            assert_eq!(sink.object_count().await, objects);
+            assert_eq!(budget.observation().used.pages, objects as u128);
+            assert_eq!(
+                budget.observation().used.disk_bytes,
+                u128::from(sealed.retained_object_bytes())
+            );
+            let path = sealed.manifest_path().clone();
+            let reopened = builder
+                .reopen(path.clone(), epoch, query, lease)
+                .await
+                .unwrap();
+            assert_eq!(reopened.manifest(), sealed.manifest());
+            let pages = sealed
+                .manifest()
+                .pages
+                .iter()
+                .map(|page| ObjectPath::from(page.object_path.clone()))
+                .collect::<Vec<_>>();
+            drop(reopened);
+            drop(sealed);
+            builder
+                .delete_retained_object_set(&pages, &path)
+                .await
+                .unwrap();
+            assert_eq!(sink.object_count().await, 0);
+            assert_eq!(budget.observation().used.memory_bytes, 0);
+            assert_eq!(budget.observation().used.disk_bytes, 0);
+            assert_eq!(budget.observation().used.pages, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_block_cleanup_errors_preserve_the_previous_recovery_checkpoint() {
+        for fail_delete in [true, false] {
+            let sink = Arc::new(RecordingSink::new(None));
+            sink.fail_delete.store(fail_delete, Ordering::Relaxed);
+            let budget = test_resource_budget();
+            let builder =
+                StreamedResultPackageBuilder::new(sink.clone(), limits(1), budget.clone());
+            let recorder = CleanupRecorder::new(sink.clone(), !fail_delete);
+            let relations = vec![failing_relation(
+                datafusion::common::DataFusionError::Execution("bad computation".into()),
+            )];
+            let response = block_response(&relations);
+            let (epoch, query, lease) = pins();
+            assert!(
+                builder
+                    .seal(
+                        epoch,
+                        query,
+                        &response,
+                        relations,
+                        lease,
+                        &Cancellation::default(),
+                        Instant::now() + Duration::from_secs(5),
+                        &recorder
+                    )
+                    .await
+                    .is_err()
+            );
+            let intent = recorder.latest.lock().unwrap().clone().unwrap();
+            assert_eq!(intent.page_object_paths.len(), 2);
+            assert_eq!(recorder.reconciliations.load(Ordering::Relaxed), 0);
+            assert_eq!(sink.object_count().await, if fail_delete { 2 } else { 0 });
+            assert_eq!(
+                budget.observation().used.pages,
+                if fail_delete { 2 } else { 0 }
+            );
+            sink.fail_delete.store(false, Ordering::Relaxed);
+            let pages = intent
+                .page_object_paths
+                .iter()
+                .map(|path| ObjectPath::from(path.clone()))
+                .collect::<Vec<_>>();
+            builder
+                .delete_retained_object_set(&pages, &ObjectPath::from(intent.manifest_object_path))
+                .await
+                .unwrap();
+            assert_eq!(budget.observation().used.memory_bytes, 0);
+            assert_eq!(budget.observation().used.disk_bytes, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn fatal_native_errors_and_legacy_responses_do_not_publish_partial_success() {
+        use datafusion::common::DataFusionError;
+        for (error, legacy) in [
+            (DataFusionError::ResourcesExhausted("memory".into()), false),
+            (
+                arrow_schema::ArrowError::SchemaError("schema".into()).into(),
+                false,
+            ),
+            (DataFusionError::Execution("computation".into()), true),
+        ] {
+            let sink = Arc::new(RecordingSink::new(None));
+            let builder =
+                StreamedResultPackageBuilder::new(sink.clone(), limits(1), test_resource_budget());
+            let relations = vec![failing_relation(error)];
+            let response = if legacy {
+                b"{}".to_vec()
+            } else {
+                block_response(&relations)
+            };
+            let (epoch, query, lease) = pins();
+            assert!(matches!(
+                builder
+                    .seal(
+                        epoch,
+                        query,
+                        &response,
+                        relations,
+                        lease,
+                        &Cancellation::default(),
+                        Instant::now() + Duration::from_secs(5),
+                        &AcceptPublicationIntent
+                    )
+                    .await,
+                Err(StreamedResultPackageError::DataFusion(_))
+            ));
+            assert_eq!(sink.object_count().await, 0);
+        }
     }
 
     #[tokio::test]

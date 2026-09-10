@@ -795,10 +795,44 @@ Package reissue/cleanup, undeclared-empty/dependency tests, default/featureless 
 218 tooling cases, navigation, affected spelling and diff checks pass. Final Clippy has no affected
 findings. All 32 expanded coordinator/package/runtime regression cases pass in 0.38 s; STATUS
 carries the logs and validation limits. Full-suite closure is not claimed.
-Native runtime failure isolation remains next. A failed stream may already have written private
-pages: delete those owned objects before reconciling its durable cleanup checkpoint, then remove
-its relation/output summary. A crash before reconciliation retains an idempotently deletable old
-checkpoint. Do not buffer every leaf result solely to avoid handling this native streaming seam.
+Native runtime failure isolation is added by the following continuation.
+
+**P03 native runtime failure continuation passes focused and installed-client validation,
+2026-09-10.** DataFusion computation failures in reusable producers mark their owning block failed
+and skip dependent blocks. Independent plans continue. Leaf streams remain native streams: after a
+computation error, stop the stream and delete its trailing pages before replacing the exact private
+cleanup checkpoint. The replacement must match the writer's previous checkpoint and retain an exact
+prefix. Ordinary writes can only grow that prefix; rollback is a separate internal capability with
+no new wire event. A recorder without rollback support fails closed. Failed cleanup preserves the
+previous durable recovery intent. A crash before replacement therefore leaves safe idempotent cleanup.
+
+DataFusion reference §33.2 (error category map) and §33.3 (planning vs execution errors), checked
+against resolved 55.0.0 and Arrow 59.2.0, distinguish computation errors from resource/storage/schema/
+internal failures. Native `find_root` unwraps error context without converting errors to strings.
+Arrow divide-by-zero, arithmetic overflow, cast and compute errors are classified explicitly.
+Source hard limits, cancellation/deadlines and task failures retain request-level handling. Real
+native division over an admitted provider column exercises both retained-producer and leaf paths.
+
+Sealed manifests remove failed relations, output observations and processing summaries while
+retaining typed outcomes in request order. Partial-page counters and owned storage charges reconcile
+with the retained pages; an all-failed stream request can seal only its manifest. Tests exercise
+deletion-before-checkpoint ordering, stale checkpoint conflicts, exact reopen, independent rows,
+failed cleanup and final memory/disk/page release. The first ten fault/recovery cases pass, as do
+the expanded native producer/leaf and processing-pruning checks. The 57-case integrated selection
+passes all 55 coordinator/package/runtime cases and the installed branch/reopen scenario (121.72 s).
+Ordering first fails before query admission while native semantic publication exceeds the adapter's
+120-second operation deadline; a serial rerun confirms that boundary. The ordering fixture now
+waits for exact semantic activation within a separate 180-second preparation bound and passes its
+unchanged query/prior/reopen assertions in 207.03 s. Source-window/hard-limit/reopen also passes
+(108.63 s). Default/featureless root checks, affected Clippy, 218 tooling cases, navigation, affected
+spelling and diff checks pass. STATUS carries commands and logs. Full-suite closure is not claimed.
+
+The measured source publication writes 84 relations in 47.63 s; completed semantic preparation
+spends 27.83 s in Cargo/rustc and 101.15 s executing/writing 129 relations. Initial mixed-input
+readiness within 120 seconds remains unqualified. P04/P14 must profile retained-context/version
+reuse and relational preparation costs using these actual phases; this checkpoint establishes
+post-publication query behavior without asserting startup or comparative performance closure.
+Early phrase/input/authorization errors, ready-block concurrency and broader P03 semantics remain.
 
 **Next:** remaining first-four scopes/meanings, precise dependency scope and independent block
 execution/failure, then proceed to P04 in package order.
@@ -1597,7 +1631,7 @@ Complete resource acquisition/transfer/drop/escape, unwind paths, closure captur
 
 ### 7G. Remaining forms, complete composition and query semantics
 
-**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, CombineResults, SummarizeFacts and full first-four behavior remain. P03 now isolates repeated first-four blocks and materializes typed entity results once for fan-out/fan-in. Compiler return-resolution/lowering failures now preserve independent results with typed outcomes and failed-dependency states through exact reopen. Broader prior roles/scopes, runtime branch failures, ready-block concurrency and the full mixed-form DAG remain.
+**Current status — open.** Eight-form parsing/typed ingress exists; four limited canonical forms are publicly demonstrated. FindPaths, MatchPattern, CombineResults, SummarizeFacts and full first-four behavior remain. P03 now isolates repeated first-four blocks and materializes typed entity results once for fan-out/fan-in. Compiler return-resolution/lowering and native computation failures preserve independent results with typed outcomes and failed-dependency states. Failed leaf streams reconcile owned partial-page cleanup before exact sealing/reopen. Broader prior roles/scopes, early input/authorization failures, ready-block concurrency and the full mixed-form DAG remain.
 
 **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, query contracts and graph integration. Complete the first four forms from 4E and extend them to every relevant family in the coverage map as those families land.
 

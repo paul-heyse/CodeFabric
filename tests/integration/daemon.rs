@@ -3720,8 +3720,15 @@ fn fresh_activation_relation_batches(
 }
 
 fn wait_for_semantic_activation(fixture: &ProductionFixture) -> PersistedActivationControlRow {
+    wait_for_semantic_activation_with_timeout(fixture, Duration::from_secs(120))
+}
+
+fn wait_for_semantic_activation_with_timeout(
+    fixture: &ProductionFixture,
+    timeout: Duration,
+) -> PersistedActivationControlRow {
     use arrow::array::{Array as _, BooleanArray};
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let deadline = Instant::now() + timeout;
     loop {
         let selected = all_activation_control_rows(fixture)
             .into_iter()

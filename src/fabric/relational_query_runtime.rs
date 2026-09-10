@@ -1010,7 +1010,7 @@ impl RelationalQueryRuntime {
             observed_at_unix_ms,
             cancellation,
             canonical_semantic_response,
-            processing,
+            mut processing,
             deadline,
         } = transaction;
         let canonical_semantic_response = canonical_semantic_response
@@ -1031,6 +1031,9 @@ impl RelationalQueryRuntime {
         let seal_cancellation = cancellation.clone();
         let (package, observations) = work
             .run(async move {
+                let mut response: serde_json::Value = serde_json::from_slice(&canonical_semantic_response)
+                    .map_err(StreamedResultPackageError::CanonicalResponse)?;
+                let mut block_outcomes = super::query_block_outcomes::QueryBlockOutcomes::parse(&response)?;
                 let child = if outputs.is_empty() {
                     None
                 } else {
@@ -1055,6 +1058,15 @@ impl RelationalQueryRuntime {
                 let mut relation_streams = Vec::with_capacity(outputs.len());
                 let mut compiled_outputs = Vec::with_capacity(outputs.len());
                 for output in outputs {
+                    if let Some(outcomes) = &mut block_outcomes {
+                        let failed = output.prior_results.iter().flat_map(|slot| &slot.producers)
+                            .map(RelationId::as_str).filter(|relation| outcomes.failed(relation))
+                            .collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>();
+                        if !failed.is_empty() {
+                            outcomes.fail_dependencies(output.relation_id.as_str(), &failed)?;
+                            continue;
+                        }
+                    }
                     let child = child
                         .as_ref()
                         .expect("nonempty output execution owns its child");
@@ -1104,14 +1116,22 @@ impl RelationalQueryRuntime {
                             .map_err(RelationalQueryRuntimeError::from)
                         })
                         .collect::<Result<Vec<_>, RelationalQueryRuntimeError>>()?;
-                    let streamed = child
+                    let streamed = match child
                         .execute_relational_program_stream_with_query_local_bindings(
                             &output.program,
                             request_inputs.get(&output.relation_id).map(Arc::as_ref),
                             output.program_result_binding.as_ref(),
                             &prior_inputs,
                         )
-                        .await?;
+                        .await {
+                            Ok(streamed) => streamed,
+                            Err(error) if block_outcomes.is_some() && isolated_child_execution_error(&error) => {
+                                tracing::warn!(relation = output.relation_id.as_str(), %error, "query block execution failed");
+                                block_outcomes.as_mut().expect("outcome presence checked").fail_execution(output.relation_id.as_str())?;
+                                continue;
+                            }
+                            Err(error) => return Err(error.into()),
+                        };
                     let schema = Arc::clone(streamed.schema());
                     let compilation = streamed.observations().clone();
                     let mut provenance = compilation_provenance(&compilation);
@@ -1127,17 +1147,12 @@ impl RelationalQueryRuntime {
                                 identity: producer.as_str().into(),
                             }),
                     );
-                    compiled_outputs.push((
-                        output.relation_id.clone(),
-                        schema.clone(),
-                        compilation,
-                    ));
                     let stream = if reusable.contains(&output.relation_id) {
                         let selected_rows = output
                             .row_selection
                             .as_ref()
                             .map_or(max_output_rows, |selection| selection.maximum_rows);
-                        let result = super::query_result_input::RetainedBlockResult::collect(
+                        let result = match super::query_result_input::RetainedBlockResult::collect(
                             Arc::clone(&schema),
                             streamed.into_stream(),
                             child.reserve_prior_result_memory(),
@@ -1147,13 +1162,23 @@ impl RelationalQueryRuntime {
                             &seal_cancellation,
                             deadline,
                         )
-                        .await?;
+                        .await {
+                            Ok(result) => result,
+                            Err(StreamedResultPackageError::DataFusion(error)) if block_outcomes.is_some()
+                                && super::query_block_outcomes::isolated_execution_error(&error) => {
+                                tracing::warn!(relation = output.relation_id.as_str(), %error, "reusable query block execution failed");
+                                block_outcomes.as_mut().expect("outcome presence checked").fail_execution(output.relation_id.as_str())?;
+                                continue;
+                            }
+                            Err(error) => return Err(error.into()),
+                        };
                         let stream = result.stream();
                         retained.insert(output.relation_id.clone(), result);
                         stream
                     } else {
                         streamed.into_stream()
                     };
+                    compiled_outputs.push((output.relation_id.clone(), schema.clone(), compilation));
                     relation_streams.push(StreamedRelationInput {
                         relation_id: output.relation_id,
                         schema,
@@ -1164,6 +1189,12 @@ impl RelationalQueryRuntime {
                         row_selection: output.row_selection,
                     });
                 }
+                if let Some(outcomes) = &block_outcomes {
+                    outcomes.write_response(&mut response)?;
+                    outcomes.retain_processing(&mut processing);
+                }
+                let canonical_semantic_response = serde_json_canonicalizer::to_vec(&response)
+                    .map_err(StreamedResultPackageError::CanonicalResponse)?;
                 let package = builder
                     .seal_with_processing(
                         epoch_id,
@@ -1183,8 +1214,15 @@ impl RelationalQueryRuntime {
                     .iter()
                     .map(|relation| (relation.relation_id.as_str(), relation))
                     .collect::<BTreeMap<_, _>>();
+                let failed_queries = package.manifest().query_results()?.unwrap_or_default().into_iter()
+                    .filter(|row| row.execution_state != crate::semantic_query_contract::QueryBlockExecutionState::Complete)
+                    .map(|row| row.query_id).collect::<BTreeSet<_>>();
                 let observations = compiled_outputs
                     .into_iter()
+                    .filter(|(relation, _, _)| {
+                        !block_outcomes.as_ref().and_then(|outcomes| outcomes.query_id(relation.as_str()))
+                            .is_some_and(|query| failed_queries.contains(query))
+                    })
                     .map(|(relation_id, schema, compilation)| {
                         let manifest =
                             manifest_relations
@@ -1275,6 +1313,16 @@ const fn all_zero<const N: usize>(value: &[u8; N]) -> bool {
         index += 1;
     }
     true
+}
+
+fn isolated_child_execution_error(error: &ChildSessionError) -> bool {
+    match error {
+        ChildSessionError::DataFusion(error)
+        | ChildSessionError::RelationalProgram(RelationalProgramError::DataFusion(error)) => {
+            super::query_block_outcomes::isolated_execution_error(error)
+        }
+        _ => false,
+    }
 }
 
 fn compilation_provenance(observations: &CompilationObservations) -> Vec<ResultProvenance> {
@@ -2427,6 +2475,214 @@ mod tests {
             )
             .unwrap();
         assert!(first_weak.upgrade().is_none());
+    }
+
+    #[tokio::test]
+    async fn native_failed_producer_skips_dependents_and_seals_independent_results() {
+        native_failed_block_fixture(true).await;
+        native_failed_block_fixture(false).await;
+    }
+
+    #[allow(clippy::too_many_lines)] // Keep the real native DAG and its publication expectations together.
+    async fn native_failed_block_fixture(reusable: bool) {
+        use super::super::streamed_result_package::{
+            ObjectStoreResultSink, PendingResultObjectSet, ResultPublicationIntentError,
+            StreamedResultPackageLimits,
+        };
+        use crate::relational_program::{NamedExpression, ScalarExpression, ScalarOperator};
+        use arrow_array::Int64Array;
+        use datafusion::common::ScalarValue;
+
+        #[derive(Debug)]
+        struct Recorder;
+        #[async_trait::async_trait]
+        impl ResultPublicationIntentRecorder for Recorder {
+            async fn record_publication_intent(
+                &self,
+                _: PendingResultObjectSet,
+            ) -> Result<(), ResultPublicationIntentError> {
+                Ok(())
+            }
+        }
+
+        const INDEPENDENT: &str = "query.independent";
+        let workspace = WorkspaceId::from_bytes(id16(1));
+        let epoch_id = EpochId::from_bytes(id16(20));
+        let mut builder =
+            ProgrammaticFabricEpochBuilder::try_new(epoch_id, FabricEpochRuntimeConfig::default())
+                .unwrap();
+        for relation in [ALLOWED_RELATION, SECOND_RELATION, INDEPENDENT] {
+            let field =
+                Field::new("value", DataType::Int64, false).with_metadata(HashMap::from([(
+                    FIELD_ID_METADATA_KEY.into(),
+                    format!("{relation}.value"),
+                )]));
+            let schema = Arc::new(Schema::new_with_metadata(
+                vec![field],
+                HashMap::from([(RELATION_ID_METADATA_KEY.into(), relation.into())]),
+            ));
+            let table = TableReference::full(FABRIC_CATALOG, "fact", relation);
+            let contract = Arc::new(
+                SchemaContract::try_new(
+                    format!("provider:{relation}:v1"),
+                    table.clone(),
+                    schema.clone(),
+                    schema.clone(),
+                    vec![FieldIndexMapping::direct(0, 0)],
+                )
+                .unwrap(),
+            );
+            let batch =
+                RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![42]))])
+                    .unwrap();
+            builder
+                .register_provider(ProviderInput::new(
+                    ProgrammaticRelationId::new(relation),
+                    table,
+                    contract,
+                    Arc::new(MemTable::try_new(schema, vec![vec![batch]]).unwrap()),
+                ))
+                .unwrap();
+        }
+        let epoch = Arc::new(builder.seal_for_test().await.unwrap());
+        let (admission, _) = admitted_runtime(workspace, epoch.clone());
+        let resources = resource_coordinator(&epoch);
+        let runtime = test_query_runtime(workspace, admission.clone(), resources.clone());
+        let (producer_id, mut producer_program) = program(&epoch, ALLOWED_RELATION);
+        let producer_field = producer_program.output_fields[0].clone();
+        // Native integer division reads a real provider column. This fails during execution,
+        // rather than relying on a fabricated error or an unavailable semantic phrase.
+        producer_program.root = RelationalExpression::Filter {
+            input: Box::new(producer_program.root),
+            predicate: ScalarExpression::Call {
+                operator: ScalarOperator::GreaterThan,
+                arguments: vec![
+                    ScalarExpression::Call {
+                        operator: ScalarOperator::Divide,
+                        arguments: vec![
+                            ScalarExpression::Field(producer_field),
+                            ScalarExpression::Literal(ScalarValue::Int64(Some(0))),
+                        ],
+                    },
+                    ScalarExpression::Literal(ScalarValue::Int64(Some(0))),
+                ],
+            },
+        };
+        let producer = SelectedQueryOutput::new(
+            producer_id.clone(),
+            producer_program,
+            Some(ResultCoverage::complete(1)),
+        );
+        let mut consumer = selected_output(&epoch, SECOND_RELATION);
+        let slot_id = RelationId::new("query.prior.failed").unwrap();
+        let slot_field = FieldId::new("query.prior.failed.value").unwrap();
+        let slot = SupplementalProgramRelationBinding::try_new(
+            slot_id.clone(),
+            TableReference::full(FABRIC_CATALOG, "query_input", "failed"),
+            Arc::new(Schema::new(vec![Field::new(
+                "value",
+                DataType::Int64,
+                false,
+            )])),
+            vec![slot_field.clone()],
+            id32(70),
+        )
+        .unwrap();
+        consumer.program.root = RelationalExpression::Projection {
+            input: Box::new(RelationalExpression::Input(slot_id)),
+            expressions: vec![NamedExpression {
+                field_id: consumer.program.output_fields[0].clone(),
+                expression: ScalarExpression::Field(slot_field),
+            }],
+        };
+        consumer = consumer.with_prior_result_input(slot, vec![producer_id]);
+        let mut outputs = vec![producer, selected_output(&epoch, INDEPENDENT)];
+        if reusable {
+            outputs.insert(0, consumer);
+        }
+        let response = serde_json_canonicalizer::to_vec(&serde_json::json!({
+            "queries": outputs.iter().map(|output| serde_json::json!({"query_id":output.relation_id.as_str(),
+                "relation_id":output.relation_id.as_str()})).collect::<Vec<_>>(),
+            "query_results": outputs.iter().map(|output| serde_json::json!({"query_id":output.relation_id.as_str(),
+                "execution_state":"COMPLETE","errors":[]})).collect::<Vec<_>>()
+        })).unwrap();
+        let transaction = RelationalQueryTransaction::try_new(
+            owner(workspace, 0x31),
+            QueryExecutionPin::from_bytes(id32(0x51)),
+            authorization(
+                &epoch,
+                &[ALLOWED_RELATION, SECOND_RELATION, INDEPENDENT],
+                100,
+            ),
+            outputs,
+            ResultResourceLease::try_new(LeaseId::from_bytes(id16(0x61)), 1_000, 2_000).unwrap(),
+            token(0x71),
+            result_limits(),
+            1_500,
+            Cancellation::default(),
+        )
+        .unwrap()
+        .with_canonical_semantic_response(response)
+        .with_deadline(Instant::now() + std::time::Duration::from_secs(10));
+        let package_builder = StreamedResultPackageBuilder::new(
+            Arc::new(ObjectStoreResultSink::new(Arc::new(
+                object_store::memory::InMemory::new(),
+            ))),
+            StreamedResultPackageLimits::try_new(
+                8,
+                64,
+                10,
+                64 * 1024,
+                1024,
+                4 * 1024 * 1024,
+                128 * 1024,
+                64,
+                1024,
+            )
+            .unwrap(),
+            resources.resource_budget().clone(),
+        );
+        let publication = runtime
+            .execute_admitted_and_seal(
+                admission.admit_selected(epoch).unwrap(),
+                resources,
+                transaction,
+                &package_builder,
+                Arc::new(Recorder),
+            )
+            .await
+            .unwrap();
+        let manifest = publication.package().manifest();
+        assert_eq!(manifest.total_rows, 1);
+        assert_eq!(manifest.relations.len(), 1);
+        assert_eq!(manifest.relations[0].relation_id, INDEPENDENT);
+        let outcomes = manifest.query_results().unwrap().unwrap();
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|row| row.query_id.as_str())
+                .collect::<Vec<_>>(),
+            if reusable {
+                vec![SECOND_RELATION, ALLOWED_RELATION, INDEPENDENT]
+            } else {
+                vec![ALLOWED_RELATION, INDEPENDENT]
+            }
+        );
+        if reusable {
+            assert_eq!(
+                outcomes[0].errors[0].related_id.as_deref(),
+                Some(ALLOWED_RELATION)
+            );
+        }
+        assert_eq!(
+            outcomes[usize::from(reusable)].errors[0].code,
+            "QUERY_EXECUTION_FAILED"
+        );
+        assert_eq!(
+            outcomes.last().unwrap().execution_state,
+            crate::semantic_query_contract::QueryBlockExecutionState::Complete
+        );
+        assert_eq!(publication.output_observations().len(), 1);
     }
 
     #[tokio::test]

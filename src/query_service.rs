@@ -2681,6 +2681,18 @@ impl ResultPublicationIntentRecorder for CoordinatorPublicationIntentRecorder {
             .map(|_| ())
             .map_err(|_| ResultPublicationIntentError)
     }
+
+    async fn reconcile_after_cleanup(
+        &self,
+        previous: PendingResultObjectSet,
+        retained: PendingResultObjectSet,
+    ) -> Result<(), ResultPublicationIntentError> {
+        self.coordinator
+            .reconcile_publication_after_cleanup(&self.query_id, &previous, retained, now_millis())
+            .await
+            .map(|_| ())
+            .map_err(|_| ResultPublicationIntentError)
+    }
 }
 
 async fn execute_accepted_query<B: SemanticQueryBackend>(task: ExecutionTask<B>) {

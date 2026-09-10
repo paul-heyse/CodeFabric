@@ -48,6 +48,43 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The runtime continuation after `bb059db5` isolates native computation errors in both reusable
+producers and leaf streams. Failed producers skip their dependents; independent blocks keep their
+real Arrow results. Failed leaves stop native production, delete their trailing private pages and
+reconcile the exact durable cleanup checkpoint before sealing. If deletion or checkpoint replacement
+fails, the request fails and the previous recovery checkpoint retains ownership. A crash before
+replacement leaves an idempotently deletable page set. Successful output observations and processing
+summaries exclude the failed blocks; typed outcomes retain original request order.
+
+DataFusion reference §33.2–33.3 and the resolved 55.0.0/Arrow 59.2.0 error enums ground the boundary:
+native execution and arithmetic/cast/compute errors can fail a block. Resource, storage, schema,
+internal, source hard-limit, cancellation and deadline failures remain fatal. Native `find_root`
+preserves classification through contextual/external wrappers. Leaf results remain streamed, and
+retained producer rows retain their native shared-pool reservation and owned lifetime.
+
+The first ten fault/recovery cases pass in 0.20 s, including a real provider-column division by zero,
+dependent skipping, partial-page deletion, exact reopen, stale-checkpoint rejection, cleanup failures
+and resource release (`/tmp/codefabric-p03-runtime-branches-tests-2.log`). The expanded test also
+covers a failing leaf and passes during the integrated run. That run passes 56 of 57 selected cases,
+including the installed branch/reopen scenario in 121.72 s; the ordering scenario fails with a client
+`MCPError` at the query step in 178.57 s, without an underlying public error
+(`/tmp/codefabric-p03-runtime-branches-regression.log`). The serial rerun passes the source-window/
+hard-limit/reopen scenario in 108.63 s and all five selected runtime/outcome cases, but ordering again
+expires before query admission. Its semantic preparation records 26.62 s in Cargo/rustc and an
+unfinished 95.39 s in relational execution/Delta writing at teardown. The ordering fixture now waits
+for exact semantic activation within a separate 180-second preparation bound before its queries.
+The final installed ordering/prior/reopen scenario passes in 207.03 s
+(`/tmp/codefabric-p03-runtime-branches-ordering-ready.log`). Completed semantic preparation publishes
+129 relations, spending 27.83 s in Cargo/rustc and 101.15 s in relational execution/Delta writes;
+the source epoch's 84 relations take 47.63 s in that phase. These are observed costs, not comparative
+performance qualification. Initial mixed-input readiness within the adapter's 120-second operation
+deadline remains unqualified; preparation performance stays in P04/P14.
+Default/featureless root checks and final affected Clippy pass. All
+218 tooling cases pass in 6.58 s. The workstation uv mismatch
+was reconciled from 0.12.12 to the required 0.12.11; `just tool-version-contract-check` passes.
+Early phrase/input/authorization errors, ready-block concurrency, prior FindEntities scopes and
+broader first-four semantics remain P03 work. No package or outcome exit is claimed.
+
 The continuation after `82bda01b` now retains an all-failed compiler request as a typed result
 manifest with zero relations, pages and data rows. The request operation finishes successfully;
 each failed/skipped block keeps its actual execution outcome. No empty fact relation is fabricated.
@@ -95,7 +132,8 @@ also caught null-versus-absent related IDs; Rust now omits unset related IDs con
 generated wire and public adapter. `query-branches` selects the scenario. Navigation, affected
 spelling and diff checks pass; full-suite/strict baseline lint closure is not claimed.
 
-This is the initial compiler-failure vertical. Runtime stream/planning failures, early phrase/input
+This is the initial compiler-failure vertical. The runtime continuation above handles native
+computation failures; other early phrase/input
 and authorization failures, ready-block concurrency, prior FindEntities scopes and broader
 first-four semantics remain P03 work. The subsequent continuation above adds all-failed request
 result envelopes. P03 and subsequent packages remain open.

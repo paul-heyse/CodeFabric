@@ -318,7 +318,8 @@ pub enum QueryControlEventPayload {
         completed: u64,
         total: Option<u64>,
     },
-    /// Monotonic private object set durably extended before each additional page write.
+    /// Private object set extended before page writes; owned rollback requires an exact
+    /// checkpoint precondition after deletion of a trailing page set.
     PublicationPending { object_set: PendingResultObjectSet },
     ResultReady {
         package_id: String,
@@ -1258,6 +1259,39 @@ impl QueryCoordinator {
         payload: QueryControlEventPayload,
         observed_at_unix_ms: i64,
     ) -> Result<QueryControlEvent, QueryCoordinatorError> {
+        self.append_event_with_cleanup_precondition(query_id, payload, observed_at_unix_ms, None)
+            .await
+    }
+
+    /// Replace the exact private checkpoint after its writer deleted a trailing page set.
+    /// A crash before this replacement leaves an idempotently deletable previous checkpoint.
+    pub(crate) async fn reconcile_publication_after_cleanup(
+        &self,
+        query_id: &str,
+        previous: &PendingResultObjectSet,
+        retained: PendingResultObjectSet,
+        observed_at_unix_ms: i64,
+    ) -> Result<QueryControlEvent, QueryCoordinatorError> {
+        self.append_event_with_cleanup_precondition(
+            query_id,
+            QueryControlEventPayload::PublicationPending {
+                object_set: retained,
+            },
+            observed_at_unix_ms,
+            Some(previous),
+        )
+        .await
+    }
+
+    // Keep validation, private checkpoint replacement and durable commit in one critical section.
+    #[allow(clippy::too_many_lines)]
+    async fn append_event_with_cleanup_precondition(
+        &self,
+        query_id: &str,
+        payload: QueryControlEventPayload,
+        observed_at_unix_ms: i64,
+        cleanup_precondition: Option<&PendingResultObjectSet>,
+    ) -> Result<QueryControlEvent, QueryCoordinatorError> {
         if payload.is_terminal() {
             return Err(QueryCoordinatorError::TerminalRequiresClosure);
         }
@@ -1286,13 +1320,28 @@ impl QueryCoordinator {
                     if previous.manifest_object_path != object_set.manifest_object_path
                         || previous.epoch_id != object_set.epoch_id
                         || previous.query_execution != object_set.query_execution
-                        || object_set.page_object_paths.len() <= previous.page_object_paths.len()
-                        || !object_set
-                            .page_object_paths
-                            .starts_with(&previous.page_object_paths)
+                        || match cleanup_precondition {
+                            Some(expected) => {
+                                expected != &previous
+                                    || object_set.page_object_paths.len()
+                                        >= previous.page_object_paths.len()
+                                    || !previous
+                                        .page_object_paths
+                                        .starts_with(&object_set.page_object_paths)
+                            }
+                            None => {
+                                object_set.page_object_paths.len()
+                                    <= previous.page_object_paths.len()
+                                    || !object_set
+                                        .page_object_paths
+                                        .starts_with(&previous.page_object_paths)
+                            }
+                        }
                     {
                         return Err(QueryCoordinatorError::PublicationIntentConflict);
                     }
+                } else if cleanup_precondition.is_some() {
+                    return Err(QueryCoordinatorError::PublicationIntentMissing);
                 }
             }
             QueryControlEventPayload::ResultReady {
@@ -3858,6 +3907,128 @@ mod tests {
         assert_eq!(
             restarted.pending_result_cleanups().await,
             [(query_id, expected)]
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // One checkpoint lineage spans stale writers and restart.
+    async fn failed_block_cleanup_requires_exact_checkpoint_and_survives_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let limits = policy(1, 1_024, 64);
+        let previous = pending_object_set(&retained_locator());
+        let mut retained = previous.clone();
+        retained.page_object_paths.truncate(1);
+        let query_id = {
+            let coordinator = coordinator(&temp, limits, 7, 1_000);
+            let accepted = acceptance(
+                coordinator
+                    .accept(operation("rollback", 1), 1_000)
+                    .await
+                    .unwrap(),
+            );
+            assert!(matches!(
+                coordinator
+                    .reconcile_publication_after_cleanup(
+                        &accepted.query_id,
+                        &previous,
+                        retained.clone(),
+                        1_001
+                    )
+                    .await,
+                Err(QueryCoordinatorError::PublicationIntentMissing)
+            ));
+            coordinator
+                .append_event(
+                    &accepted.query_id,
+                    QueryControlEventPayload::PublicationPending {
+                        object_set: previous.clone(),
+                    },
+                    1_002,
+                )
+                .await
+                .unwrap();
+            let public_before = coordinator
+                .events_after(&accepted.query_id, 0)
+                .await
+                .unwrap();
+            let mut wrong_prefix = retained.clone();
+            wrong_prefix.page_object_paths[0] = previous.page_object_paths[1].clone();
+            let mut wrong_epoch = retained.clone();
+            wrong_epoch.epoch_id = "ff".repeat(16);
+            for (expected, next) in [
+                (retained.clone(), retained.clone()),
+                (previous.clone(), previous.clone()),
+                (previous.clone(), wrong_prefix),
+                (previous.clone(), wrong_epoch),
+            ] {
+                assert!(
+                    coordinator
+                        .reconcile_publication_after_cleanup(
+                            &accepted.query_id,
+                            &expected,
+                            next,
+                            1_003
+                        )
+                        .await
+                        .is_err()
+                );
+            }
+            coordinator
+                .reconcile_publication_after_cleanup(
+                    &accepted.query_id,
+                    &previous,
+                    retained.clone(),
+                    1_004,
+                )
+                .await
+                .unwrap();
+            // The old writer cannot replace a newer checkpoint, even with a valid prefix.
+            let mut empty = previous.clone();
+            empty.page_object_paths.clear();
+            assert!(matches!(
+                coordinator
+                    .reconcile_publication_after_cleanup(
+                        &accepted.query_id,
+                        &previous,
+                        empty,
+                        1_005
+                    )
+                    .await,
+                Err(QueryCoordinatorError::PublicationIntentConflict)
+            ));
+            assert_eq!(
+                coordinator
+                    .events_after(&accepted.query_id, 0)
+                    .await
+                    .unwrap(),
+                public_before
+            );
+            // New writes can extend the reconciled checkpoint through the ordinary path.
+            coordinator
+                .append_event(
+                    &accepted.query_id,
+                    QueryControlEventPayload::PublicationPending {
+                        object_set: previous.clone(),
+                    },
+                    1_006,
+                )
+                .await
+                .unwrap();
+            coordinator
+                .reconcile_publication_after_cleanup(
+                    &accepted.query_id,
+                    &previous,
+                    retained.clone(),
+                    1_007,
+                )
+                .await
+                .unwrap();
+            accepted.query_id
+        };
+        let restarted = coordinator(&temp, limits, 8, 1_100);
+        assert_eq!(
+            restarted.pending_result_cleanups().await,
+            [(query_id, retained)]
         );
     }
 

@@ -231,8 +231,10 @@ fn pragmatic_semantic_ordering_precedes_limits_and_survives_prior_reuse_and_reop
     }
     let stack = InstalledProductionStack::build();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    // This scenario measures query ordering after native publication. The observed mixed-language
+    // preparation can exceed the adapter's per-operation deadline before any query is admitted.
+    let selected = wait_for_semantic_activation_with_timeout(&fixture, Duration::from_secs(180));
     let expected = ordered_queries(&fixture, &stack, "initial");
-    let selected = wait_for_semantic_activation(&fixture);
     supervisor.stop();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
     assert_eq!(
