@@ -168,6 +168,7 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
         "repeated-first-four",
         "prior-entities",
         "semantic-relationships",
+        "literal-identifiers",
         "python-live",
         "mixed-clean-live",
         "staged-live",

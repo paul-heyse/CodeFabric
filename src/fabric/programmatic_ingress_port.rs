@@ -738,12 +738,25 @@ impl ApplicationOwnedSemanticIngressPort {
                 where_conditions,
                 ..
             } => {
+                let literal = code_literals::entity_selection(looking_for);
+                if looking_for.contains('`') && literal.is_none() {
+                    return Err(rejected(
+                        "quoted entity identifiers require a supported kind phrase and one nonempty literal",
+                    ));
+                }
+                let (meaning, predicates) = if let Some((meaning, predicate)) = &literal {
+                    let mut predicates = where_conditions.clone();
+                    predicates.push(predicate.clone());
+                    (meaning.as_str(), predicates)
+                } else {
+                    (looking_for.as_str(), where_conditions.clone())
+                };
                 project_selection(
                     fields,
                     &mut consumed,
                     ProgrammaticFormIngressField::LookingFor,
                     query_id,
-                    vec![text(looking_for)?],
+                    vec![text(meaning)?],
                     projection,
                 )?;
                 self.project_references(
@@ -761,7 +774,7 @@ impl ApplicationOwnedSemanticIngressPort {
                     &mut consumed,
                     ProgrammaticFormIngressField::Where,
                     query_id,
-                    where_conditions,
+                    &predicates,
                     projection,
                 )?;
             }
@@ -2170,6 +2183,7 @@ fn released_form(clause: &SemanticQueryClause) -> ReleasedSemanticForm {
     }
 }
 
+mod code_literals;
 mod family_selection;
 
 fn select_clause_program<'a>(
@@ -2869,7 +2883,9 @@ fn validate_texts<'a>(
 }
 
 fn contains_evaluative_intent(canonical_bytes: &[u8]) -> bool {
-    let normalized = String::from_utf8_lossy(canonical_bytes).to_ascii_lowercase();
+    let mut semantic = serde_json::from_slice(canonical_bytes).unwrap_or(serde_json::Value::Null);
+    code_literals::without_literal_values(&mut semantic);
+    let normalized = semantic.to_string().to_ascii_lowercase();
     [
         "safe_to_refactor",
         "safe to refactor",

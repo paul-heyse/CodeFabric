@@ -1309,6 +1309,22 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 );
             }
             for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
+                if let Err(message) = crate::production_query_recipe::validate_property_inputs(
+                    &request.parsed().request,
+                    query_id,
+                    &validated.ingress().selections,
+                ) {
+                    return failed_error(
+                        &artifacts,
+                        "property_scope",
+                        SemanticQueryError::Phase {
+                            code: "SEMANTIC_REFERENCE_UNAVAILABLE",
+                            phase: "property_resolution",
+                            pointer: format!("queries.{query_id}.where"),
+                            message,
+                        },
+                    );
+                }
                 let canonical_family = crate::production_query_recipe::canonical_result_family(
                     output.relation_id().as_str(),
                 );
@@ -1688,6 +1704,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             "queries": output_queries.iter().map(|query_id| serde_json::json!({
                 "query_id": query_id,
                 "relation_id": output_by_query[query_id].as_str(),
+                "resolved_semantics": resolved_semantic_selections(&validated.ingress().selections, query_id),
             })).collect::<Vec<_>>(),
             "query_dependencies": handoff.prior_results.iter().flat_map(|slot| {
                 slot.producer_query_ids.iter().map(|producer| serde_json::json!({
@@ -1772,6 +1789,40 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             artifacts.snapshot(),
         ))
     }
+}
+
+fn resolved_semantic_selections(
+    selections: &[crate::relational_semantic_query::EpochBoundSelectionRow],
+    query_id: &str,
+) -> std::collections::BTreeMap<String, Vec<serde_json::Value>> {
+    let mut result = std::collections::BTreeMap::<String, Vec<serde_json::Value>>::new();
+    for selection in selections
+        .iter()
+        .filter(|row| row.query_id.as_ref() == query_id)
+    {
+        let value = match &selection.value {
+            SemanticClauseValue::Boolean(value) => serde_json::json!(value),
+            SemanticClauseValue::Int64(value) => serde_json::json!(value),
+            SemanticClauseValue::UInt64(value) => serde_json::json!(value),
+            SemanticClauseValue::Text(value)
+                if selection.selection_id.as_ref() == "selection.where" =>
+            {
+                serde_json::from_str(value).unwrap_or_else(|_| serde_json::json!(value))
+            }
+            SemanticClauseValue::Text(value) => serde_json::json!(value),
+        };
+        result
+            .entry(
+                selection
+                    .selection_id
+                    .strip_prefix("selection.")
+                    .unwrap_or(&selection.selection_id)
+                    .replace('-', "_"),
+            )
+            .or_default()
+            .push(value);
+    }
+    result
 }
 
 /// Deterministic pin of the already canonical released request bytes.

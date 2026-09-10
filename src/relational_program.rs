@@ -263,6 +263,8 @@ impl SupplementalProgramRelationBinding {
 /// Closed scalar operations that map to native DataFusion expressions.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ScalarOperator {
+    /// Native LIKE lowering with an escaped, literal suffix; never a public pattern.
+    TextEndsWith,
     Equal,
     NotEqual,
     LessThan,
@@ -1433,6 +1435,28 @@ impl CompileState {
                     self.require_boolean(&arguments[0], schema, "NOT argument")?;
                 }
                 let expression = match operator {
+                    ScalarOperator::TextEndsWith => {
+                        let suffix = arguments.pop().expect("checked binary arity");
+                        let Expr::Literal(ScalarValue::Utf8(Some(suffix)), _) = suffix else {
+                            return Err(RelationalProgramError::InvalidProgram(
+                                "literal text suffix is required".into(),
+                            ));
+                        };
+                        let mut pattern = String::from("%");
+                        for character in suffix.chars() {
+                            if matches!(character, '%' | '_' | '\\') {
+                                pattern.push('\\');
+                            }
+                            pattern.push(character);
+                        }
+                        Expr::Like(datafusion::logical_expr::expr::Like::new(
+                            false,
+                            Box::new(arguments.pop().expect("checked binary arity")),
+                            Box::new(Expr::Literal(ScalarValue::Utf8(Some(pattern)), None)),
+                            Some('\\'),
+                            false,
+                        ))
+                    }
                     ScalarOperator::Equal => arguments.remove(0).eq(arguments.remove(0)),
                     ScalarOperator::NotEqual => arguments.remove(0).not_eq(arguments.remove(0)),
                     ScalarOperator::LessThan => arguments.remove(0).lt(arguments.remove(0)),
@@ -1658,7 +1682,8 @@ impl CompileState {
 const fn scalar_arity(operator: ScalarOperator) -> usize {
     match operator {
         ScalarOperator::Not | ScalarOperator::IsNull | ScalarOperator::IsNotNull => 1,
-        ScalarOperator::Equal
+        ScalarOperator::TextEndsWith
+        | ScalarOperator::Equal
         | ScalarOperator::NotEqual
         | ScalarOperator::LessThan
         | ScalarOperator::LessThanOrEqual
@@ -2374,5 +2399,86 @@ mod tests {
             Err(RelationalProgramError::InvalidProgram(message))
                 if message.contains("shadows an epoch relation")
         ));
+    }
+    #[tokio::test]
+    async fn literal_suffix_uses_native_like_without_wildcard_or_case_expansion() {
+        use arrow_array::{Int64Array, RecordBatch, StringArray};
+        use datafusion::prelude::SessionContext;
+        let context = SessionContext::new();
+        let names = [
+            "root::a_b",
+            "root::aXb",
+            "root::a%b",
+            r"root::a\b",
+            "root::café",
+            "root::nested::a_b",
+            "root::A_b",
+        ];
+        let schema = Arc::new(arrow_schema::Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("group_name", DataType::Utf8, false),
+            Field::new("value", DataType::Int64, true),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from_iter_values(0..7)),
+                Arc::new(StringArray::from(names.to_vec())),
+                Arc::new(Int64Array::from(vec![Some(0); 7])),
+            ],
+        )
+        .unwrap();
+        let plan = context.read_batch(batch).unwrap().into_unoptimized_plan();
+        for (suffix, expected) in [
+            ("::a_b", vec![0, 5]),
+            ("::a%b", vec![2]),
+            (r"::a\b", vec![3]),
+            ("::café", vec![4]),
+            ("::absent", vec![]),
+        ] {
+            let program = RelationalProgram {
+                root: RelationalExpression::Filter {
+                    input: Box::new(RelationalExpression::Input(relation_id(LEFT))),
+                    predicate: ScalarExpression::Call {
+                        operator: ScalarOperator::TextEndsWith,
+                        arguments: vec![
+                            field(LEFT_GROUP),
+                            ScalarExpression::Literal(ScalarValue::Utf8(Some(suffix.into()))),
+                        ],
+                    },
+                },
+                output_fields: vec![id(LEFT_ID), id(LEFT_GROUP), id(LEFT_VALUE)],
+            };
+            let compiled = RelationalProgramCompiler::compile_with_bindings(
+                &program_bindings(),
+                vec![RelationInput {
+                    relation_id: relation_id(LEFT),
+                    plan: plan.clone(),
+                }],
+                &program,
+            )
+            .unwrap();
+            let batches = context
+                .execute_logical_plan(compiled.plan)
+                .await
+                .unwrap()
+                .collect()
+                .await
+                .unwrap();
+            let actual = batches
+                .iter()
+                .flat_map(|batch| {
+                    batch
+                        .column(0)
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .unwrap()
+                        .values()
+                        .iter()
+                        .copied()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected, "{suffix}");
+        }
     }
 }

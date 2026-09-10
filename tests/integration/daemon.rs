@@ -33,6 +33,7 @@ mod semantic_references;
 mod fact_families;
 mod block_queries;
 mod relationship_queries;
+mod literal_queries;
 mod types;
 
 struct InstalledProductionStack {

@@ -1,0 +1,120 @@
+//! Quoted identifiers are literal operands, separate from controlled entity-kind phrases.
+
+use crate::relational_semantic_query::property_predicate::{TextComparison, TextPropertyPredicate};
+
+pub(super) fn entity_selection(value: &str) -> Option<(String, String)> {
+    let (phrase, quoted) = value.split_once('`')?;
+    let name = quoted.strip_suffix('`')?;
+    if name.is_empty() || name.contains('`') || name.chars().any(char::is_control) {
+        return None;
+    }
+    let phrase = phrase.trim().strip_prefix("the ").unwrap_or(phrase.trim());
+    let phrase = phrase.strip_suffix(" named").unwrap_or(phrase);
+    let meaning = match phrase {
+        "Python function" => "Python function declarations",
+        "Rust function" => "Rust function declarations",
+        "function" => "function declarations",
+        "Python class" => "Python class declarations",
+        "Python module" => "Python modules",
+        "Python parameter" => "Python parameter declarations",
+        "Python binding" => "Python binding declarations",
+        "Rust constant" => "Rust constant declarations",
+        "Rust static" => "Rust static declarations",
+        _ => return None,
+    };
+    let predicate = TextPropertyPredicate {
+        property: if phrase.starts_with("Rust ") && name.contains("::") {
+            "qualified name"
+        } else {
+            "name"
+        }
+        .into(),
+        operator: TextComparison::Equal,
+        value: name.into(),
+    };
+    Some((
+        meaning.into(),
+        serde_json::to_string(&predicate).expect("literal predicate serializes"),
+    ))
+}
+
+pub(super) fn without_literal_values(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            if let Some(serde_json::Value::String(phrase)) = fields.get_mut("looking_for")
+                && let Some((meaning, _)) = entity_selection(phrase)
+            {
+                *phrase = meaning;
+            }
+            if let Some(serde_json::Value::Array(conditions)) = fields.get_mut("where") {
+                for condition in conditions {
+                    let encoded = condition
+                        .as_str()
+                        .map_or_else(|| condition.to_string(), str::to_owned);
+                    if TextPropertyPredicate::parse(&encoded).is_ok() {
+                        *condition = serde_json::json!({"literal_property_predicate":true});
+                    }
+                }
+            }
+            for child in fields.values_mut() {
+                without_literal_values(child);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for child in values {
+                without_literal_values(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quoted_names_remain_exact_and_separate_from_the_kind_phrase() {
+        let (meaning, predicate) = entity_selection("the Python function named `café`").unwrap();
+        assert_eq!(meaning, "Python function declarations");
+        assert_eq!(
+            TextPropertyPredicate::parse(&predicate).unwrap().value,
+            "café"
+        );
+        let (_, predicate) = entity_selection("the Rust function `crate::module::target`").unwrap();
+        assert_eq!(
+            TextPropertyPredicate::parse(&predicate).unwrap().property,
+            "qualified name"
+        );
+        for invalid in [
+            "Python function named target",
+            "Python function named ``",
+            "Python function `a` or `b`",
+            "Python function `a` extra",
+            "safe to refactor `a`",
+        ] {
+            assert!(entity_selection(invalid).is_none());
+        }
+    }
+    #[test]
+    fn objective_intent_check_distinguishes_code_literals_from_judgments() {
+        let check = |value: serde_json::Value| {
+            super::super::contains_evaluative_intent(&serde_json::to_vec(&value).unwrap())
+        };
+        assert!(!check(
+            serde_json::json!({"queries":[{"looking_for":"the Rust function named `safe_to_refactor`","where":[{"property":"name","operator":"equals","value":"high risk"}]}]})
+        ));
+        assert!(!check(
+            serde_json::json!({"queries":[{"where":[r#"{"property":"name","operator":"equals","value":"should_change"}"#]}]})
+        ));
+        assert!(check(
+            serde_json::json!({"queries":[{"facts":["safe_to_refactor"]}]})
+        ));
+        assert!(check(
+            serde_json::json!({"queries":[{"looking_for":"high risk functions"}]})
+        ));
+        assert!(check(
+            serde_json::json!({"queries":[{"looking_for":"Python function `x` should change"}]})
+        ));
+    }
+}

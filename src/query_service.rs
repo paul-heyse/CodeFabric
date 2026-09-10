@@ -2877,7 +2877,10 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(task: ExecutionTask<B>)
             tracing::warn!(query_id, error = %error, "semantic query execution failed");
             let public_code = match &error {
                 SemanticQueryError::Phase {
-                    code: code @ ("RESOURCE_CAPACITY" | "QUERY_HARD_LIMIT_EXCEEDED"),
+                    code:
+                        code @ ("RESOURCE_CAPACITY"
+                        | "QUERY_HARD_LIMIT_EXCEEDED"
+                        | "SEMANTIC_REFERENCE_UNAVAILABLE"),
                     ..
                 } => *code,
                 _ => "QUERY_EXECUTION_FAILED",
@@ -3285,6 +3288,8 @@ async fn event_to_wire(
                             SafeErrorCode::CapacityUnavailable
                         } else if public_code == "QUERY_HARD_LIMIT_EXCEEDED" {
                             SafeErrorCode::QueryHardLimitExceeded
+                        } else if public_code == "SEMANTIC_REFERENCE_UNAVAILABLE" {
+                            SafeErrorCode::ValidationRejected
                         } else {
                             terminal_safe_code(state)
                         },

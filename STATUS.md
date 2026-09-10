@@ -48,6 +48,37 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The literal/filter continuation now separates quoted identifiers from entity-kind phrases. For
+example, a Rust function request with a backtick-quoted `target` becomes a declaration meaning and a
+literal name predicate; all namespace-qualified matches remain candidates. Native DataFusion
+`LIKE` with an escaped suffix handles retained Rust qualification, without rewriting canonical
+names or accepting public patterns. Explicit qualified-name predicates remain exact. Text `where`
+objects use `property`, `operator` (`equals` / `does not equal`) and literal `value`; each compiled
+program carries its own allowed semantic property-to-field map. Unknown fields/operators and
+malformed quoted identifiers are rejected. Code identifiers that resemble evaluative terms stay
+literal operands; actual judgment requests remain rejected. Entity results also expose existing
+qualified-name evidence, and each manifest block records its resolved selections/predicates.
+
+The ten-block installed-client/reopen case passes in 107.44 s, alongside native percent/underscore/
+backslash/Unicode suffix and intent checks (`/tmp/codefabric-p03-literals-native-2.log`). The first
+native run passed 20 units but used `resolved` instead of the call family's actual
+`resolved_declaration` filter value (`/tmp/codefabric-p03-literals-native-1.log`). All 37 affected
+compiler/recipe/ingress and native regressions pass in 108.72 s
+(`/tmp/codefabric-p03-literals-regression.log`), including manifest resolved meanings (108.70 s)
+and prior-entity reuse with the extended schema (54.32 s). The initial 26 canonical/recipe/parser
+cases passed (`/tmp/codefabric-p03-literals-units-1.log`). A final availability guard prevents
+nullable, unimplemented Python declaration qualification from yielding a false complete-empty
+answer. The final five-case run passes in 107.31 s, including installed-client positive/negative
+queries and exact reopen (`/tmp/codefabric-p03-literals-final-native-3.log`). Earlier final runs
+corrected an immediate-error test assumption and exposed terminal validation failures being
+collapsed to `INTERNAL`; the daemon now preserves the existing non-retryable `VALIDATION_REJECTED`
+wire classification. `literal-identifiers` resolves to exactly one native case.
+Default/featureless root checks and focused tooling tests/lint pass. Final affected Clippy
+(`/tmp/codefabric-p03-literals-final-clippy-2.jsonl`) reports no new-file/changed-line findings;
+the existing repository backlog remains. Documentation/link, spelling and diff checks pass.
+Broader literal reference subjects, source/syntax
+meanings, scope/projection/directive behavior and independent branch failure remain P03 work.
+
 The source continuation extends exact captured source descriptors to call/reference/import
 occurrences, lexical references and Python modules. Native exact-pin joins and span/provenance
 checks exclude invalid mappings. Candidate multiplicity is deduplicated within a provider family;

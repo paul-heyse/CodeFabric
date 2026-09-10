@@ -1171,10 +1171,16 @@ pub enum EpochBoundSelectionFold {
     Any,
 }
 
+pub(crate) mod property_predicate;
+
 /// A selection either constrains rows or selects the already bound typed program.
 /// Program selection remains an ingress-validated dependency; it creates no artificial fact column.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EpochBoundSelectionTarget {
+    /// Literal property predicates use only the selected program's semantic field map.
+    TextProperties {
+        fields: BTreeMap<Arc<str>, FieldId>,
+    },
     Predicate {
         input_field_id: FieldId,
         scalar_operator: ScalarOperator,
@@ -4847,9 +4853,18 @@ fn validate_epoch_execution_catalog<'a>(
             Arc::clone(&selection.program_binding_id),
             Arc::clone(&node.input_node_ids[0]),
         )];
-        if let EpochBoundSelectionTarget::Predicate { input_field_id, .. } = &selection.target
-            && !input.output_fields.contains(input_field_id)
-        {
+        if match &selection.target {
+            EpochBoundSelectionTarget::Predicate { input_field_id, .. } => {
+                !input.output_fields.contains(input_field_id)
+            }
+            EpochBoundSelectionTarget::TextProperties { fields } => {
+                fields.is_empty()
+                    || fields
+                        .values()
+                        .any(|field| !input.output_fields.contains(field))
+            }
+            EpochBoundSelectionTarget::Program => false,
+        } {
             return Err(EpochBoundSemanticCompileError::InvalidNode {
                 node: selection.operator_node_id.to_string(),
                 detail: "selection field is absent from filter input".to_owned(),
@@ -5377,18 +5392,32 @@ fn lower_epoch_execution_program(
                                 &(binding, value),
                             ),
                         });
-                        if let EpochBoundSelectionTarget::Predicate {
-                            input_field_id,
-                            scalar_operator,
-                        } = &binding.target
-                        {
-                            value_predicates.push_back(ScalarExpression::Call {
+                        match &binding.target {
+                            EpochBoundSelectionTarget::Predicate {
+                                input_field_id,
+                                scalar_operator,
+                            } => value_predicates.push_back(ScalarExpression::Call {
                                 operator: *scalar_operator,
                                 arguments: vec![
                                     ScalarExpression::Field(input_field_id.clone()),
                                     ScalarExpression::Literal(value.value.scalar()),
                                 ],
-                            });
+                            }),
+                            EpochBoundSelectionTarget::TextProperties { fields } => {
+                                value_predicates.push_back(
+                                    property_predicate::TextPropertyPredicate::expression(
+                                        &value.value,
+                                        fields,
+                                    )
+                                    .map_err(|detail| {
+                                        EpochBoundSemanticCompileError::InvalidNode {
+                                            node: binding.operator_node_id.to_string(),
+                                            detail,
+                                        }
+                                    })?,
+                                );
+                            }
+                            EpochBoundSelectionTarget::Program => {}
                         }
                     }
                     let fold = match binding.fold {

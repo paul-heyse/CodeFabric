@@ -586,6 +586,32 @@ pass (107.77 s), including Unicode truncation, live revocation of a retained pag
 Final all-target Clippy has no diagnostics on new modules/changed lines; document navigation,
 focused spelling and diff checks pass. This continuation is not P03 or outcome closure.
 
+**P03 quoted identifiers and text-property filters, 2026-09-10.** Quoted code names are separate
+literal operands from the resolved entity-kind phrase. Native DataFusion comparisons and escaped
+`LIKE` suffix expressions preserve retained canonical Rust names while finding all exact namespace
+candidates; explicit qualified-name predicates stay exact. Unknown properties/operators and
+malformed quoted identifiers fail closed. Each program declares the semantic property-to-field map
+used by its existing filter node, and that map is part of the program identity. Literal values
+cannot select engine fields or patterns. Judgment-like code identifiers remain code literals.
+
+The released `where` list now accepts text predicates such as
+`{"property":"name","operator":"equals","value":"target"}` and `does not equal` comparisons.
+Available names/kinds/languages/provider/resolution properties depend on the actual selected
+program. Entity results expose existing qualified-name evidence; manifest blocks record their
+resolved selections and predicates. Unavailable Python declaration qualified names are rejected
+rather than inferred absent from nullable columns. The final positive/negative installed-client
+and exact-reopen run passes (five cases, 107.31 s); terminal delivery now preserves the existing
+non-retryable `VALIDATION_REJECTED` classification for this unavailable meaning.
+
+The ten-block mixed native query/reopen scenario passes (107.44 s); native wildcard escaping,
+Unicode, literal/intent separation, all first-four filters, ambiguity, contradictory/empty filters
+and reusable subjects are exercised. All 37 relevant regressions pass (108.72 s), including the
+manifest and the existing prior-result scenario. STATUS records exact evidence and the initial
+call-resolution vocabulary correction. `literal-identifiers` selects the new case. DataFusion
+planning §43/§44 and resolved DataFusion 55 `Expr::Like`/`Like::new` APIs guide native lowering and
+field authority. This remains a P03 continuation; broader scopes, reference subjects, directives,
+source/syntax meanings and independent block failures are not closed.
+
 **Next:** remaining first-four scopes/meanings, precise dependency scope and independent block
 execution/failure, then proceed to P04 in package order.
 Full source/syntax selection and remaining P03 acceptance are still open.

@@ -120,11 +120,12 @@ filter = 'test(source_current_publication_fences_delayed_semantics_and_resumes_a
 slow-timeout = { period = "60s", terminate-after = 5 }
 
 # This mixed native scenario executes 70 installed-client blocks across exact reopen,
-# including authorized source materialization. Keep the slow signal and a finite bound.
+# including authorized source materialization. Literal/filter scenarios also install the real
+# native stack and reopen it. Keep the slow signal and a finite bound.
 [[profile.default.overrides]]
-filter = 'test(pragmatic_semantic_relationships_through_installed_clients_and_reopen)'
+filter = 'test(pragmatic_semantic_relationships_through_installed_clients_and_reopen) | test(pragmatic_literal_identifiers_and_property_filters_survive_public_reopen)'
 slow-timeout = { period = "60s", terminate-after = 5 }
 
 [[profile.ci.overrides]]
-filter = 'test(pragmatic_semantic_relationships_through_installed_clients_and_reopen)'
+filter = 'test(pragmatic_semantic_relationships_through_installed_clients_and_reopen) | test(pragmatic_literal_identifiers_and_property_filters_survive_public_reopen)'
 slow-timeout = { period = "60s", terminate-after = 5 }

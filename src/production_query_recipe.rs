@@ -47,6 +47,7 @@ use crate::semantic_release::{CompiledQueryProgram, SemanticQueryForm};
 
 mod facts;
 mod prior;
+mod properties;
 use crate::relational_semantic_query::EpochBoundSelectionTarget;
 pub(crate) use facts::families::{
     known_meaning as canonical_fact_meaning, result_family as canonical_result_family,
@@ -55,6 +56,7 @@ pub(crate) use facts::relationships::{
     is_result as semantic_relationship_result, known_meaning as canonical_relationship_meaning,
 };
 pub(crate) use facts::validate_canonical_fact_references;
+pub(crate) use properties::validate_inputs as validate_property_inputs;
 
 const PRODUCTION_SEMANTIC_QUERY_RELEASE_ID: &str =
     "codefabric.semantic-query.release.v2.3.0:datafusion=55.0.0:arrow=59.2.0";
@@ -298,6 +300,7 @@ impl ProductionSemanticQueryRecipe {
         }
         let mut forms = compiled_released_form_programs(epoch, &producer_closure)?;
         prior::bind_entity_subjects(&mut forms, input.limits.compiler().max_fanin())?;
+        properties::install(&mut forms);
         let scopes = compiled_release_scopes();
         let program_release_pin = compiled_release_identity_pin(&forms, &scopes);
         validate_pin("program release", program_release_pin)?;
@@ -760,14 +763,32 @@ fn epoch_semantic_relation(
             canonical,
             occurrences: semantic_role == CANONICAL_OCCURRENCE_SELECTOR_ROLE,
             scope_fields: if canonical {
-                canonical_entity_scope_fields(
-                    &semantic_field,
-                    sealed
-                        .contract
-                        .logical_schema()
-                        .index_of("public_entity_id")
-                        .is_ok(),
-                )?
+                {
+                    let mut fields = canonical_entity_scope_fields(
+                        &semantic_field,
+                        sealed
+                            .contract
+                            .logical_schema()
+                            .index_of("public_entity_id")
+                            .is_ok(),
+                    )?;
+                    if let Ok(index) = sealed.contract.logical_schema().index_of("qualified_name") {
+                        fields.push((
+                            release_field_id(
+                                sealed
+                                    .contract
+                                    .field_id_at(SchemaRole::Logical, index)
+                                    .map_err(|error| {
+                                        ProductionQueryRecipeError::InvalidCompiledRelease {
+                                            detail: error.to_string(),
+                                        }
+                                    })?,
+                            )?,
+                            "qualified-name",
+                        ));
+                    }
+                    fields
+                }
             } else {
                 Vec::new()
             },
@@ -1461,6 +1482,12 @@ fn validate_program_bindings(
             || input.is_none_or(|input| match &selection.target {
                 EpochBoundSelectionTarget::Predicate { input_field_id, .. } => {
                     !input.output_fields.contains(input_field_id)
+                }
+                EpochBoundSelectionTarget::TextProperties { fields } => {
+                    fields.is_empty()
+                        || fields
+                            .values()
+                            .any(|field| !input.output_fields.contains(field))
                 }
                 EpochBoundSelectionTarget::Program => selection.resolutions.is_empty(),
             })
@@ -2404,6 +2431,18 @@ fn encode_selection(value: &ProductionSelectionDefinition) -> CanonicalIdentityF
             frame.text(6, input_field_id.as_str());
             frame.u64(7, scalar_operator_code(*scalar_operator));
         }
+        EpochBoundSelectionTarget::TextProperties { fields } => {
+            frame.text(10, "text-property-predicates");
+            frame.frames(
+                11,
+                fields.iter().map(|(name, field)| {
+                    let mut property = CanonicalIdentityFrame::default();
+                    property.text(1, name);
+                    property.text(2, field.as_str());
+                    property
+                }),
+            );
+        }
         EpochBoundSelectionTarget::Program => frame.text(10, "program-selection"),
     }
     frame.u64(8, selection_fold_code(value.fold));
@@ -2599,6 +2638,7 @@ const fn scalar_operator_code(value: ScalarOperator) -> u64 {
         ScalarOperator::Divide => 13,
         ScalarOperator::IsNull => 14,
         ScalarOperator::IsNotNull => 15,
+        ScalarOperator::TextEndsWith => 16,
     }
 }
 
