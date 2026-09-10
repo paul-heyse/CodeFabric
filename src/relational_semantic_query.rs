@@ -1171,12 +1171,16 @@ pub enum EpochBoundSelectionFold {
     Any,
 }
 
+pub(crate) mod location_predicate;
 pub(crate) mod property_predicate;
 
 /// A selection either constrains rows or selects the already bound typed program.
 /// Program selection remains an ingress-validated dependency; it creates no artificial fact column.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EpochBoundSelectionTarget {
+    SourceLocations {
+        fields: BTreeMap<Arc<str>, FieldId>,
+    },
     /// Named subjects select canonical entities; an absent selection admits no subjects.
     NamedEntities {
         fields: BTreeMap<Arc<str>, FieldId>,
@@ -4862,7 +4866,8 @@ fn validate_epoch_execution_catalog<'a>(
                 !input.output_fields.contains(input_field_id)
             }
             EpochBoundSelectionTarget::TextProperties { fields }
-            | EpochBoundSelectionTarget::NamedEntities { fields } => {
+            | EpochBoundSelectionTarget::NamedEntities { fields }
+            | EpochBoundSelectionTarget::SourceLocations { fields } => {
                 fields.is_empty()
                     || fields
                         .values()
@@ -5393,6 +5398,7 @@ fn lower_epoch_execution_program(
                         && matches!(
                             binding.target,
                             EpochBoundSelectionTarget::NamedEntities { .. }
+                                | EpochBoundSelectionTarget::SourceLocations { .. }
                         )
                     {
                         value_predicates.push_back(ScalarExpression::Literal(
@@ -5444,6 +5450,16 @@ fn lower_epoch_execution_program(
                                             detail,
                                         }
                                     })?,
+                                );
+                            }
+                            EpochBoundSelectionTarget::SourceLocations { fields } => {
+                                value_predicates.push_back(
+                                    location_predicate::expression(&value.value, fields).map_err(
+                                        |detail| EpochBoundSemanticCompileError::InvalidNode {
+                                            node: binding.operator_node_id.to_string(),
+                                            detail,
+                                        },
+                                    )?,
                                 );
                             }
                             EpochBoundSelectionTarget::Program => {}

@@ -360,7 +360,7 @@ fn program(
     }))
 }
 
-pub(super) fn definition(
+pub(in crate::production_query_recipe) fn definition(
     epoch: &ProgrammaticFabricEpoch,
     id: &str,
 ) -> Result<Option<ProductionRelationDefinition>, ProductionQueryRecipeError> {

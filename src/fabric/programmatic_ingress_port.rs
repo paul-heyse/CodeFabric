@@ -1179,6 +1179,41 @@ impl ApplicationOwnedSemanticIngressPort {
         catalog: &EpochBoundSemanticIngressCatalog,
         projection: &mut IngressProjection,
     ) -> Result<(), ProgrammaticQueryPortError> {
+        if let ReferenceValue::Semantic(SemanticReference::SourceLocation { source_location }) =
+            &reference
+        {
+            source_location.validate().map_err(rejected)?;
+            source_location.meaning().map_err(rejected)?;
+            if parent.is_none()
+                && mapping.input_id.as_ref() == "input.within"
+                && catalog
+                    .selections
+                    .iter()
+                    .any(|selection| selection.selection_id.as_ref() == "selection.source-location")
+            {
+                // FindEntities applies this optional scope after compilation, like source boundaries.
+                // Its empty within operand preserves the unconstrained entity census.
+                return Ok(());
+            }
+            if parent.is_some()
+                || !catalog.selections.iter().any(|selection| {
+                    selection.program_binding_id == binding.program_binding_id
+                        && selection.selection_id.as_ref() == "selection.source-location"
+                })
+            {
+                return Err(rejected(
+                    "source-location subjects are unavailable for the selected snapshot or form",
+                ));
+            }
+            return projection.push_selection(
+                query_id,
+                &Arc::from("selection.source-location"),
+                text(
+                    &serde_json::to_string(source_location)
+                        .map_err(|error| rejected(error.to_string()))?,
+                )?,
+            );
+        }
         if parent.is_none()
             && let ReferenceValue::Semantic(SemanticReference::Phrase(value)) = &reference
             && let Some(named) = code_literals::named_subject(value)
@@ -1198,6 +1233,9 @@ impl ApplicationOwnedSemanticIngressPort {
             fields.push(field_value(field_id, text(value)?));
         }
         let (kind, value, prior) = match reference {
+            ReferenceValue::Semantic(SemanticReference::SourceLocation { .. }) => {
+                return Err(rejected("source location was not projected"));
+            }
             ReferenceValue::Semantic(SemanticReference::Phrase(value)) => {
                 ("phrase", value.as_str(), None)
             }
@@ -2705,6 +2743,9 @@ fn validate_clause_values(clause: &SemanticQueryClause) -> Result<(), Programmat
     let validate_references = |references: &[SemanticReference]| {
         for reference in references {
             match reference {
+                SemanticReference::SourceLocation { source_location } => {
+                    source_location.validate().map_err(rejected)?;
+                }
                 SemanticReference::Phrase(value) => {
                     text(value)?;
                 }

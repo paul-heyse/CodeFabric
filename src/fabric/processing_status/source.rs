@@ -5,6 +5,48 @@ use crate::relational_semantic_query::{EpochBoundSelectionRow, SemanticClauseVal
 use crate::semantic_query_contract::{SemanticQueryClause, SemanticReference};
 
 impl EntityQueryScope {
+    /// Find/source scopes need the addressed files; incoming relationships and context-wide facts
+    /// retain their broader dependency scope until their own families prove a narrower selection.
+    pub(crate) fn narrow_location_files(
+        &mut self,
+        clause: &SemanticQueryClause,
+    ) -> Result<(), String> {
+        let subjects = match clause {
+            SemanticQueryClause::FindEntities { within, .. } => within,
+            SemanticQueryClause::RetrieveSourceContext { for_inputs, .. } => for_inputs,
+            _ => return Ok(()),
+        };
+        if subjects.is_empty()
+            || subjects
+                .iter()
+                .any(|subject| !matches!(subject, SemanticReference::SourceLocation { .. }))
+        {
+            return Ok(());
+        }
+        let mut selected = Vec::new();
+        for subject in subjects {
+            let SemanticReference::SourceLocation { source_location } = subject else {
+                unreachable!("checked location subjects")
+            };
+            source_location.validate()?;
+            if self
+                .boundaries
+                .selects(source_location.source_file.as_bytes())
+            {
+                selected.push(
+                    serde_json::json!({"kind":"path","root":source_location.source_file})
+                        .to_string(),
+                );
+            }
+        }
+        if selected.is_empty() {
+            self.languages.clear();
+        } else {
+            self.boundaries = super::SourceBoundaries::authorize(&selected)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn source_predicate_for(
         &self,
         relation: &str,
@@ -74,6 +116,57 @@ impl EntityQueryScope {
         let mut all_languages_known = true;
         for subject in for_inputs {
             match subject {
+                SemanticReference::SourceLocation { source_location } => {
+                    source_location.validate()?;
+                    let meaning = source_location.meaning()?;
+                    match meaning.kind {
+                        Some("syntax-node") => {
+                            families.insert("syntax-nodes");
+                        }
+                        Some("call") => {
+                            families.insert("call-targets");
+                        }
+                        Some("reference") => {
+                            families.extend(["lexical-references", "semantic-references"]);
+                        }
+                        Some("import-occurrence") => {
+                            families.insert("imports");
+                        }
+                        Some("module") => {
+                            families.insert("modules");
+                        }
+                        Some("function") => {
+                            families.insert("function-declarations");
+                        }
+                        None => {
+                            families.extend([
+                                "function-declarations",
+                                "syntax-nodes",
+                                "call-targets",
+                                "lexical-references",
+                                "semantic-references",
+                                "imports",
+                                "modules",
+                            ]);
+                        }
+                        Some(_) => {
+                            return Err(
+                                "source location kind has no source dependency family".into()
+                            );
+                        }
+                    }
+                    if let Some(language) = meaning.language {
+                        languages.insert(language.to_owned());
+                    } else if source_location.source_file.as_bytes().ends_with(b".rs") {
+                        languages.insert("rust".into());
+                    } else if source_location.source_file.as_bytes().ends_with(b".py")
+                        || source_location.source_file.as_bytes().ends_with(b".pyi")
+                    {
+                        languages.insert("python".into());
+                    } else {
+                        all_languages_known = false;
+                    }
+                }
                 SemanticReference::Entity { entity_id } => {
                     all_languages_known = false;
                     let kind = entity_id
@@ -309,6 +402,26 @@ mod tests {
             .unwrap();
         assert_eq!(mixed.languages, scope().languages);
         assert_eq!(mixed.families, BTreeSet::from(["function-declarations"]));
+    }
+
+    #[test]
+    fn source_locations_narrow_only_addressed_files_inside_authorized_boundaries() {
+        let subject = |file| {
+            SemanticReference::SourceLocation { source_location: serde_json::from_value(serde_json::json!({"source_file":file,"start_byte":0,"semantic_location":"Python syntax node"})).unwrap() }
+        };
+        let mut selected = scope();
+        selected.boundaries =
+            SourceBoundaries::authorize(&[r#"{"kind":"path","root":"src"}"#.into()]).unwrap();
+        selected
+            .narrow_location_files(&clause(vec![subject("src/a.py"), subject("outside.py")]))
+            .unwrap();
+        assert!(selected.boundaries.selects(b"src/a.py"));
+        assert!(!selected.boundaries.selects(b"src/b.py"));
+        assert!(!selected.boundaries.selects(b"outside.py"));
+        selected
+            .narrow_location_files(&clause(vec![subject("outside.py")]))
+            .unwrap();
+        assert!(selected.languages.is_empty());
     }
 
     #[test]

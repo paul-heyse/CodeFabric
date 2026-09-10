@@ -1318,7 +1318,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             );
         }
         let mut processing_summaries = Vec::new();
-        for output in &mut outputs {
+        for (output, query_id) in outputs.iter_mut().zip(&output_queries) {
             *output = match output.clone().with_source_boundaries(&source_boundaries) {
                 Ok(output) => output,
                 Err(message) => {
@@ -1334,6 +1334,61 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     );
                 }
             };
+            if let Some(crate::semantic_query_contract::SemanticQueryClause::FindEntities {
+                within,
+                ..
+            }) = request
+                .parsed()
+                .request
+                .queries
+                .iter()
+                .find(|clause| clause.query_id() == query_id.as_ref())
+            {
+                let locations = within
+                    .iter()
+                    .filter_map(|subject| {
+                        if let crate::semantic_query_contract::SemanticReference::SourceLocation {
+                            source_location,
+                        } = subject
+                        {
+                            Some(source_location)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if !locations.is_empty() {
+                    let result = if locations.len() != within.len() {
+                        Err(
+                            "mixed source-location and other within operands are unavailable"
+                                .into(),
+                        )
+                    } else if authority
+                        .epoch()
+                        .relation(&ProgrammaticRelationId::new("fact.code_entity_location"))
+                        .is_none()
+                    {
+                        Err("selected snapshot has no canonical source-location mapping".into())
+                    } else {
+                        output.clone().with_source_locations(&locations)
+                    };
+                    *output = match result {
+                        Ok(output) => output,
+                        Err(message) => {
+                            return failed_error(
+                                &artifacts,
+                                "source_location_scope",
+                                SemanticQueryError::Phase {
+                                    code: "SEMANTIC_REFERENCE_UNAVAILABLE",
+                                    phase: "scope_resolution",
+                                    pointer: format!("queries.{query_id}.within"),
+                                    message,
+                                },
+                            );
+                        }
+                    };
+                }
+            }
         }
         if let Some(processing) = authority.entity_processing() {
             use super::processing_status::{ENTITY_PROCESSING_RELATION, EntityQueryScope};
@@ -1504,7 +1559,9 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                     .queries
                     .iter()
                     .find(|clause| clause.query_id() == query_id.as_ref())
-                    && let Err(error) = processing.select_outgoing_owners(&mut scope, clause)
+                    && let Err(error) = scope
+                        .narrow_location_files(clause)
+                        .and_then(|()| processing.select_outgoing_owners(&mut scope, clause))
                 {
                     return failed(&artifacts, "processing_scope", error);
                 }

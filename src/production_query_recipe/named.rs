@@ -9,8 +9,6 @@ use super::{
 };
 use crate::relational_semantic_query::ProgramJoinPredicate;
 
-// Keep the native subject path beside the selection and schema contracts that authorize it.
-#[allow(clippy::too_many_lines)]
 pub(super) fn install(
     entities: &EpochSemanticRelation,
     programs: &mut [ProductionSemanticFormProgram],
@@ -35,6 +33,43 @@ pub(super) fn install(
     if let Some(qualified) = entity_field("qualified-name") {
         names.insert(Arc::from("qualified name"), qualified);
     }
+    install_selection(
+        &SubjectSelection {
+            source: ProductionRelationDefinition {
+                relation_id: entities.relation_id.clone(),
+                fields: entities.fields.clone(),
+                authority: ProductionRelationAuthority::Epoch,
+            },
+            public_id,
+            context_id,
+            name: "named",
+            selection_id: "selection.named-subject",
+            target: EpochBoundSelectionTarget::NamedEntities { fields: names },
+        },
+        programs,
+    );
+}
+
+pub(super) struct SubjectSelection {
+    pub source: ProductionRelationDefinition,
+    pub public_id: crate::relational_program::FieldId,
+    pub context_id: crate::relational_program::FieldId,
+    pub name: &'static str,
+    pub selection_id: &'static str,
+    pub target: EpochBoundSelectionTarget,
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "subject alternatives share one native union and exact identity/context join contract"
+)]
+pub(super) fn install_selection(
+    selection: &SubjectSelection,
+    programs: &mut [ProductionSemanticFormProgram],
+) {
+    let entities = &selection.source;
+    let public_id = &selection.public_id;
+    let context_id = &selection.context_id;
     for program in programs {
         if !matches!(
             program.form,
@@ -44,7 +79,9 @@ pub(super) fn install(
         ) {
             continue;
         }
-        let node = |suffix| Arc::<str>::from(format!("{}.{suffix}", program.program_binding_id));
+        let node =
+            |suffix: &str| Arc::<str>::from(format!("{}.{suffix}", program.program_binding_id));
+        let subject_node = |suffix: &str| node(&format!("{}-{suffix}", selection.name));
         let Some(index) = program
             .operators
             .iter()
@@ -65,7 +102,7 @@ pub(super) fn install(
         else {
             continue;
         };
-        let combined = node("all-named-subjects");
+        let combined = node(&format!("all-{}-subjects", selection.name));
         for op in &mut program.operators {
             for input in &mut op.input_node_ids {
                 if *input == subjects.node_id {
@@ -75,7 +112,7 @@ pub(super) fn install(
         }
         let mut additions = vec![
             ProductionOperatorDefinition {
-                node_id: node("named-input"),
+                node_id: subject_node("input"),
                 ordinal: 0,
                 input_node_ids: vec![],
                 operator: ProgramRelationalOperator::Input {
@@ -84,20 +121,20 @@ pub(super) fn install(
                 output_fields: entities.fields.clone(),
             },
             ProductionOperatorDefinition {
-                node_id: node("named-filter"),
+                node_id: subject_node("filter"),
                 ordinal: 0,
-                input_node_ids: vec![node("named-input")],
+                input_node_ids: vec![subject_node("input")],
                 operator: ProgramRelationalOperator::Filter,
                 output_fields: entities.fields.clone(),
             },
         ];
         let selected = if subjects.output_fields == entities.fields {
-            node("named-filter")
+            subject_node("filter")
         } else {
             additions.push(ProductionOperatorDefinition {
-                node_id: node("named-subjects"),
+                node_id: subject_node("subjects"),
                 ordinal: 0,
-                input_node_ids: vec![subjects.input_node_ids[0].clone(), node("named-filter")],
+                input_node_ids: vec![subjects.input_node_ids[0].clone(), subject_node("filter")],
                 operator: ProgramRelationalOperator::Join {
                     kind: JoinKind::LeftSemi,
                     predicates: [
@@ -114,7 +151,7 @@ pub(super) fn install(
                 },
                 output_fields: subjects.output_fields.clone(),
             });
-            node("named-subjects")
+            subject_node("subjects")
         };
         additions.push(ProductionOperatorDefinition {
             node_id: combined,
@@ -142,14 +179,12 @@ pub(super) fn install(
             });
         }
         program.selections.push(ProductionSelectionDefinition {
-            selection_id: Arc::from("selection.named-subject"),
+            selection_id: Arc::from(selection.selection_id),
             value_kind: SemanticValueKind::Text,
             minimum_values: 0,
             maximum_values: RELEASE_SELECTION_MAXIMUM_VALUES,
-            operator_node_id: node("named-filter"),
-            target: EpochBoundSelectionTarget::NamedEntities {
-                fields: names.clone(),
-            },
+            operator_node_id: subject_node("filter"),
+            target: selection.target.clone(),
             fold: EpochBoundSelectionFold::Any,
             resolutions: vec![],
         });

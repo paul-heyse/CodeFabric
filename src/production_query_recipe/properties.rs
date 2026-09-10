@@ -13,6 +13,7 @@ pub(super) fn install(
         let Some(filter) = program.operators.iter().find(|node| {
             matches!(node.operator, ProgramRelationalOperator::Filter)
                 && !node.node_id.ends_with(".named-filter")
+                && !node.node_id.ends_with(".location-filter")
         }) else {
             continue;
         };

@@ -10,11 +10,14 @@ use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
 use crate::fabric::{hash32_array, id16_array};
 use crate::source_image::InventoryCaptureBundle;
 
+pub(super) mod line_index;
+
 pub(super) fn install(
     builder: &mut ProgrammaticFabricEpochBuilder,
     capture: &InventoryCaptureBundle,
     stage: super::PublicationStage,
 ) -> Result<(), ProductionWorkspaceStartupError> {
+    line_index::install(builder, capture)?;
     let images = capture.images();
     // Capture already bounds the total bytes. Arrow owns these copies through publication;
     // subsequent source reads select this exact relation version, never a workspace pathname.

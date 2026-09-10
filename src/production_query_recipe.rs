@@ -46,6 +46,7 @@ use crate::semantic_query_contract::{COMPILED_V2_0_SCOPE_DEFINITIONS, ResultRole
 use crate::semantic_release::{CompiledQueryProgram, SemanticQueryForm};
 
 mod facts;
+mod locations;
 mod named;
 mod prior;
 mod properties;
@@ -62,7 +63,7 @@ pub(crate) use properties::validate_inputs as validate_property_inputs;
 const PRODUCTION_SEMANTIC_QUERY_RELEASE_ID: &str =
     "codefabric.semantic-query.release.v2.3.0:datafusion=55.0.0:arrow=59.2.0";
 const RELEASE_FACTUAL_SEMANTIC_CLASS_ID: &str = "semantic.fact.v2";
-const RELEASE_SELECTION_MAXIMUM_VALUES: usize = 64;
+pub(crate) const RELEASE_SELECTION_MAXIMUM_VALUES: usize = 64;
 
 pub(crate) const SOURCE_OCCURRENCES_ROLE: &str = "canonical.source-context.occurrences.v1";
 pub(crate) const SOURCE_SYNTAX_ROLE: &str = "canonical.source-context.syntax.v1";
@@ -578,6 +579,7 @@ fn compiled_released_form_programs(
             programs.push(program);
         }
         named::install(&source, &mut programs);
+        locations::install(epoch, &mut programs)?;
         return validate_form_coverage(programs);
     }
     let binding_family = NativeSyntaxRelation::RuffBinding.as_str();
@@ -1507,7 +1509,8 @@ fn validate_program_bindings(
                     !input.output_fields.contains(input_field_id)
                 }
                 EpochBoundSelectionTarget::TextProperties { fields }
-                | EpochBoundSelectionTarget::NamedEntities { fields } => {
+                | EpochBoundSelectionTarget::NamedEntities { fields }
+                | EpochBoundSelectionTarget::SourceLocations { fields } => {
                     fields.is_empty()
                         || fields
                             .values()
@@ -2456,10 +2459,16 @@ fn encode_selection(value: &ProductionSelectionDefinition) -> CanonicalIdentityF
             frame.u64(7, scalar_operator_code(*scalar_operator));
         }
         EpochBoundSelectionTarget::TextProperties { fields }
-        | EpochBoundSelectionTarget::NamedEntities { fields } => {
+        | EpochBoundSelectionTarget::NamedEntities { fields }
+        | EpochBoundSelectionTarget::SourceLocations { fields } => {
             frame.text(
                 10,
                 if matches!(
+                    value.target,
+                    EpochBoundSelectionTarget::SourceLocations { .. }
+                ) {
+                    "source-location-predicates"
+                } else if matches!(
                     value.target,
                     EpochBoundSelectionTarget::NamedEntities { .. }
                 ) {

@@ -48,6 +48,38 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The source-location continuation after `8c0d9494` now accepts typed captured-file points and
+half-open ranges in all first-four forms. Original byte offsets and one-based line/zero-based byte
+columns remain distinct inputs; CRLF, lone CR, Unicode and zero-width syntax nodes retain their
+captured coordinates. Optional controlled meanings select declaration/call/reference/import/module
+or syntax candidates without collapsing ambiguity. Unknown meanings and mixed coordinate bases
+fail explicitly. Source-location facts do not require a source-disclosure grant.
+
+Native DataFusion predicates and identity/context semi-joins share the existing named-subject
+selection path. A captured Arrow line-index relation supplies coordinates to exact source-backed
+canonical entity locations; the location relation contains metadata, not source text. FindEntities
+applies its location scope before limits and probes, and Find/Source processing intersects the
+addressed captured files with authorized source boundaries. Other dependency scopes remain
+conservative. Historical epochs without the location relation do not advertise the capability.
+
+The twelve-block installed-client Python/Rust scenario passes initial publication and exact reopen
+in 73.99 s, including byte/line subjects, all four forms, range selection before truncation and empty
+Rust syntax. A separate metadata-only scenario passes in 60.44 s
+(`/tmp/codefabric-p03-locations-native-3.log`). The first added Find-within case exposed physical
+column names differing from released semantic field IDs; selection now uses the released IDs.
+The existing ten-block syntax/named/prior/source scenario passes in 69.86 s
+(`/tmp/codefabric-p03-locations-named-regression.log`). Fifty-five affected Rust cases pass in
+4.19 s (`/tmp/codefabric-p03-locations-final-units.log`). Default/featureless root checks pass
+(`/tmp/codefabric-p03-locations-root-check.log`), as do all 218 tooling cases and affected Python
+lint. Final all-target Clippy has no new-file/changed-line findings
+(`/tmp/codefabric-p03-locations-final-clippy-2.jsonl`). Documentation/navigation and affected
+spelling/diff checks pass. Whole-file spelling still flags the pre-existing truncated UTF-8
+`caf\xc3` test bytes in `daemon.rs`; that unrelated fixture is preserved. Product selectors
+`source-locations` and `source-location-metadata` name the public scenarios. These checks use the
+existing delegated user-systemd scope and installed provider binaries. Full source outlines,
+configured context defaults, directives, precise dependencies and independent branch failure
+remain P03 work; no package, outcome, full-suite or doctest closure is claimed.
+
 The syntax continuation after `2f7dc7cb` exposes the complete admitted Python/Rust CST as
 canonical source-context entities. Native DataFusion grouping, Arrow structs/lists and an immutable
 bounded identity fold replace provider-local node numbers with application-owned parent/sibling
@@ -62,7 +94,8 @@ are reusable subjects. Source context mode selects the reserved source identity;
 representation selection keeps those layers distinct. Existing `explicit` context selection remains
 a compatibility spelling of `selected`. New retained schema profiles advertise the added syntax
 capability; historical profiles do not gain meanings they cannot serve. Broader configured-default
-contexts, source locations/outlines, directives and independent branch failure remain open.
+contexts, source outlines, directives and independent branch failure remain open. Typed source
+locations are delivered by the continuation above.
 
 The ten-block installed-client Python/Rust scenario passes initial publication and exact reopen
 in 67.73 s. It reads every advertised Arrow page, checks all nodes and parent edges, CRLF/Unicode

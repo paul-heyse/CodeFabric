@@ -8,6 +8,9 @@ use crate::contracts::jcs::{CanonicalJsonError, canonicalize_slice, canonicalize
 use crate::registries::{FRESHNESS_STATE_VALUES, FreshnessState, registry_state_name};
 use serde::{Deserialize, Serialize};
 
+mod source_location;
+pub use source_location::SourceLocation;
+
 const MAX_REQUEST_BYTES: usize = 256 * 1024;
 
 /// Freshness choice carried by the released request envelope.
@@ -628,6 +631,11 @@ fn translate_v2_reference(
     let object = value.as_object().ok_or_else(|| {
         SemanticQueryError::Invalid("semantic reference must be a string or object".to_owned())
     })?;
+    if object.contains_key("source_location") && object.len() != 1 {
+        return Err(SemanticQueryError::Invalid(
+            "source location reference has extra fields".into(),
+        ));
+    }
     if let Some(entity_id) = object.get("entity_id").and_then(serde_json::Value::as_str) {
         return Ok(SemanticReference::Entity {
             entity_id: entity_id.to_owned(),
@@ -650,9 +658,13 @@ fn translate_v2_reference(
         return Ok(SemanticReference::PriorResult(reference));
     }
     if object.contains_key("source_location") {
-        return serde_json::to_string(&value)
-            .map(SemanticReference::Phrase)
-            .map_err(|error| SemanticQueryError::Invalid(error.to_string()));
+        let source_location: SourceLocation =
+            serde_json::from_value(object["source_location"].clone())
+                .map_err(|error| SemanticQueryError::Invalid(error.to_string()))?;
+        source_location
+            .validate()
+            .map_err(SemanticQueryError::Invalid)?;
+        return Ok(SemanticReference::SourceLocation { source_location });
     }
     Err(SemanticQueryError::Invalid(
         "semantic reference object has no released discriminator".to_owned(),
@@ -884,6 +896,7 @@ pub enum SemanticReference {
     PriorResult(PriorResultReference),
     Entity { entity_id: String },
     Fact { fact_id: String },
+    SourceLocation { source_location: SourceLocation },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -1332,6 +1345,27 @@ mod tests {
             parsed.request_digest,
             crate::integrity::framed_digest(&parsed.canonical_bytes)
         );
+    }
+
+    #[test]
+    fn source_location_reference_keeps_structured_coordinates_and_rejects_mixed_tags() {
+        let location = serde_json::json!({"source_location":{"source_file":"café.py","start_line":2,"start_column":0,"semantic_location":"Python syntax node `identifier`"}});
+        let mut request: serde_json::Value = serde_json::from_slice(REQUEST).unwrap();
+        request["queries"][0]["within"] = serde_json::json!([location.clone()]);
+        let parsed = parse_request(&serde_json::to_vec(&request).unwrap()).unwrap();
+        let reference = parsed.request.queries[0].semantic_references()[0];
+        assert!(
+            matches!(reference, SemanticReference::SourceLocation { source_location } if source_location.start_column == Some(0))
+        );
+        assert_eq!(serde_json::to_value(reference).unwrap(), location);
+        for invalid in [
+            serde_json::json!({"source_location":{"source_file":"a.py","start_byte":0},"entity_id":"entity:function:00000000000000000000000000000000"}),
+            serde_json::json!({"source_location":{"source_file":"a.py","start_line":0}}),
+            serde_json::json!({"source_location":{"source_file":"a.py","start_byte":0,"new_field":true}}),
+        ] {
+            request["queries"][0]["within"] = serde_json::json!([invalid]);
+            assert!(parse_request(&serde_json::to_vec(&request).unwrap()).is_err());
+        }
     }
 
     #[test]

@@ -533,6 +533,10 @@ pub(crate) fn validate_canonical_fact_references(
             _ => continue,
         };
         for reference in references {
+            if let SemanticReference::SourceLocation { source_location } = reference {
+                source_location.validate()?;
+                continue;
+            }
             if let SemanticReference::Phrase(value) = reference
                 && crate::fabric::programmatic_ingress_port::code_literals::named_subject(value)
                     .is_some()

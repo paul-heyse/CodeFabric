@@ -690,8 +690,36 @@ Rust syntax without Cargo. The failed-Rust-target diagnostic/source case passes 
 tooling cases pass. Default/featureless root checks and affected Python lint pass; final all-target
 Clippy has no new-file/changed-line findings. Documentation/navigation, spelling and diff checks
 pass. STATUS records commands/logs, the corrected join contract and fixture issues.
-This delivers syntax selection within P03; configured context defaults, source-location/outlines,
+This delivers syntax selection within P03; configured context defaults, source outlines,
 remaining directives and full first-four acceptance remain open.
+
+**P03 captured source locations pass native validation, 2026-09-10.** Typed `source_location`
+operands resolve a captured relative file and original byte or line/byte-column point/range.
+Controlled optional meanings preserve all matching candidates, literal raw syntax kinds and the
+explicit beginning-on-line interpretation. Invalid paths, unknown fields/meanings, reversed ranges
+and mixed coordinate bases are rejected. Locations are accepted as fact, relationship and source
+subjects and as FindEntities `within` scope, including multiple location alternatives.
+
+Following QRY v2.3 §3 and the source-location contract in QRY v1.3 §10.4/AC-G-55, captured Arrow
+line offsets retain original CRLF/lone-CR/Unicode coordinates. DataFusion planning §43 and resolved
+55.0.0 native filters, joins and scalar functions drive selection. An immutable bounded coordinate
+function maps exact source descriptors against their captured line index; native identity/context
+semi-joins reuse the existing subject compiler. No live file lookup or source-text disclosure is
+needed for facts. FindEntities scopes before limits/probes. Find/Source processing intersects
+location files with authorized boundaries; broader incoming/fact dependencies remain conservative.
+
+The twelve-block installed-client Python/Rust request and exact reopen pass in 73.99 s, including
+all four forms, zero-width empty syntax, byte/line equivalence and truncated range selection. The
+metadata-only facts case passes in 60.44 s. The added Find-within case exposed a semantic-field-ID
+versus physical-column-name mismatch, now corrected. The existing syntax/named/prior/source public
+regression passes in 69.86 s. Fifty-five affected Rust cases, both root build configurations, all
+218 tooling cases and affected Python lint pass. Final all-target Clippy has no new-file/changed-line
+findings; documentation/navigation, affected spelling and diff checks pass. The existing truncated
+UTF-8 test bytes remain the whole-file spelling exception in `daemon.rs`.
+`source-locations` and `source-location-metadata`
+select the native cases; STATUS records logs and final validation. Configured context defaults,
+source outlines/related contexts, remaining directives/dependency scopes and independent branch
+execution remain open. This slice does not close P03 or any outcome.
 
 **Next:** remaining first-four scopes/meanings, precise dependency scope and independent block
 execution/failure, then proceed to P04 in package order.
@@ -948,7 +976,7 @@ now also publishes typed native denotations, scoped unknowns and exact reopen as
 
 ### 4E. First four production query forms and mixed-language demonstration
 
-**Current status — partial.** Installed clients exercise canonical function and selected additional declaration-kind FindEntities and exact-ID declaration RetrieveFacts, including repeated subjects, scoped failure, empty results and truncation. Installed FollowRelationships queries execute one-step Python/Rust calls and exact Python reopen. The continuation adds explicit Python lexical-reference traversal, preserving write/read/call/type/import kinds, reusable occurrence endpoints and unresolved/unsupported family scope; project-aware Python/Rust semantic references and imports now pass both one-step directions, guarded family selection, typed prior-entity inputs and exact reopen; full traversal remains open. SourceContext serves exact canonical declaration spans with live independent disclosure checks, lossless byte limits and coordinates. Function definitions/bodies now use exact syntax-owner joins and an independent incomplete-owner processing family; the mixed live/clean behavioral case passes with independent expected source, nested functions, CRLF/Unicode truncation, edits and restoration (206.25 s). `function-source-live` selects it. Explicit surrounding-line windows now preserve captured CRLF, Unicode, file edges and separate anchor/requested/delivered ranges. Installed clients and exact reopen pass (33.70 s), including a non-retryable source hard-limit failure versus explicit prefix truncation; `source-lines-live` selects the case. Captured path boundaries now narrow file-anchored results before limits and preserve Python processing scope through continuation/reopen. Canonical syntax nodes now support FindEntities, properties, parent relationships and exact/surrounding source through typed priors/literal kinds, with source context, independent file coverage and public reopen. Remaining syntax outlines/related contexts and source-location subjects stay open. Broader meanings, remaining source/representation scopes, remaining semantic normalization, stop/filter/distance behavior and full composition remain required. The first-four acceptance below is open.
+**Current status — partial.** Installed clients exercise canonical function and selected additional declaration-kind FindEntities and exact-ID declaration RetrieveFacts, including repeated subjects, scoped failure, empty results and truncation. Installed FollowRelationships queries execute one-step Python/Rust calls and exact Python reopen. The continuation adds explicit Python lexical-reference traversal, preserving write/read/call/type/import kinds, reusable occurrence endpoints and unresolved/unsupported family scope; project-aware Python/Rust semantic references and imports now pass both one-step directions, guarded family selection, typed prior-entity inputs and exact reopen; full traversal remains open. SourceContext serves exact canonical declaration spans with live independent disclosure checks, lossless byte limits and coordinates. Function definitions/bodies now use exact syntax-owner joins and an independent incomplete-owner processing family; the mixed live/clean behavioral case passes with independent expected source, nested functions, CRLF/Unicode truncation, edits and restoration (206.25 s). `function-source-live` selects it. Explicit surrounding-line windows now preserve captured CRLF, Unicode, file edges and separate anchor/requested/delivered ranges. Installed clients and exact reopen pass (33.70 s), including a non-retryable source hard-limit failure versus explicit prefix truncation; `source-lines-live` selects the case. Captured path boundaries now narrow file-anchored results before limits and preserve Python processing scope through continuation/reopen. Canonical syntax nodes now support FindEntities, properties, parent relationships and exact/surrounding source through typed priors/literal kinds, with source context, independent file coverage and public reopen. Typed captured source-location points/ranges now support all first-four forms, including FindEntities scope before limits and metadata-only facts. Remaining syntax outlines/related contexts stay open. Broader meanings, remaining source/representation scopes, remaining semantic normalization, stop/filter/distance behavior and full composition remain required. The first-four acceptance below is open.
 
 **Prerequisites:** 4D and 5A–5B. **Surfaces:** `src/production_query_recipe.rs`, `src/relational_semantic_query.rs`, `src/query_service.rs`, `src/semantic_query_contract.rs`, existing child catalog and adapter.
 

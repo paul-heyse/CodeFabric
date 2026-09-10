@@ -37,6 +37,7 @@ mod call_selector;
 mod calls;
 mod diagnostics;
 mod imports;
+mod locations;
 mod modules;
 mod occurrences;
 mod processing;
@@ -107,14 +108,25 @@ const REFERENCE: &str = "fact.code_reference";
 const INPUT: &str = "source.input_inventory";
 const RUN: &str = "system.provider_run_scope";
 
+#[derive(Clone, Copy)]
+pub(super) struct SourceInputs {
+    pub python: bool,
+    pub rust_syntax: bool,
+    pub indexed_locations: bool,
+}
+
 pub(super) fn install(
     builder: &mut ProgrammaticFabricEpochBuilder,
     inventory: &ProviderSourceInventory,
-    python: bool,
+    sources: SourceInputs,
     rust: RustInputs,
     pyrefly: bool,
-    rust_syntax: bool,
 ) -> Result<(), ProductionWorkspaceStartupError> {
+    let SourceInputs {
+        python,
+        rust_syntax,
+        indexed_locations,
+    } = sources;
     for kind in [
         Kind::Source,
         Kind::Syntax {
@@ -188,6 +200,9 @@ pub(super) fn install(
             python,
             rust: rust.declarations,
         },
+        Kind::EntityLocation {
+            indexed: indexed_locations,
+        },
     ] {
         builder
             .add_transformation(Arc::new(Canonical::new(kind, inventory)))
@@ -198,6 +213,9 @@ pub(super) fn install(
 
 #[derive(Clone, Copy)]
 enum Kind {
+    EntityLocation {
+        indexed: bool,
+    },
     Syntax {
         python: bool,
         rust: bool,
@@ -268,6 +286,11 @@ impl Canonical {
     )]
     fn new(kind: Kind, inventory: &ProviderSourceInventory) -> Self {
         let (id, names, mut dependencies) = match kind {
+            Kind::EntityLocation { indexed } => (
+                locations::RELATION,
+                locations::fields(),
+                locations::dependencies(indexed),
+            ),
             Kind::Syntax { python, rust } => (
                 syntax::RELATION,
                 syntax::fields(),
@@ -682,6 +705,7 @@ impl ProgrammaticTransformation for Canonical {
     )]
     fn build(&self, inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
         match self.kind {
+            Kind::EntityLocation { indexed } => locations::build(inputs, indexed),
             Kind::Syntax { python, rust } => syntax::build(inputs, python, rust),
             Kind::Type {
                 relation,
@@ -1381,9 +1405,12 @@ mod tests {
         install(
             &mut builder,
             &inventory,
-            python,
+            SourceInputs {
+                python,
+                rust_syntax: false,
+                indexed_locations: false,
+            },
             RustInputs::from_relations([]),
-            false,
             false,
         )
         .unwrap();

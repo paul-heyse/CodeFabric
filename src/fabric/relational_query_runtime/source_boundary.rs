@@ -149,7 +149,7 @@ impl SourceBoundaries {
 }
 
 // Keep both application and native predicate trees logarithmic in the bounded operand count.
-fn balanced_union<T>(mut terms: Vec<T>, combine: impl Fn(T, T) -> T) -> T {
+pub(super) fn balanced_union<T>(mut terms: Vec<T>, combine: impl Fn(T, T) -> T) -> T {
     while terms.len() > 1 {
         let mut next = Vec::with_capacity(terms.len().div_ceil(2));
         let mut terms_iter = terms.into_iter();

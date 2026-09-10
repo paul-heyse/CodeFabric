@@ -930,10 +930,13 @@ fn build_fresh_native_source(
     canonical::install(
         &mut builder,
         &prepared_inputs.inventory,
-        !native_runs.is_empty(),
+        canonical::SourceInputs {
+            python: !native_runs.is_empty(),
+            rust_syntax: rust_syntax_available,
+            indexed_locations: true,
+        },
         rustc_inputs,
         pyrefly_available,
-        rust_syntax_available,
     )?;
     canonical::install_processing(
         &mut builder,
