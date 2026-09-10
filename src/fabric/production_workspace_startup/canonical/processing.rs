@@ -53,6 +53,8 @@ pub(super) fn dependencies(pyrefly: bool, rust: bool) -> Vec<&'static str> {
         INPUT,
         super::calls::RELATION,
         super::REFERENCE,
+        super::semantic_references::RELATION,
+        super::imports::RELATION,
         super::DECLARATION,
         super::source_context::RELATION,
     ];
@@ -115,7 +117,7 @@ pub(super) fn build(
         )?
         .alias("g")?
         .build()?;
-    let base = LogicalPlanBuilder::from(qualify_lexical_references(inputs)?)
+    let base = LogicalPlanBuilder::from(qualify_references(inputs)?)
         .union(function_source_scope(inputs)?)?
         .build()?;
     let fields = fields();
@@ -232,10 +234,39 @@ pub(super) fn build(
     })
 }
 
-fn qualify_lexical_references(
+fn qualify_references(
     inputs: &TransformationInputs,
 ) -> Result<LogicalPlan, TransformationPlanError> {
-    let gaps = LogicalPlanBuilder::from(plan(inputs, super::REFERENCE)?)
+    let mut base = plan(inputs, INPUT)?;
+    for (relation, family, reason) in [
+        (
+            super::REFERENCE,
+            "lexical-references",
+            "lexical_reference_targets_unknown",
+        ),
+        (
+            super::semantic_references::RELATION,
+            "semantic-references",
+            "canonical_semantic_targets_unknown",
+        ),
+        (
+            super::imports::RELATION,
+            "imports",
+            "canonical_import_targets_unknown",
+        ),
+    ] {
+        base = qualify_reference_targets(base, plan(inputs, relation)?, family, reason)?;
+    }
+    Ok(base)
+}
+
+fn qualify_reference_targets(
+    base: LogicalPlan,
+    references: LogicalPlan,
+    family: &str,
+    reason: &str,
+) -> Result<LogicalPlan, TransformationPlanError> {
+    let gaps = LogicalPlanBuilder::from(references)
         .filter(
             col("resolution")
                 .not_eq(lit("resolved"))
@@ -247,19 +278,17 @@ fn qualify_lexical_references(
         )?
         .alias("r")?
         .build()?;
-    let base = LogicalPlanBuilder::from(plan(inputs, INPUT)?)
-        .alias("b")?
-        .join(
-            gaps,
-            JoinType::Left,
-            (
-                vec!["b.context_id", "b.file_id", "b.source_generation"],
-                vec!["r.context_id", "r.file_id", "r.source_generation"],
-            ),
-            None,
-        )?;
+    let base = LogicalPlanBuilder::from(base).alias("b")?.join(
+        gaps,
+        JoinType::Left,
+        (
+            vec!["b.context_id", "b.file_id", "b.source_generation"],
+            vec!["r.context_id", "r.file_id", "r.source_generation"],
+        ),
+        None,
+    )?;
     let incomplete = col("b.family")
-        .eq(lit("lexical-references"))
+        .eq(lit(family))
         .and(col("b.processing_state").eq(lit("complete")))
         .and(coalesce(vec![col("r.gaps"), lit(0_i64)]).gt(lit(0_i64)));
     Ok(base
@@ -272,11 +301,8 @@ fn qualify_lexical_references(
                             datafusion::logical_expr::when(incomplete.clone(), lit("partial"))
                                 .otherwise(col("b.processing_state"))?
                         }
-                        "reason" => datafusion::logical_expr::when(
-                            incomplete.clone(),
-                            lit("lexical_reference_targets_unknown"),
-                        )
-                        .otherwise(col("b.reason"))?,
+                        "reason" => datafusion::logical_expr::when(incomplete.clone(), lit(reason))
+                            .otherwise(col("b.reason"))?,
                         _ => col(format!("b.{name}")),
                     }
                     .alias(*name))

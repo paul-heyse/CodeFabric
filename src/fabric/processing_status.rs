@@ -666,6 +666,9 @@ fn validate(batch: &RecordBatch, workspace: [u8; 16], generation: u64) -> Result
                     | "diagnostic-messages"
                     | "diagnostic-locations"
                     | "diagnostic-suggestions"
+                    | "modules"
+                    | "semantic-references"
+                    | "imports"
                     | "function-source-context"
             )
             || !matches!(language.value(row), "python" | "rust")

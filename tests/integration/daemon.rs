@@ -28,6 +28,9 @@ use serde_json::{Value, json};
 const PROCESS_DEADLINE: Duration = Duration::from_secs(180);
 const DEFAULT_PRODUCTION_SOURCE: &[u8] = b"def answer(value: int) -> int:\n    return value + 1\n";
 
+#[cfg(target_os = "linux")]
+mod semantic_references;
+
 struct InstalledProductionStack {
     _root: tempfile::TempDir,
     codefabric: PathBuf,

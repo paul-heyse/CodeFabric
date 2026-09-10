@@ -20,6 +20,7 @@ CASES = {
     "cancellation": "wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation",
     "rust-failure": "pragmatic_rust_target_failure_retains_other_targets",
     "canonical-diagnostics": "pragmatic_all_rust_targets_failed_retains_diagnostics_and_source",
+    "canonical-python-references": "pragmatic_python_canonical_modules_imports_references_and_reopen",
     "python-live": "pragmatic_live_python_edits_converge_without_restart",
     "mixed-clean-live": "live_updates::mixed_live_updates_equal_independent_clean_public_queries",
     "staged-live": "live_updates::source_current_publication_fences_delayed_semantics_and_resumes_after_restart",

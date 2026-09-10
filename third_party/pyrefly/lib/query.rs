@@ -97,7 +97,11 @@ use crate::state::state::TransactionHandle;
 use crate::types::display::LspDisplayMode;
 use crate::types::display::TypeDisplayContext;
 
+mod references;
 mod type_table;
+pub use references::{
+    SemanticReference, SemanticReferenceKind, SemanticReferenceResponse, SemanticReferenceTarget,
+};
 pub use ruff_python_ast::Decorator as TypeQueryDecorator;
 pub use ruff_python_ast::Expr as TypeQueryExpr;
 pub use ruff_python_ast::Stmt as TypeQueryStmt;

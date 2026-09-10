@@ -980,6 +980,7 @@ fn pyrefly_coverage(
         | PyreflyRelation::TypeTrait
         | PyreflyRelation::LocatedType => "computed_types",
         PyreflyRelation::CallTarget => "call_targets",
+        PyreflyRelation::Reference => "semantic_references",
         PyreflyRelation::Member => "members",
         PyreflyRelation::Diagnostic => "diagnostics",
         PyreflyRelation::AffectedModule => "affected_modules",
@@ -1062,6 +1063,18 @@ fn native_reason_map() -> BTreeMap<String, RemainderReason> {
 
 fn pyrefly_reason_map() -> BTreeMap<String, RemainderReason> {
     BTreeMap::from([
+        (
+            "SEMANTIC_REFERENCE_QUERY_UNAVAILABLE".to_owned(),
+            RemainderReason::ProviderUnavailable,
+        ),
+        (
+            "SEMANTIC_REFERENCE_CENSUS_LIMIT".to_owned(),
+            RemainderReason::ResourceLimit,
+        ),
+        (
+            "UNRESOLVED_OR_UNMAPPED_SEMANTIC_REFERENCE".to_owned(),
+            RemainderReason::Unknown,
+        ),
         (
             "QUERY_RETURNED_NONE".to_owned(),
             RemainderReason::ProviderUnavailable,
@@ -1177,6 +1190,7 @@ const fn pyrefly_authority(relation: PyreflyRelation) -> ProviderAuthorityRole {
         | PyreflyRelation::TypeTrait
         | PyreflyRelation::LocatedType
         | PyreflyRelation::CallTarget
+        | PyreflyRelation::Reference
         | PyreflyRelation::Member
         | PyreflyRelation::Coverage => ProviderAuthorityRole::Primary,
     }
@@ -1227,6 +1241,7 @@ const fn pyrefly_upstream_symbol(relation: PyreflyRelation) -> &'static str {
         | PyreflyRelation::TypeTrait
         | PyreflyRelation::LocatedType => "pyrefly::query::Query::get_type_table_in_file",
         PyreflyRelation::CallTarget => "pyrefly::query::Query::get_callees_with_location",
+        PyreflyRelation::Reference => "pyrefly::query::Query::get_semantic_references_in_file",
         PyreflyRelation::Member => "pyrefly::query::Query::get_attributes",
         PyreflyRelation::Diagnostic => "pyrefly::query::Query::add_files",
         PyreflyRelation::AffectedModule => "pyrefly::query::Query::change_files",
@@ -2021,6 +2036,23 @@ fn compiled_provider_field_role(
             | "provider_end_column" => Some(PROVIDER_COORDINATE_ROLE),
             _ => None,
         },
+        ProviderRelation::Pyrefly(PyreflyRelation::Reference) => match name {
+            "provider_run_id"
+            | "analysis_context_id"
+            | "semantic_environment_id"
+            | "source_generation" => Some(PROVENANCE_FACT_ROLE),
+            "module_id" => Some(CANONICAL_KEY_ROLE),
+            "file_id" | "target_file_id" => Some(FILE_IDENTITY_ROLE),
+            "content_digest" | "target_content_digest" => Some(CONTENT_DIGEST_ROLE),
+            "start_byte" | "target_start_byte" => Some(BYTE_START_ROLE),
+            "end_byte" | "target_end_byte" => Some(BYTE_END_ROLE),
+            "reference_kind" | "target_symbol_kind" | "target_is_module" => {
+                Some(PROVIDER_KIND_ROLE)
+            }
+            "occurrence_ordinal" | "target_ordinal" | "name" | "resolution_state"
+            | "definition_mapping" => Some(PROVIDER_FACT_ROLE),
+            _ => None,
+        },
         ProviderRelation::Pyrefly(PyreflyRelation::CallTarget) => match name {
             "provider_run_id"
             | "analysis_context_id"
@@ -2472,8 +2504,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(release.observation().provider_lanes, 5);
-        assert_eq!(release.observation().provider_relations, 66);
-        assert_eq!(release.observation().transformations, 66);
+        assert_eq!(release.observation().provider_relations, 67);
+        assert_eq!(release.observation().transformations, 67);
         assert_eq!(release.observation().query_forms, 8);
     }
 

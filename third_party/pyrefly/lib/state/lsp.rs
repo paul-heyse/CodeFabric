@@ -256,6 +256,8 @@ pub enum ImportBehavior {
     /// Jump through all imports. For non-Python files, this means selecting the definition file,
     /// even if we can't parse/process that definition file.
     JumpThroughEverything,
+    /// Resolve imported denotations without the editor's unresolved-import landing fallback.
+    ResolveDenotations,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1669,6 +1671,12 @@ impl<'a> Transaction<'a> {
                 let Some((def_handle, _, export)) =
                     self.resolve_named_import(handle, module_name, name.clone(), preference)
                 else {
+                    if matches!(
+                        preference.import_behavior,
+                        ImportBehavior::ResolveDenotations
+                    ) {
+                        return None;
+                    }
                     let non_module_result = self.resolve_intermediate_non_python_module_definition(
                         handle,
                         module_name,
@@ -1696,7 +1704,9 @@ impl<'a> Transaction<'a> {
                 let should_stop_at_import = match preference.import_behavior {
                     ImportBehavior::StopAtEverything => true,
                     ImportBehavior::StopAtRenamedImports => original_name_range.is_some(),
-                    ImportBehavior::JumpThroughEverything => false,
+                    ImportBehavior::JumpThroughEverything | ImportBehavior::ResolveDenotations => {
+                        false
+                    }
                 };
                 if should_stop_at_import {
                     Some((
@@ -1896,7 +1906,7 @@ impl<'a> Transaction<'a> {
         Ok(self.key_to_export(handle, key, preference))
     }
 
-    fn find_definition_for_name_def(
+    pub(crate) fn find_definition_for_name_def(
         &self,
         handle: &Handle,
         name: &Identifier,

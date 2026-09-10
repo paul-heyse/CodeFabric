@@ -15,6 +15,8 @@ use crate::provider_native_syntax::NativeSyntaxRelation;
 use crate::rustc_relation_schema::RustcRelation;
 use arrow_array::{ArrayRef, BinaryArray, StringArray, UInt64Array};
 
+mod semantic_coverage;
+
 #[derive(Clone, Copy)]
 struct Partition<'a> {
     family: &'static str,
@@ -40,6 +42,7 @@ pub(super) fn install(
 ) -> Result<(), ProductionWorkspaceStartupError> {
     let python = ruff_by_file(runs);
     let pyrefly = pyrefly_by_file(runs);
+    let semantic_coverage = semantic_coverage::index(runs)?;
     let mut rows = Vec::new();
     let mut rust_requested = false;
     for member in inventory.members() {
@@ -91,6 +94,14 @@ pub(super) fn install(
             &mut rows,
             partition,
             file.and_then(|id| pyrefly.get(&id).copied()),
+            publication,
+        );
+        semantic_coverage::append(
+            &mut rows,
+            partition,
+            file.and_then(|id| pyrefly.get(&id).copied()),
+            run,
+            &semantic_coverage,
             publication,
         );
         let mut calls = Partition {

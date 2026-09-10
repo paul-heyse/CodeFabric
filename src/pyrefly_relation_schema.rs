@@ -32,10 +32,11 @@ pub enum PyreflyRelation {
     Diagnostic = 118,
     AffectedModule = 119,
     Coverage = 120,
+    Reference = 143,
 }
 
 impl PyreflyRelation {
-    pub(crate) const ALL: [Self; 10] = [
+    pub(crate) const ALL: [Self; 11] = [
         Self::ModuleContext,
         Self::TypeShape,
         Self::TypeComponent,
@@ -46,6 +47,7 @@ impl PyreflyRelation {
         Self::Diagnostic,
         Self::AffectedModule,
         Self::Coverage,
+        Self::Reference,
     ];
 
     #[must_use]
@@ -66,6 +68,7 @@ impl PyreflyRelation {
             Self::Diagnostic => "provider.pyrefly.diagnostic.v1",
             Self::AffectedModule => "provider.pyrefly.affected_module.v1",
             Self::Coverage => "provider.pyrefly.coverage.v1",
+            Self::Reference => "provider.pyrefly.reference.v1",
         }
     }
 
@@ -174,6 +177,7 @@ impl PyreflyRelation {
                 u64_field("source_byte_length", false),
                 bool_field("long_lived_context", false),
             ],
+            Self::Reference => reference_fields(),
             Self::TypeShape => vec![
                 u64_field("local_type_index", false),
                 u64_field("structural_hash", false),
@@ -285,6 +289,25 @@ struct FieldSpec {
     name: &'static str,
     data_type: DataType,
     nullable: bool,
+}
+
+fn reference_fields() -> Vec<FieldSpec> {
+    vec![
+        u64_field("occurrence_ordinal", false),
+        u64_field("start_byte", false),
+        u64_field("end_byte", false),
+        utf8("name", false),
+        utf8("reference_kind", false),
+        u64_field("target_ordinal", true),
+        utf8("target_file_id", true),
+        fixed_binary("target_content_digest", 32, true),
+        u64_field("target_start_byte", true),
+        u64_field("target_end_byte", true),
+        utf8("target_symbol_kind", true),
+        bool_field("target_is_module", true),
+        utf8("resolution_state", false),
+        utf8("definition_mapping", false),
+    ]
 }
 
 fn common_fields() -> Vec<FieldSpec> {

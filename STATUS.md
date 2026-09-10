@@ -3,7 +3,8 @@
 Updated 2026-09-10 from the canonical `/home/paul/CodeFabric` working tree on `master`.
 Implementation has resumed from `b2a97b9c` in the detailed plan's P01–P14 package order, as requested.
 P01's initial captured dependency/context vertical and phase costs are committed in `a31e2a3a`.
-P02 is in progress; its canonical diagnostic message/detail and coverage slice is implemented.
+P02 is in progress; canonical diagnostics and the initial Python module/import/semantic-reference
+cluster are implemented with scoped coverage and exact reopen.
 The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
 Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
 
@@ -38,7 +39,55 @@ The call-query continuation present at session start was preserved, exercised an
 originally stopped at the diagnostic checkpoint. The subsequent user instruction resumes execution
 of the cross-cutting packages in §3.3 of the detailed plan.
 
-## P02 in progress: canonical diagnostics and scoped coverage
+## P02 in progress: Python semantic references and canonical diagnostics
+
+The Python continuation publishes `fact.code_module`, `fact.code_semantic_reference` and
+`fact.code_import`. Checker-selected modules are application-owned semantic entities without
+invented declaration spans. The native Pyrefly query seam resolves names, attributes and import
+aliases in one transaction and AST walk, retaining every definition candidate and explicit
+unresolved observations. A semantic import mode disables the editor's unresolved-import landing
+fallback. Module targets preserve native module identity even when their definition range is empty.
+The sidecar maps source/definition anchors to original captured bytes and emits the typed
+`provider.pyrefly.reference.v1` Arrow relation (family 143). Both build domains use the updated
+schema bundle; old sidecars fail its existing exact digest handshake.
+
+Native DataFusion joins require matching analysis context, source file, digest and generation.
+Declaration targets require exact anchors; module targets require exact captured module membership.
+Distinct canonical matches remain candidates, and stale targets retain unknown denotations.
+Import syntax joins checker names only at the same alias start within the Ruff alias range, with
+the join method recorded. Raw syntax names never establish semantic resolution. Entity union
+branches carry common output field metadata before optimization, including an empty module branch.
+
+`modules`, `semantic-references` and `imports` now have requested processing partitions. An accepted
+native per-file/family census refines aggregate provider remainder, and canonical target gaps can
+only downgrade completion. Imports also require their syntax family. An unresolved import in one
+file does not make another file's complete imports incomplete. Source-only epochs disclose pending
+semantic work. Builtins/external targets outside the captured inventory and unsupported semantic
+anchors remain unknown; the broader reference census and external normalization are still required.
+
+Validation on 2026-09-10: all 38 sidecar tests pass, including aliased imports, attributes, module
+endpoints and absent imports (`/tmp/codefabric-p02-references-sidecar-tests-3.log`). Six canonical
+tests and a real daemon/reopen case pass together (23.29 s;
+`/tmp/codefabric-p02-references-tests-3.log`). Independent Arrow inputs cover candidate multiplicity,
+another analysis context, stale source/target digests, stale generation, invalid ranges and stable
+IDs across run/generation changes. The expanded real case additionally checks a separate broken
+import file, healthy-file complete coverage and exact reopen of all new relations/coverage
+(23.45 s; `/tmp/codefabric-p02-references-native-negative.log`).
+`canonical-python-references` selects it through `just golden`. Native tests use the delegated
+user-systemd scope described under P01, with the rebuilt current sidecar and existing extractor.
+Fourteen provider-recipe/processing tests pass, including the expanded exact schema census
+(`/tmp/codefabric-p02-references-provider-tests-final.log`). Tooling golden selection, focused
+lint/format, documentation navigation, spelling and diff checks pass.
+Default/featureless `just root-check` and strict `just sidecar-check` pass. All-target root Clippy
+completes with the existing warning backlog; full-suite, doctest and public family-selection
+completion are not claimed by this slice. The code-facts and DataFusion reference skills and exact
+local sources guided the bulk resolver, typed Arrow boundary, joins, aggregates and alias metadata.
+
+Structural types, initial Rust import/reference normalization and public family selection remain
+P02 work. The current Pyrefly shape table erases native type distinctions; extend its typed query
+seam before interning canonical type identities. P03–P14 remain required in package order.
+
+### Canonical diagnostics (`cf42d574`)
 
 The daemon now publishes `fact.code_diagnostic` for accepted Python and Rust messages, plus
 `fact.code_diagnostic_child`, `fact.code_diagnostic_span`, `fact.code_diagnostic_suggestion` and
@@ -86,10 +135,8 @@ complete coverage for a failed Cargo target. No full-suite, doctest or all-famil
 completion is claimed.
 
 The DataFusion and code-facts reference skills guided typed logical joins and native diagnostic
-authority. P02 remains open for structural types, imports, semantic references, their complete
-coverage and public family selection. Pyrefly's current type-shape export collapses native
-distinctions; extend its typed query seam before using those observations as canonical type IDs.
-P03–P14 remain required in package order. No outcome is closed by this diagnostic slice.
+authority. P02's remaining scope and the subsequent Python cluster are recorded above.
+No outcome is closed by these slices.
 
 ## P01: captured dependency contexts and initial phase costs
 

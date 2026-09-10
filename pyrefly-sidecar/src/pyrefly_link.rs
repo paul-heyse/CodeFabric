@@ -27,6 +27,7 @@ use relation_schema::{PYREFLY_RELEASE, PYREFLY_REVISION};
 pub(crate) use relation_schema::{PyreflyRelation, schema_bundle_digest, schema_digests};
 
 pub(crate) mod preparation;
+mod references;
 use preparation::SelectedPyreflyPreparation;
 
 const MAX_RELATION_ROWS: usize = 1_000_000;
@@ -626,6 +627,7 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
     };
     let type_table = query.get_type_table_in_file(name, path.clone(), None);
     let callees = query.get_callees_with_location(name, path.clone(), None);
+    let references = query.get_semantic_references_in_file(name, path.clone(), MAX_RELATION_ROWS);
 
     let (shape_rows, component_rows, trait_rows, located_rows) =
         project_type_table(type_table.as_ref(), source)?;
@@ -636,7 +638,7 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
         .filter(|(owner, _)| owner == &path)
         .map(|(_, diagnostic)| normalize_diagnostic(diagnostic, provider_path, &module.module_id))
         .collect::<Vec<_>>();
-    let coverage_rows = coverage_rows(
+    let mut coverage_rows = coverage_rows(
         type_table.is_some(),
         callees.is_some(),
         shape_rows.len(),
@@ -645,8 +647,14 @@ fn analyze_loaded_module(input: LoadedModuleAnalysisInput<'_>) -> Result<ModuleA
         member_rows.len(),
         module_diagnostics.len(),
     );
+    let reference_rows = references::project(references.as_ref(), source, definition_sources)?;
+    references::qualify_coverage(&mut coverage_rows, references.as_ref(), &reference_rows);
 
     let mut relations = vec![
+        encode_relation(
+            PyreflyRelation::Reference,
+            &references::batch(&common, &reference_rows)?,
+        )?,
         encode_relation(
             PyreflyRelation::ModuleContext,
             &module_context_batch(&common, source.original_len)?,
@@ -1778,6 +1786,106 @@ mod tests {
         assert_eq!(
             checked,
             BTreeSet::from(["b.chosen".to_owned(), "b.Service.method".to_owned()])
+        );
+        drop(context);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn checker_semantic_references_keep_alias_targets_attributes_and_unknowns() {
+        use arrow_array::Array as _;
+        let root = claim_001_temp_root("semantic-references");
+        std::fs::create_dir_all(&root).unwrap();
+        let a = b"from b import chosen as alias, Service\ndef chosen() -> str:\n    return 'local'\nvalue = alias()\nservice = Service()\nother = service.method()\nmissing()\nimport b\nmodule_value = b.chosen()\nfrom absent import orphan\norphan()\n";
+        let b = b"def chosen() -> int:\n    return 7\nclass Service:\n    def method(self) -> int:\n        return chosen()\n";
+        let mut context = SemanticContext::test_only_fixture(&root, "semantic-references").unwrap();
+        let result = context
+            .analyze_modules(
+                &inventory_run(1),
+                &complete([
+                    inventory_module(&root, "a", a),
+                    inventory_module(&root, "b", b),
+                ]),
+            )
+            .unwrap();
+        let relation = result
+            .modules
+            .iter()
+            .find(|module| module.module_id == "module:a")
+            .unwrap()
+            .relations
+            .iter()
+            .find(|relation| relation.relation == PyreflyRelation::Reference)
+            .unwrap();
+        let mut checked = BTreeSet::new();
+        for batch in StreamReader::try_new(Cursor::new(&relation.arrow_ipc), None).unwrap() {
+            let batch = batch.unwrap();
+            let text = |name| {
+                batch
+                    .column_by_name(name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+            };
+            let numbers = |name| {
+                batch
+                    .column_by_name(name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<UInt64Array>()
+                    .unwrap()
+            };
+            for row in 0..batch.num_rows() {
+                let name = text("name").value(row);
+                let kind = text("reference_kind").value(row);
+                let expected = match (name, kind) {
+                    ("chosen", "import") | ("alias", "read") => Some((4, 10)),
+                    ("method", "read") => Some((57, 63)),
+                    ("b", "import" | "read") => {
+                        assert_eq!(
+                            text("definition_mapping").value(row),
+                            "exact_checker_module"
+                        );
+                        assert_eq!(text("target_file_id").value(row), "file:b");
+                        assert!(numbers("target_start_byte").is_null(row));
+                        assert!(numbers("target_end_byte").is_null(row));
+                        checked.insert((name.to_owned(), kind.to_owned()));
+                        None
+                    }
+                    ("missing", "read") | ("orphan", "import" | "read") => {
+                        assert_eq!(text("resolution_state").value(row), "unresolved");
+                        assert!(text("target_file_id").is_null(row));
+                        assert!(numbers("target_ordinal").is_null(row));
+                        checked.insert((name.to_owned(), kind.to_owned()));
+                        None
+                    }
+                    _ => continue,
+                };
+                if let Some((start, end)) = expected {
+                    assert_eq!(text("target_file_id").value(row), "file:b");
+                    assert_eq!(
+                        text("definition_mapping").value(row),
+                        "exact_checker_definition"
+                    );
+                    assert_eq!(numbers("target_start_byte").value(row), start);
+                    assert_eq!(numbers("target_end_byte").value(row), end);
+                    checked.insert((name.to_owned(), kind.to_owned()));
+                }
+            }
+        }
+        assert_eq!(
+            checked,
+            BTreeSet::from([
+                ("chosen".to_owned(), "import".to_owned()),
+                ("alias".to_owned(), "read".to_owned()),
+                ("method".to_owned(), "read".to_owned()),
+                ("missing".to_owned(), "read".to_owned()),
+                ("b".to_owned(), "import".to_owned()),
+                ("b".to_owned(), "read".to_owned()),
+                ("orphan".to_owned(), "import".to_owned()),
+                ("orphan".to_owned(), "read".to_owned()),
+            ])
         );
         drop(context);
         std::fs::remove_dir_all(root).unwrap();

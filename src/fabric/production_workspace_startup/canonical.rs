@@ -35,9 +35,12 @@ use crate::rustc_relation_schema::RustcRelation;
 mod call_selector;
 mod calls;
 mod diagnostics;
+mod imports;
+mod modules;
 mod processing;
 mod python_calls;
 mod relationship_selector;
+mod semantic_references;
 mod source_context;
 
 /// Each canonical projection requires its own native input set. Diagnostic-only compilation and
@@ -103,6 +106,9 @@ pub(super) fn install(
             rust: rust.declarations,
         },
         Kind::Reference { python },
+        Kind::Module { pyrefly },
+        Kind::SemanticReference { pyrefly },
+        Kind::Import { python },
         Kind::Diagnostic {
             pyrefly,
             rust: rust.diagnostics.primary,
@@ -162,6 +168,15 @@ enum Kind {
         pyrefly: bool,
         rust: bool,
     },
+    Module {
+        pyrefly: bool,
+    },
+    SemanticReference {
+        pyrefly: bool,
+    },
+    Import {
+        python: bool,
+    },
     DiagnosticDetail {
         detail: diagnostics::Detail,
         available: bool,
@@ -208,6 +223,21 @@ impl Canonical {
                 diagnostics::fields(),
                 diagnostics::dependencies(pyrefly, rust),
             ),
+            Kind::Module { pyrefly } => (
+                modules::RELATION,
+                modules::fields(),
+                modules::dependencies(pyrefly),
+            ),
+            Kind::Import { python } => (
+                imports::RELATION,
+                imports::fields(),
+                imports::dependencies(python),
+            ),
+            Kind::SemanticReference { pyrefly } => (
+                semantic_references::RELATION,
+                semantic_references::fields(),
+                semantic_references::dependencies(pyrefly),
+            ),
             Kind::DiagnosticDetail { detail, available } => (
                 detail.relation(),
                 detail.fields(),
@@ -224,7 +254,11 @@ impl Canonical {
                     vec![]
                 },
             ),
-            Kind::Entity => (ENTITY, entity_fields(), vec![DECLARATION]),
+            Kind::Entity => (
+                ENTITY,
+                entity_fields(),
+                vec![DECLARATION, modules::RELATION],
+            ),
             Kind::CallSelector => (
                 call_selector::RELATION,
                 call_selector::fields(),
@@ -592,6 +626,11 @@ impl ProgrammaticTransformation for Canonical {
             Kind::Diagnostic { pyrefly, rust } => {
                 diagnostics::build(self.workspace, inputs, pyrefly, rust)
             }
+            Kind::Module { pyrefly } => modules::build(self.workspace, inputs, pyrefly),
+            Kind::Import { python } => imports::build(self.workspace, inputs, python),
+            Kind::SemanticReference { pyrefly } => {
+                semantic_references::build(self.workspace, inputs, pyrefly)
+            }
             Kind::DiagnosticDetail { detail, available } => detail.build(inputs, available),
             Kind::Reference { python: true } => self.references(inputs),
             Kind::Reference { python: false } => empty(reference_fields()),
@@ -636,7 +675,12 @@ impl ProgrammaticTransformation for Canonical {
             }
             Kind::Entity => Ok(LogicalPlanBuilder::from(plan(inputs, DECLARATION)?)
                 .filter(col("entity_id").is_not_null())?
-                .project(entity_fields().iter().map(|(name, _, _)| col(*name)))?
+                .project(entity_projection())?
+                .union(
+                    LogicalPlanBuilder::from(plan(inputs, modules::RELATION)?)
+                        .project(entity_projection())?
+                        .build()?,
+                )?
                 .distinct()?
                 .build()?),
             Kind::Declaration { python, rust } => {
@@ -737,6 +781,31 @@ fn source_fields() -> Vec<FieldSpec> {
         ("disposition", DataType::Utf8, false),
     ]
 }
+fn entity_projection() -> Vec<Expr> {
+    // Union branches describe the same output fields. Give each branch that field identity
+    // before DataFusion can prune an empty branch or propagate its physical schema.
+    entity_fields()
+        .iter()
+        .map(|(name, _, _)| {
+            let identity = canonical_field_identity(ENTITY, name);
+            let mut metadata = std::collections::HashMap::from([(
+                crate::schema_contract::FIELD_ID_METADATA_KEY.to_owned(),
+                identity.field_id().as_str().to_owned(),
+            )]);
+            if let Some(role) = identity.semantic_role() {
+                metadata.insert(
+                    crate::schema_contract::SEMANTIC_ROLE_METADATA_KEY.to_owned(),
+                    role.to_string(),
+                );
+            }
+            col(*name).alias_with_metadata(
+                *name,
+                Some(datafusion::common::metadata::FieldMetadata::from(metadata)),
+            )
+        })
+        .collect()
+}
+
 fn entity_fields() -> Vec<FieldSpec> {
     vec![
         ("entity_id", DataType::FixedSizeBinary(16), true),
@@ -877,6 +946,7 @@ fn kind_code(kind: &str) -> u16 {
         "type-alias" => 8,
         "type-parameter" => 9,
         "import" => 10,
+        "module" => 11,
         _ => 2,
     }
 }
@@ -1056,6 +1126,7 @@ fn source_occurrence_id(workspace: [u8; 16], name: &str, kind: u16, family: u16)
 #[cfg(test)]
 mod tests {
     mod diagnostics;
+    mod semantic_references;
     use super::*;
     use crate::fabric::epoch_runtime::{FabricEpochId, FabricEpochRuntimeConfig};
     use crate::fabric::programmatic_schema::ProviderInput;
@@ -1220,6 +1291,7 @@ mod tests {
                 NativeSyntaxRelation::RuffCallable,
                 NativeSyntaxRelation::RuffCallSite,
                 NativeSyntaxRelation::RuffCallableSyntax,
+                NativeSyntaxRelation::RuffImport,
             ] {
                 let schema = relation.schema();
                 provider(
@@ -1421,6 +1493,9 @@ mod tests {
             "fact.code_diagnostic_span",
             "fact.code_diagnostic_suggestion",
             "fact.code_diagnostic_edit",
+            "fact.code_module",
+            "fact.code_semantic_reference",
+            "fact.code_import",
             "fact.code_call_site",
         ] {
             let batches = context.table(table).await.unwrap().collect().await.unwrap();

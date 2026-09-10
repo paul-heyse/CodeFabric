@@ -1,6 +1,6 @@
 # CodeFabric: detailed implementation of remaining outcomes 4–8
 
-Created 2026-09-09 against `126cf71f`; the diagnostic checkpoint was `4cc74d7c`. Design and remaining work expanded against `d6d1369b` and committed in `b2a97b9c`. Package execution resumed under the subsequent user instruction. Updated 2026-09-10 with P01's initial captured dependency/context vertical and phase measurements, and P02's canonical diagnostic/coverage slice.
+Created 2026-09-09 against `126cf71f`; the diagnostic checkpoint was `4cc74d7c`. Design and remaining work expanded against `d6d1369b` and committed in `b2a97b9c`. Package execution resumed under the subsequent user instruction. Updated 2026-09-10 with P01's initial captured dependency/context vertical and phase measurements, and P02's canonical diagnostics and initial Python module/import/reference cluster.
 
 This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Execute the cross-cutting packages in §3.3 order. The status notes distinguish demonstrated behavior and remaining acceptance; writing or updating this plan is not implementation evidence.
 
@@ -373,8 +373,27 @@ message comparison and Delta reopen of all five relations (46.95 s); independent
 stale owners, cross-file locations, invalidated ranges and stable IDs. `canonical-diagnostics`
 selects the native scenario. STATUS records checks and remaining scope.
 
-Continue P02 with canonical types/imports/semantic references, scoped requested coverage and family
-selection. Pyrefly's existing deduplicated shape table erases some native type distinctions; extend
+**P02 initial Python module/import/reference cluster implemented, 2026-09-10.**
+The typed Pyrefly bulk query performs one transaction/AST walk over names, attributes and import
+aliases, preserving candidates, unresolved imports and module targets without definition ranges.
+It disables the native editor's unresolved-import landing fallback. The shared Arrow schema adds
+`provider.pyrefly.reference.v1`; source/definition anchors retain original captured bytes.
+`fact.code_module`, `fact.code_semantic_reference` and `fact.code_import` use native DataFusion
+context/file/digest/generation joins, exact declaration anchors, explicit import-anchor methods,
+candidate aggregates and application-owned IDs. Module entities join the entity universe; output
+field metadata is aligned before union optimization. Invalidated targets remain unknown.
+
+Requested modules/imports/semantic-reference coverage combines accepted per-file native census,
+syntax availability and canonical target completeness. Healthy-file imports remain complete beside
+a broken import in another file. Independent Arrow cases cover context separation, multiplicity,
+stale source/targets, range validity and identity stability. Real contained Pyrefly publication and
+exact Delta reopen pass for aliases, class methods, modules and missing names/imports (23.45 s);
+`canonical-python-references` selects the case. All 38 sidecar tests, canonical cases, root default/
+featureless checks and strict sidecar checks pass; STATUS records commands, evidence and limits.
+Public family retrieval and broader native reference meanings remain open.
+
+Continue P02 with structural types, initial Rust imports/semantic references and public family
+selection for the canonical clusters. Pyrefly's existing deduplicated shape table erases some native type distinctions; extend
 the typed native query boundary and reuse the application's type interner, without promoting display
 strings or 64-bit provider hashes to canonical type identity. This does not defer or close any of
 P02's required semantic verticals. P03–P14 remain in the table's order.
@@ -588,8 +607,10 @@ choosing more checker contexts or finer extraction.
 **Surfaces:** `src/production_provider_recipe.rs`, `src/provider_admission.rs`, `src/programmatic_derived_analysis.rs`, `src/schema_contract.rs`, programmatic relation builders and startup publication.
 
 The P02 diagnostic continuation adds canonical Python/Rust messages, Rust child/span/suggestion/edit
-relations and separate requested diagnostic coverage. Exact native-provider publication and reopen
-are exercised; public diagnostic family selection and the other semantic clusters below remain open.
+relations and separate requested diagnostic coverage. The Python module/import/semantic-reference
+cluster now has typed native observations, canonical joins, scoped coverage and exact reopen, as
+recorded in §3.3. Public family selection, structural types, the Rust import/reference cluster and
+the broader semantic families below remain open.
 
 1. Route raw source/syntax, Pyrefly and rustc outputs into typed canonical entity, occurrence, declaration, binding, reference, import/export, type, member, callable, call-site and dispatch relations. Preserve raw relations alongside normalized facts.
 2. Join ranges on `(file_id, content_digest, start_byte, end_byte)` and semantic role. Use exact matches first; a permitted containment/overlap rule records method and ambiguity. Never match unrelated declarations just because their ranges coincide.
@@ -1686,8 +1707,9 @@ P01–P14 register entries. These checks validate the planning artifact, not pro
 
 Implementation resumed from `b2a97b9c` under the user's instruction to execute §3.3 package by
 package across outcomes 4–8. P01's initial dependency/context vertical and phase costs are now
-implemented and exercised, with the limits recorded in §3.3 and STATUS. P02's canonical diagnostic
-and coverage slice is implemented; its types/imports/semantic references and family selection remain.
+implemented and exercised, with the limits recorded in §3.3 and STATUS. P02's canonical diagnostics
+and initial Python module/import/reference cluster are implemented with scoped coverage. Structural
+types, initial Rust imports/references and public family selection remain.
 
 Continue using §3.3 as the integrated order:
 
