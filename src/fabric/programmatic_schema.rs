@@ -1492,6 +1492,33 @@ impl ObservationMaterializationStats {
     }
 }
 
+/// Keep application-owned Arrow identities through native catalog and query execution.
+/// The two excluded DataFusion 55 rules erase metadata-only aliases; all other rules remain.
+pub(crate) fn with_identity_preserving_optimizers(candidate_state: SessionState) -> SessionState {
+    // DataFusion 55's logical `optimize_projections` and physical
+    // `ProjectionPushdown` rules treat a metadata-only identity projection
+    // as removable. The former drops schema metadata; the latter either
+    // drops field metadata or fails its own schema check. Retain every other
+    // native optimizer while keeping the application-owned identity boundary
+    // visible through logical, physical, batch, and view phases.
+    let logical_rules = candidate_state
+        .optimizers()
+        .iter()
+        .filter(|rule| rule.name() != "optimize_projections")
+        .cloned()
+        .collect();
+    let physical_rules = candidate_state
+        .physical_optimizers()
+        .iter()
+        .filter(|rule| rule.name() != "ProjectionPushdown")
+        .cloned()
+        .collect();
+    SessionStateBuilder::new_from_existing(candidate_state)
+        .with_optimizer_rules(logical_rules)
+        .with_physical_optimizer_rules(physical_rules)
+        .build()
+}
+
 /// Mutable builder for one dependency-closed candidate catalog.
 pub struct ProgrammaticSchemaAssembly {
     session: SessionContext,
@@ -1518,28 +1545,7 @@ impl ProgrammaticSchemaAssembly {
         candidate_state: SessionState,
         observation_policy: ObservationMaterializationPolicy,
     ) -> Self {
-        // DataFusion 55's logical `optimize_projections` and physical
-        // `ProjectionPushdown` rules treat a metadata-only identity projection
-        // as removable. The former drops schema metadata; the latter either
-        // drops field metadata or fails its own schema check. Retain every other
-        // native optimizer while keeping the application-owned identity boundary
-        // visible through logical, physical, batch, and view phases.
-        let logical_rules = candidate_state
-            .optimizers()
-            .iter()
-            .filter(|rule| rule.name() != "optimize_projections")
-            .cloned()
-            .collect();
-        let physical_rules = candidate_state
-            .physical_optimizers()
-            .iter()
-            .filter(|rule| rule.name() != "ProjectionPushdown")
-            .cloned()
-            .collect();
-        let candidate_state = SessionStateBuilder::new_from_existing(candidate_state)
-            .with_optimizer_rules(logical_rules)
-            .with_physical_optimizer_rules(physical_rules)
-            .build();
+        let candidate_state = with_identity_preserving_optimizers(candidate_state);
         Self {
             session: SessionContext::new_with_state(candidate_state),
             observation_policy,

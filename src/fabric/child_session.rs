@@ -1406,6 +1406,7 @@ impl AuthorizedChildSession {
             .with_runtime_env(Arc::clone(&runtime))
             .with_catalog_list(catalog_authority)
             .build();
+        state = super::programmatic_schema::with_identity_preserving_optimizers(state);
         validate_empty_registries(&state)?;
         install_allowlisted_registries(&mut state, &policy.registries)?;
         validate_allowlisted_registries(&state, &policy.registries)?;

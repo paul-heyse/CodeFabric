@@ -12,6 +12,7 @@ use std::ops::Not;
 use std::sync::Arc;
 
 use arrow_schema::{DataType, SchemaRef};
+use datafusion::common::metadata::FieldMetadata;
 use datafusion::common::{Column, DFSchema, ScalarValue, TableReference};
 use datafusion::error::DataFusionError;
 use datafusion::functions_aggregate::expr_fn::{avg, count, count_distinct, max, min, sum};
@@ -683,6 +684,7 @@ struct FieldDefinition {
     name: String,
     data_type: DataType,
     nullable: bool,
+    metadata: FieldMetadata,
 }
 
 #[derive(Clone, Debug)]
@@ -778,6 +780,7 @@ impl ProgramBindings {
                     name: field.name().clone(),
                     data_type: field.data_type().clone(),
                     nullable: field.is_nullable(),
+                    metadata: field.metadata().clone().into(),
                 };
                 if fields.insert(field_id.clone(), definition).is_some() {
                     return Err(RelationalProgramError::InvalidProgram(format!(
@@ -904,6 +907,7 @@ impl ProgramBindings {
                         name: field.name().clone(),
                         data_type: field.data_type().clone(),
                         nullable: field.is_nullable(),
+                        metadata: field.metadata().clone().into(),
                     },
                 );
                 relation_fields.push(field_id.clone());
@@ -1051,7 +1055,7 @@ impl CompileState {
                             &expression,
                             input.plan.schema(),
                         )?;
-                        Ok(expression.alias(self.bindings.field(&named.field_id)?.name.clone()))
+                        self.alias_output(&named.field_id, expression)
                     })
                     .collect::<Result<Vec<_>, RelationalProgramError>>()?;
                 let plan = LogicalPlanBuilder::from(input.plan)
@@ -1207,7 +1211,7 @@ impl CompileState {
                             &expression,
                             input.plan.schema(),
                         )?;
-                        Ok(expression.alias(self.bindings.field(&named.field_id)?.name.clone()))
+                        self.alias_output(&named.field_id, expression)
                     })
                     .collect::<Result<Vec<_>, RelationalProgramError>>()?;
                 let aggregates = aggregates
@@ -1223,7 +1227,7 @@ impl CompileState {
                             &expression,
                             input.plan.schema(),
                         )?;
-                        Ok(expression.alias(self.bindings.field(&named.field_id)?.name.clone()))
+                        self.alias_output(&named.field_id, expression)
                     })
                     .collect::<Result<Vec<_>, RelationalProgramError>>()?;
                 self.require_intrinsic(RelationalPrimitive::Aggregate)?;
@@ -1562,6 +1566,21 @@ impl CompileState {
                 expected: DataType::Boolean,
                 observed,
             })
+        }
+    }
+
+    fn alias_output(
+        &self,
+        field_id: &FieldId,
+        expression: Expr,
+    ) -> Result<Expr, RelationalProgramError> {
+        let output = self.bindings.field(field_id)?;
+        // DataFusion merges alias metadata with input metadata. Declared keys, including a
+        // shared union output identity, override the contributing input family's keys.
+        if output.metadata.is_empty() {
+            Ok(expression.alias(output.name.clone()))
+        } else {
+            Ok(expression.alias_with_metadata(output.name.clone(), Some(output.metadata.clone())))
         }
     }
 
@@ -2077,6 +2096,13 @@ mod tests {
                         && implementation_id == &expected_aggregate_implementation
             )
         }));
+        for (index, field_id) in [SUMMARY_GROUP, SUMMARY_TOTAL].iter().enumerate() {
+            assert_eq!(
+                compiled.plan.schema().field(index).metadata()[FIELD_ID_METADATA_KEY],
+                *field_id,
+                "aggregate outputs carry their declared identity"
+            );
+        }
     }
 
     #[test]
@@ -2106,6 +2132,123 @@ mod tests {
         assert!(matches!(compiled.plan, LogicalPlan::SubqueryAlias(_)));
         assert_eq!(compiled.plan.schema().field(0).name(), "group_name");
         assert_eq!(compiled.plan.schema().field(1).name(), "value");
+    }
+
+    fn metadata_context() -> datafusion::prelude::SessionContext {
+        use datafusion::prelude::SessionContext;
+        SessionContext::new_with_state(
+            crate::fabric::programmatic_schema::with_identity_preserving_optimizers(
+                SessionContext::new().state(),
+            ),
+        )
+    }
+
+    #[tokio::test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "exercise branch elimination and physical execution with distinct input and output metadata"
+    )]
+    async fn declared_field_metadata_survives_union_branch_elimination_and_execution() {
+        use arrow_array::{Int64Array, RecordBatch};
+
+        for metadata in [
+            HashMap::from([(FIELD_ID_METADATA_KEY.into(), "test.field.output.id".into())]),
+            HashMap::from([
+                (FIELD_ID_METADATA_KEY.into(), "test.field.output.id".into()),
+                ("result".into(), "identity".into()),
+            ]),
+        ] {
+            let context = metadata_context();
+            let contracts = [
+                program_contract(LEFT, "left", vec![(LEFT_ID, "id", DataType::Int64, false)]),
+                program_contract(
+                    RIGHT,
+                    "right",
+                    vec![(RIGHT_ID, "id", DataType::Int64, false)],
+                ),
+            ];
+            let inputs = contracts
+                .iter()
+                .zip([7, 99])
+                .map(|(contract, value)| {
+                    let batch = RecordBatch::try_new(
+                        Arc::clone(contract.contract.logical_schema()),
+                        vec![Arc::new(Int64Array::from(vec![value]))],
+                    )
+                    .unwrap();
+                    RelationInput {
+                        relation_id: contract.relation_id.clone(),
+                        plan: context.read_batch(batch).unwrap().into_unoptimized_plan(),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let result_schema = Arc::new(Schema::new(vec![
+                Field::new("id", DataType::Int64, false).with_metadata(metadata.clone()),
+            ]));
+            let output_id = id("test.field.output.id");
+            let bindings = ProgramBindings::try_new("metadata-test", contracts)
+                .unwrap()
+                .with_supplemental_relations([SupplementalProgramRelationBinding::try_new(
+                    relation_id("test.relation.output"),
+                    TableReference::full("codefabric", "test", "output"),
+                    Arc::clone(&result_schema),
+                    vec![output_id.clone()],
+                    [1; 32],
+                )
+                .unwrap()])
+                .unwrap();
+            let branches = [(LEFT, LEFT_ID, true), (RIGHT, RIGHT_ID, false)]
+                .into_iter()
+                .map(
+                    |(relation, input_id, keep)| RelationalExpression::Projection {
+                        input: Box::new(RelationalExpression::Filter {
+                            input: Box::new(RelationalExpression::Input(relation_id(relation))),
+                            predicate: ScalarExpression::Literal(ScalarValue::Boolean(Some(keep))),
+                        }),
+                        expressions: vec![NamedExpression {
+                            field_id: output_id.clone(),
+                            expression: field(input_id),
+                        }],
+                    },
+                )
+                .collect();
+            let compiled = RelationalProgramCompiler::compile_with_bindings(
+                &bindings,
+                inputs,
+                &RelationalProgram {
+                    root: RelationalExpression::Union {
+                        inputs: branches,
+                        kind: UnionKind::Distinct,
+                    },
+                    output_fields: vec![output_id],
+                },
+            )
+            .unwrap();
+            assert_eq!(compiled.plan.schema().field(0).metadata(), &metadata);
+            let state = context.state();
+            let optimized = state.optimize(&compiled.plan).unwrap();
+            assert_eq!(optimized.schema().fields(), result_schema.fields());
+            assert!(!optimized.display_indent().to_string().contains("Union"));
+            let physical = state
+                .query_planner()
+                .create_physical_plan(&optimized, &state)
+                .await
+                .unwrap();
+            assert_eq!(physical.schema().fields(), result_schema.fields());
+            let batches = datafusion::physical_plan::collect(physical, context.task_ctx())
+                .await
+                .unwrap();
+            assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
+            assert_eq!(
+                batches[0]
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap()
+                    .value(0),
+                7
+            );
+        }
     }
 
     #[test]
@@ -2555,8 +2698,7 @@ mod tests {
     #[tokio::test]
     async fn block_output_renaming_carries_values_across_repeated_projection_bindings() {
         use arrow_array::{Int64Array, RecordBatch};
-        use datafusion::prelude::SessionContext;
-        let context = SessionContext::new();
+        let context = metadata_context();
         let batch = RecordBatch::try_from_iter([(
             "value",
             Arc::new(Int64Array::from(vec![Some(5), None])) as arrow_array::ArrayRef,

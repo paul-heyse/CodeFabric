@@ -13,9 +13,21 @@ pub(super) fn preserve_result_metadata(
 ) -> Result<(LogicalPlan, bool)> {
     let plan = preserve_aggregate_inputs(plan)?;
     if plan.schema().fields() != expected.fields() {
-        return Err(DataFusionError::Plan(
-            "optimized output fields differ from the compiled result contract".into(),
-        ));
+        let actual = plan.schema().fields();
+        let difference = actual.iter().zip(expected.fields()).enumerate()
+            .find(|(_, (actual, expected))| actual != expected)
+            .map_or_else(
+                || format!("field counts {} versus {}", actual.len(), expected.fields().len()),
+                |(index, (actual, expected))| format!(
+                    "field {index}: actual {} {} nullable={}, expected {} {} nullable={}, metadata_equal={}",
+                    actual.name(), actual.data_type(), actual.is_nullable(),
+                    expected.name(), expected.data_type(), expected.is_nullable(),
+                    actual.metadata() == expected.metadata(),
+                ),
+            );
+        return Err(DataFusionError::Plan(format!(
+            "optimized output fields differ from the compiled result contract: {difference}"
+        )));
     }
     if plan.schema().metadata() == expected.metadata() {
         return Ok((plan, false));
