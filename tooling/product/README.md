@@ -97,3 +97,8 @@ and exact reopen preserves the selected results. Its default harness deadline is
 alias deduplication, missing-target scope, selected rustflags and extensionless configuration
 precedence through installed queries, independent clean comparison and exact reopen. Its default
 harness deadline is 600 seconds.
+
+`just golden --case cargo-linkage-live` exercises `cdylib`, `dylib` and combined
+`rlib`/`cdylib`/`staticlib` Cargo library targets through installed declaration, call and source
+queries, live manifest changes, independent clean comparison and exact reopen. Its default
+harness deadline is 600 seconds.

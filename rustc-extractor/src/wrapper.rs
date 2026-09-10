@@ -279,10 +279,31 @@ fn fixed16_hex(value: [u8; 16]) -> String {
     encoded
 }
 
+/// Preserve the complete raw rustc linkage selection. Repeated flags and comma-separated
+/// values describe one compilation; a sorted set keeps the existing single-kind wire value.
+fn selected_crate_types(arguments: &[String]) -> String {
+    let mut selected = std::collections::BTreeSet::new();
+    for (index, argument) in arguments.iter().enumerate() {
+        let value = argument.strip_prefix("--crate-type=").or_else(|| {
+            (argument == "--crate-type")
+                .then(|| arguments.get(index + 1).map(String::as_str))
+                .flatten()
+        });
+        if let Some(value) = value {
+            selected.extend(value.split(',').filter(|value| !value.is_empty()));
+        }
+    }
+    if selected.is_empty() {
+        "lib".to_owned()
+    } else {
+        selected.into_iter().collect::<Vec<_>>().join(",")
+    }
+}
+
 fn target_identity(arguments: &[String], invocation_digest: &str) -> PackageTargetIdentity {
     let crate_name =
         argument_value(arguments, "--crate-name").unwrap_or_else(|| "unknown_crate".to_owned());
-    let crate_type = argument_value(arguments, "--crate-type").unwrap_or_else(|| "lib".to_owned());
+    let crate_type = selected_crate_types(arguments);
     let package_name = env::var("CARGO_PKG_NAME").unwrap_or_else(|_| crate_name.clone());
     let package_id = format!(
         "pkg:{}",
@@ -1157,6 +1178,27 @@ pub(crate) fn run(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn compiler_linkage_selection_retains_every_repeated_and_combined_crate_type() {
+        let arguments = [
+            "--crate-type",
+            "rlib",
+            "--crate-type=cdylib,staticlib",
+            "--crate-type",
+            "rlib",
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            super::selected_crate_types(&arguments),
+            "cdylib,rlib,staticlib"
+        );
+        assert_eq!(
+            super::selected_crate_types(&["--crate-type=proc-macro".to_owned()]),
+            "proc-macro"
+        );
+        assert_eq!(super::selected_crate_types(&[]), "lib");
+    }
+
     use std::collections::{BTreeMap, BTreeSet};
     use std::io::Cursor;
     use std::pin::Pin;
@@ -1601,7 +1643,8 @@ mod tests {
         let arguments = vec![
             source.into_os_string(),
             OsString::from("--crate-name=codefabric_wrapper_probe"),
-            OsString::from("--crate-type=lib"),
+            OsString::from("--crate-type=rlib"),
+            OsString::from("--crate-type=cdylib"),
             OsString::from("--edition=2024"),
             OsString::from("--emit=metadata"),
             OsString::from(format!("--out-dir={}", output.display())),
@@ -1708,6 +1751,10 @@ mod tests {
             observed.first().and_then(|event| event.event.as_ref()),
             Some(Event::CompilationBegin(_))
         ));
+        let Some(Event::CompilationBegin(begin)) = observed[0].event.as_ref() else {
+            unreachable!()
+        };
+        assert_eq!(begin.target.as_ref().unwrap().crate_type, "cdylib,rlib");
         assert!(matches!(
             observed.last().and_then(|event| event.event.as_ref()),
             Some(Event::CompilationEnd(_))

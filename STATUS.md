@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `c1e95674` (`Apply captured Cargo platform selections and retain platform failure scope`);
-shared captured Rust toolchain preparation is the current implementation slice.
+Last production commit: `7cc76a00` (`Share captured Rust toolchain inputs across target preparation`);
+Cargo library linkage and exact metadata admission are the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -321,6 +321,26 @@ correctness with shared capture, not an end-to-end speedup. Default/featureless 
 governance scan, docs navigation and changed-file formatting pass. Library/integration Clippy
 retains its 955/36-warning baseline with no new code/file diagnostics. Broader performance measurements,
 retained build caches, parallel scheduling and observation of external toolchain changes remain open.
+
+## Cargo library linkage selection
+
+Captured manifests now supply typed linkage selections for libraries, proc macros and library
+examples. Metadata admission compares the complete selected crate-type set and Cargo target role,
+accepting `rlib`, `dylib`, `cdylib`, `staticlib` and combined library outputs without admitting a
+substituted linkage or target role. The extractor preserves repeated and comma-separated rustc
+crate-type flags in its existing raw identity field. Linkage changes remain context changes.
+
+On 2026-09-09 `cargo-linkage-live` passes through installed clients (175.53 s): `cdylib`, `dylib`
+and combined `rlib`/`cdylib`/`staticlib` targets retain exact declarations, outgoing calls and source
+bodies across manifest edits, independent clean reconstruction and exact reopen. Seven focused
+context/capture/metadata cases pass; five affected cases pass again alongside the native scenario.
+All 17 extractor tests and strict checks pass, including the real multi-linkage compiler IPC round
+trip. Default/featureless root checks and all 214 tooling tests plus lint pass. Affected Clippy has
+954 library and 36 integration warnings, with no new code/file findings; the metadata refactor
+removed one existing length warning. Full governance, changed-file formatting and documentation
+navigation pass.
+Full feature/profile choices, host/target separation, dependency/generated/proc-macro closure,
+custom target specifications, caches and scheduling remain open.
 
 ## Live source reconciliation and current query selection
 

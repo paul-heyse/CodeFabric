@@ -1886,6 +1886,81 @@ fn cargo_configured_platforms_and_flags_converge_with_clean_public_queries() {
     supervisor.stop();
 }
 
+#[test]
+fn cargo_library_linkage_kinds_survive_live_queries_and_clean_reopen() {
+    let fixture = ProductionFixture::with_source(b"marker = 1\n");
+    let root = Path::new(&fixture.workspace.root_path_display);
+    write_cargo_platform_fixture(root);
+    let manifest = |types: &str| {
+        format!(
+            "[package]\nname = 'fixture'\nversion = '0.1.0'\nedition = '2024'\n[lib]\ntest = false\ndoctest = false\ncrate-type = [{types}]\n"
+        )
+    };
+    fs::write(root.join("Cargo.toml"), manifest("'cdylib'")).unwrap();
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let registration = fixture.root().join("registration.sqlite3");
+    {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, true)
+            .unwrap();
+        store.backup_to(&registration).unwrap();
+    }
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let mut observed = cargo_target_observation(
+        &fixture,
+        &stack,
+        "cargo-linkage-cdylib",
+        Some("fixture::alternate"),
+        None,
+    );
+    for (phase, types) in [
+        ("dylib", "'dylib'"),
+        ("multiple", "'rlib', 'cdylib', 'staticlib'"),
+    ] {
+        fs::write(root.join("Cargo.toml"), manifest(types)).unwrap();
+        let next = cargo_target_observation(
+            &fixture,
+            &stack,
+            &format!("cargo-linkage-{phase}"),
+            Some("fixture::alternate"),
+            None,
+        );
+        assert_ne!(
+            observed[0].rows[0]["context_id"],
+            next[0].rows[0]["context_id"]
+        );
+        observed = next;
+    }
+    let clean = clean_fixture(&fixture, &registration, &stack);
+    let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        observed,
+        cargo_target_observation(
+            &clean,
+            &stack,
+            "cargo-linkage-clean",
+            Some("fixture::alternate"),
+            None
+        )
+    );
+    clean_supervisor.stop();
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    assert_eq!(
+        observed,
+        cargo_target_observation(
+            &fixture,
+            &stack,
+            "cargo-linkage-reopen",
+            Some("fixture::alternate"),
+            None
+        )
+    );
+    supervisor.stop();
+}
+
 fn encoded_sources(utf8: bool) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let python = if utf8 {
         "# coding: utf-8\r\n# é\r\nfrom helper import café\r\ndef caller():\r\n    return café()\r\n".as_bytes()

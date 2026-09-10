@@ -692,22 +692,16 @@ impl SelectedRustCompilationPreparation {
         let crate_root = PathBuf::from(std::ffi::OsString::from_vec(
             settings.target.crate_root.clone(),
         ));
-        let expected_kind = match settings.target.kind {
-            RustTargetKind::Library => "lib",
-            RustTargetKind::ProcMacro => "proc-macro",
-            RustTargetKind::Binary => "bin",
-            RustTargetKind::Example => "example",
-            RustTargetKind::Test => "test",
-            RustTargetKind::Benchmark => "bench",
-        };
         if metadata["version"] != 1
             || !package["targets"].as_array().is_some_and(|targets| {
                 targets.iter().any(|target| {
                     target["name"] == settings.target.name
                         && matches_path(&target["src_path"], &crate_root)
-                        && target["kind"]
-                            .as_array()
-                            .is_some_and(|kinds| kinds.iter().any(|kind| kind == expected_kind))
+                        && metadata_target_kind_matches(
+                            settings.target.kind,
+                            &settings.crate_types,
+                            target,
+                        )
                 })
             })
             || !package["dependencies"]
@@ -883,6 +877,50 @@ impl SelectedRustCompilationPreparation {
             source_file_manifest: None,
         }
     }
+}
+
+/// Cargo library metadata reports its crate types as target kinds. Other kinds identify
+/// the Cargo target role (an example can itself emit a library).
+fn metadata_target_kind_matches(
+    kind: RustTargetKind,
+    expected_crate_types: &[String],
+    target: &serde_json::Value,
+) -> bool {
+    let Some(types) = target["crate_types"].as_array() else {
+        return false;
+    };
+    let Some(types) = types
+        .iter()
+        .map(serde_json::Value::as_str)
+        .collect::<Option<BTreeSet<_>>>()
+    else {
+        return false;
+    };
+    if types.is_empty() || types != expected_crate_types.iter().map(String::as_str).collect() {
+        return false;
+    }
+    let Some(kinds) = target["kind"].as_array() else {
+        return false;
+    };
+    if kind == RustTargetKind::Library {
+        return !kinds.is_empty()
+            && kinds.iter().all(|kind| {
+                matches!(
+                    kind.as_str(),
+                    Some("lib" | "rlib" | "dylib" | "cdylib" | "staticlib")
+                )
+            })
+            && target["crate_types"].as_array() == Some(kinds);
+    }
+    let expected = match kind {
+        RustTargetKind::Library => unreachable!("library handled above"),
+        RustTargetKind::ProcMacro => "proc-macro",
+        RustTargetKind::Binary => "bin",
+        RustTargetKind::Example => "example",
+        RustTargetKind::Test => "test",
+        RustTargetKind::Benchmark => "bench",
+    };
+    kinds.len() == 1 && kinds[0] == expected
 }
 
 fn selected_cargo_arguments(
@@ -3886,6 +3924,63 @@ mod tests {
                 &harness.request,
             ),
             Err(RustCompilationTrustError::SelectedContextMismatch)
+        ));
+    }
+
+    fn matches_linkage(kind: RustTargetKind, metadata: &Value, expected: &[&str]) -> bool {
+        metadata_target_kind_matches(
+            kind,
+            &expected
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect::<Vec<_>>(),
+            metadata,
+        )
+    }
+
+    #[test]
+    fn cargo_library_metadata_accepts_linkage_kinds_without_widening_target_role() {
+        for kinds in [
+            vec!["lib"],
+            vec!["rlib"],
+            vec!["dylib"],
+            vec!["cdylib"],
+            vec!["staticlib"],
+            vec!["rlib", "cdylib", "staticlib"],
+        ] {
+            let metadata = serde_json::json!({"kind": kinds, "crate_types": kinds});
+            assert!(matches_linkage(RustTargetKind::Library, &metadata, &kinds));
+            assert!(!matches_linkage(RustTargetKind::Binary, &metadata, &kinds));
+        }
+        for kinds in [
+            vec![],
+            vec!["bin"],
+            vec!["proc-macro"],
+            vec!["lib", "test"],
+            vec!["unknown"],
+        ] {
+            let metadata = serde_json::json!({"kind": kinds, "crate_types": kinds});
+            assert!(!matches_linkage(RustTargetKind::Library, &metadata, &kinds));
+        }
+        assert!(!matches_linkage(
+            RustTargetKind::Library,
+            &serde_json::json!({"kind": ["rlib"], "crate_types": ["cdylib"]}),
+            &["cdylib"]
+        ));
+        assert!(matches_linkage(
+            RustTargetKind::Example,
+            &serde_json::json!({"kind": ["example"], "crate_types": ["rlib"]}),
+            &["rlib"]
+        ));
+        assert!(!matches_linkage(
+            RustTargetKind::Library,
+            &serde_json::json!({"kind": ["rlib"], "crate_types": ["rlib"]}),
+            &["cdylib"]
+        ));
+        assert!(matches_linkage(
+            RustTargetKind::ProcMacro,
+            &serde_json::json!({"kind": ["proc-macro"], "crate_types": ["proc-macro"]}),
+            &["proc-macro"]
         ));
     }
 

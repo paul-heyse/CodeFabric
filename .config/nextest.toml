@@ -8,11 +8,11 @@ fail-fast = true
 slow-timeout = { period = "60s", terminate-after = 2 }
 
 [[profile.default.overrides]]
-filter = 'test(live_mixed_function_definitions_and_bodies_equal_exact_clean_source) | test(live_mixed_decoded_sources_equal_original_bytes_and_independent_clean_queries) | test(source_line_windows_and_hard_limits_survive_public_delivery_and_reopen) | test(mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen) | test(custom_cargo_build_input_changes_context_and_matches_clean_public_results) | test(cargo_configured_platforms_and_flags_converge_with_clean_public_queries)'
+filter = 'test(live_mixed_function_definitions_and_bodies_equal_exact_clean_source) | test(live_mixed_decoded_sources_equal_original_bytes_and_independent_clean_queries) | test(source_line_windows_and_hard_limits_survive_public_delivery_and_reopen) | test(mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen) | test(custom_cargo_build_input_changes_context_and_matches_clean_public_results) | test(cargo_configured_platforms_and_flags_converge_with_clean_public_queries) | test(cargo_library_linkage_kinds_survive_live_queries_and_clean_reopen)'
 slow-timeout = { period = "60s", terminate-after = 10 }
 
 [[profile.ci.overrides]]
-filter = 'test(live_mixed_function_definitions_and_bodies_equal_exact_clean_source) | test(live_mixed_decoded_sources_equal_original_bytes_and_independent_clean_queries) | test(source_line_windows_and_hard_limits_survive_public_delivery_and_reopen) | test(mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen) | test(custom_cargo_build_input_changes_context_and_matches_clean_public_results) | test(cargo_configured_platforms_and_flags_converge_with_clean_public_queries)'
+filter = 'test(live_mixed_function_definitions_and_bodies_equal_exact_clean_source) | test(live_mixed_decoded_sources_equal_original_bytes_and_independent_clean_queries) | test(source_line_windows_and_hard_limits_survive_public_delivery_and_reopen) | test(mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen) | test(custom_cargo_build_input_changes_context_and_matches_clean_public_results) | test(cargo_configured_platforms_and_flags_converge_with_clean_public_queries) | test(cargo_library_linkage_kinds_survive_live_queries_and_clean_reopen)'
 slow-timeout = { period = "60s", terminate-after = 10 }
 
 [[profile.default.overrides]]

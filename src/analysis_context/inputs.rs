@@ -251,6 +251,9 @@ pub struct RustCompilationSettings {
     pub manifest_path: Vec<u8>,
     pub edition: String,
     pub target: RustTargetSettings,
+    /// Complete linkage selection discovered from the captured target manifest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crate_types: Vec<String>,
     pub requested_features: Vec<String>,
     pub default_features: bool,
     pub cfgs: Vec<RustCfgSetting>,

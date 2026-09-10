@@ -10,7 +10,7 @@ use super::{
     AnalysisContext, AnalysisContextError, AnalysisContextKind, ContextArtifactInput,
     ContextFileInput, ContextLookupEvidence, ContextLookupKind, ContextLookupObservation,
     ContextSearchScope, RustCfgSetting, RustCompilationSettings, RustEnvironmentSetting,
-    RustTargetSettings, RustToolchainSettings,
+    RustTargetKind, RustTargetSettings, RustToolchainSettings,
 };
 
 /// Explicit caller selections; no missing value is inferred from the daemon's environment.
@@ -448,6 +448,7 @@ fn prepare_settings(
         package_version: version.expect("validated package version"),
         manifest_path: manifest.relative_path.clone(),
         edition: edition.expect("validated edition"),
+        crate_types: selected_crate_types(document, &target)?,
         target,
         requested_features,
         default_features: selection.default_features,
@@ -464,6 +465,54 @@ fn prepare_settings(
         build_inputs: selection.build_inputs.clone(),
         configured_rustflags,
     }))
+}
+
+fn selected_crate_types(
+    document: &toml::Value,
+    target: &RustTargetSettings,
+) -> Result<Vec<String>, RustContextDiscoveryError> {
+    let (table, default) = match target.kind {
+        RustTargetKind::Library => (document.get("lib"), "lib"),
+        RustTargetKind::ProcMacro => (document.get("lib"), "proc-macro"),
+        RustTargetKind::Example => (
+            document
+                .get("example")
+                .and_then(toml::Value::as_array)
+                .and_then(|targets| {
+                    targets.iter().find(|candidate| {
+                        candidate.get("name").and_then(toml::Value::as_str)
+                            == Some(target.name.as_str())
+                    })
+                }),
+            "bin",
+        ),
+        RustTargetKind::Binary | RustTargetKind::Test | RustTargetKind::Benchmark => (None, "bin"),
+    };
+    let Some(selected) = table.and_then(|table| table.get("crate-type")) else {
+        return Ok(vec![default.to_owned()]);
+    };
+    let selected = selected
+        .as_array()
+        .ok_or(RustContextDiscoveryError::InvalidInput(
+            "crate-type must be an array",
+        ))?;
+    if selected.is_empty() || selected.len() > 64 {
+        return Err(RustContextDiscoveryError::InvalidInput(
+            "empty or excessive crate-type selection",
+        ));
+    }
+    selected
+        .iter()
+        .map(|value| match value.as_str() {
+            Some(
+                kind @ ("lib" | "rlib" | "dylib" | "cdylib" | "staticlib" | "proc-macro" | "bin"),
+            ) => Ok(kind.to_owned()),
+            _ => Err(RustContextDiscoveryError::InvalidInput(
+                "unknown crate-type selection",
+            )),
+        })
+        .collect::<Result<BTreeSet<_>, _>>()
+        .map(|selected| selected.into_iter().collect())
 }
 
 type ConfigurationInputs = (
@@ -671,6 +720,34 @@ mod tests {
         };
         product.validate().unwrap();
         product
+    }
+
+    #[test]
+    fn rust_context_discovers_exact_library_and_example_linkage() {
+        let mut request = request();
+        let before = prepared(&request);
+        assert_eq!(before.settings.crate_types, ["lib"]);
+        let manifest = "[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n[lib]\ncrate-type=['rlib', 'cdylib', 'rlib']\n[[example]]\nname='sample'\npath='src/lib.rs'\ncrate-type=['staticlib']\n";
+        request.files[0] = input(b"Cargo.toml", manifest.as_bytes());
+        let library = prepared(&request);
+        assert_eq!(library.settings.crate_types, ["cdylib", "rlib"]);
+        assert_ne!(
+            before.context.analysis_context_id,
+            library.context.analysis_context_id
+        );
+        request.selection.target.as_mut().unwrap().kind = RustTargetKind::Example;
+        assert_eq!(prepared(&request).settings.crate_types, ["staticlib"]);
+        request.selection.target.as_mut().unwrap().kind = RustTargetKind::Binary;
+        assert_eq!(prepared(&request).settings.crate_types, ["bin"]);
+        request.selection.target.as_mut().unwrap().kind = RustTargetKind::Library;
+        for invalid in ["[]", "['unknown']", "'rlib'", "[3]"] {
+            request.files[0] = input(
+                b"Cargo.toml",
+                format!("[package]\nname='sample'\nversion='0.1.0'\n[lib]\ncrate-type={invalid}\n")
+                    .as_bytes(),
+            );
+            assert!(discover_rust_context(&request).is_err(), "{invalid}");
+        }
     }
 
     #[test]
