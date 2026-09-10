@@ -1,8 +1,8 @@
 # CodeFabric status
 
 Updated 2026-09-09 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Last production commit: `46a7a412` (`Admit exact Cargo library linkage and preserve compiler crate types`);
-captured Cargo feature/profile selections are the current implementation slice.
+Last production commit: `09988b9d` (`Apply captured Cargo feature and profile selections with typed failure scope`);
+source-first fresh startup is the current implementation slice.
 The completed query slices and their validation are recorded below.
 
 ## Current handoff
@@ -18,19 +18,45 @@ and [selected design](docs/spec_index/README.md) retain the full Python/Rust CPG
 composition, truthful incomplete scope and sustained operation. The detailed plan now separates
 implemented portions, unfinished acceptance and the next work for every slice.
 
-Fresh daemon startup captures real Python/Rust inputs, runs contained semantic providers and
-publishes exact Delta versions. Canonical declarations, Python lexical references and Python/Rust
+Fresh daemon startup captures real Python/Rust inputs and publishes exact source/syntax Delta
+versions before readiness. The owned update coordinator runs contained semantic providers and
+publishes their exact successor. Canonical declarations, Python lexical references and Python/Rust
 call occurrences exist. Installed FastMCP clients have exercised function search and declaration
 fact retrieval, one-step incoming/outgoing call traversal and Python lexical-reference traversal with scoped processing and observed
 result truncation. Exact declaration source spans now pass through the same client with independent
 disclosure authorization. Python call/source queries also pass after exact reopen. A running daemon now reconciles Python edits,
 additions, deletions and atomic saves, with current-source query barriers and exact successor epochs.
 Live updates now publish source/syntax with semantic pending scope before their semantic successor.
-Fresh startup still completes its first provider pass before readiness. The first useful release remains open.
+Fresh startup now uses this source-first path too. The first useful release remains open.
 
 The call-query continuation present at session start was preserved, exercised and committed in
 `80bc6d18`; declaration kinds/public subjects followed in `1a60e748`, and lexical references in
 `5964e5ff`. The full requested implementation remains unfinished. No outcome from 4 through 8 is closed.
+
+## Source-first fresh readiness
+
+Fresh startup now selects a durable source/syntax epoch with checker/compiler scope pending and
+starts the existing owned update coordinator to publish its semantic successor. Source-current
+queries can read that initial epoch. Semantic-current requests retain their freshness barrier and
+deadline; no compiler result is inferred from readiness. Exact reopening of a source-only epoch
+uses the same semantic-resumption path as interrupted live updates.
+
+The final installed staged-publication scenario passes on 2026-09-09 (186.06 s), including initial Python
+source queries and named pending Rust target scope before the first semantic publication, strict
+semantic deadline failure, cancellation of a completed obsolete candidate, and source-only restart
+at the same epoch/generation followed by semantic convergence. Initial durable readiness also passes
+(8.85 s); its exact-genesis assertions now hold the background successor to avoid timing assumptions.
+Installed semantic serving (39.66 s), exact restart (28.67 s), the 70-module Python inventory
+(26.12 s), Python calls (29.10 s), failed Rust targets (94.18 s) and guard/resource delivery (22.27 s)
+pass. Cargo selections/clean/reopen pass (212.76 s), as do retained processing pages (74.63 s).
+Semantic test requests now explicitly wait for semantic-current data and inspect its exact successor
+instead of requiring compiler facts in the first activation. Separate source-only tests retain pending
+scope assertions. These samples are correctness evidence, not a comparative latency measurement.
+Default/featureless root checks, full governance, all 216 tooling tests, documentation navigation and
+changed-file formatting pass. Clippy retains 952 library/36 integration warnings, with no new code/file
+diagnostics; three previously oversized test functions remain oversized. Strict lint and global
+formatting retain their recorded backlog.
+Retained provider state, selective persistence and the other remaining outcomes stay open.
 
 ## Call scope and public call queries: implemented limited production slice
 

@@ -2485,6 +2485,41 @@ fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart
         "unused",
         "Python function declarations",
     );
+    let (initial_source, initial_rows) =
+        source_current_query(&fixture, &stack, "genesis-source", request.clone());
+    assert_eq!(initial_source["processing"][0]["remaining_partitions"], 0);
+    assert_eq!(
+        initial_rows
+            .iter()
+            .map(RecordBatch::num_rows)
+            .sum::<usize>(),
+        1
+    );
+    let original = initial_rows
+        .iter()
+        .find(|batch| batch.num_rows() == 1)
+        .unwrap()
+        .column_by_name("name")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(original.value(0), "original");
+    let initial_rust = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "Rust function declarations",
+    );
+    let (pending_rust, rows) = source_current_query(&fixture, &stack, "genesis-rust", initial_rust);
+    assert!(rows.iter().all(|batch| batch.num_rows() == 0));
+    assert_eq!(pending_rust["epoch_id"], initial_source["epoch_id"]);
+    assert_eq!(pending_rust["processing"][0]["requested_partitions"], 1);
+    assert_eq!(
+        pending_rust["processing"][0]["remainder"][0]["state"],
+        "pending"
+    );
+    let first_semantic = pending_semantic_candidate(&fixture);
+    fs::write(first_semantic.with_extension("resume"), b"resume").unwrap();
     let initial = public_query(&fixture, &stack, "staged-initial", request.clone());
     assert_eq!(initial.rows[0]["name"], "original");
     fs::write(

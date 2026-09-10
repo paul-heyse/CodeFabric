@@ -1409,7 +1409,9 @@ async fn compose_production_workspace(
                     PublicationWork {
                         resources: &workspace_resources,
                         scope: &task_scope,
-                        stage: PublicationStage::Semantic,
+                        // Readiness requires a durable current source selection. The same
+                        // owned update coordinator resumes its pending semantic successor.
+                        stage: PublicationStage::Source,
                     },
                 )
                 .await?,

@@ -814,7 +814,7 @@ fn semantic_request(workspace_id: &str, request_id: &str, looking_for: &str) -> 
         "version": "2.0",
         "semantic_request_id": request_id,
         "scope": {"workspace_id": workspace_id},
-        "freshness": {"policy": "best_available_snapshot"},
+        "freshness": {"policy": "require_semantic_current", "deadline_ms": 120_000},
         "queries": [{
             "request": "find code entities",
             "query_id": "q1",
@@ -846,10 +846,27 @@ fn activation_control_versions(fixture: &ProductionFixture) -> Vec<PathBuf> {
 fn decoded_activation_control_rows(
     fixture: &ProductionFixture,
 ) -> Vec<PersistedActivationControlRow> {
+    activation_control_rows_at(
+        fixture,
+        &fixture
+            .fabric_workspace_root()
+            .join("activation-control/_delta_log/00000000000000000001.json"),
+    )
+}
+
+fn all_activation_control_rows(fixture: &ProductionFixture) -> Vec<PersistedActivationControlRow> {
+    activation_control_versions(fixture)
+        .into_iter()
+        .skip(1)
+        .flat_map(|commit| activation_control_rows_at(fixture, &commit))
+        .collect()
+}
+
+fn activation_control_rows_at(
+    fixture: &ProductionFixture,
+    commit: &Path,
+) -> Vec<PersistedActivationControlRow> {
     let table_root = fixture.fabric_workspace_root().join("activation-control");
-    let commit = table_root
-        .join("_delta_log")
-        .join("00000000000000000001.json");
     let add_paths = BufReader::new(fs::File::open(commit).expect("activation commit log"))
         .lines()
         .map(|line| {
@@ -923,7 +940,6 @@ fn installed_vertical_observation(
         "policy-one",
         json!([]),
         json!([
-            {"id": "status", "operation": "call_tool", "name": "get_code_graph_status"},
             {
                 "id": "reference",
                 "operation": "call_tool",
@@ -941,6 +957,7 @@ fn installed_vertical_observation(
                 "name": "query_code_graph",
                 "arguments": {"request": request, "delivery": "resource"},
             },
+            {"id": "status", "operation": "call_tool", "name": "get_code_graph_status"},
             {
                 "id": "manifest",
                 "operation": "read_resource",
@@ -973,9 +990,13 @@ fn installed_vertical_observation(
             .is_some_and(|content| !content.is_empty())
     );
 
-    let persisted = decoded_activation_control_rows(&fixture);
-    assert_eq!(persisted.len(), 1);
-    let row = persisted[0].row();
+    let persisted = all_activation_control_rows(&fixture);
+    assert_eq!(persisted.len(), 2, "source genesis and semantic successor");
+    let selected = persisted
+        .iter()
+        .max_by_key(|row| row.row().ordinal.get())
+        .unwrap();
+    let row = selected.row();
     let epoch_id = row
         .pins
         .epoch
@@ -985,13 +1006,16 @@ fn installed_vertical_observation(
         .collect::<String>();
     assert_eq!(status["active_epoch_id"], format!("epoch:{epoch_id}"));
     assert_eq!(query["epoch_id"], format!("snapshot:{epoch_id}"));
-    assert!(matches!(row.predecessor_epoch, ExpectedHead::Empty));
+    assert_eq!(
+        row.predecessor_epoch,
+        ExpectedHead::Epoch(persisted[0].row().pins.epoch)
+    );
     assert_eq!(
         row.pins.table_versions,
-        persisted[0].table_versions().reference()
+        selected.table_versions().reference()
     );
 
-    let relation_ids = persisted[0]
+    let relation_ids = selected
         .table_versions()
         .components()
         .map(|(relation_id, pin)| {
@@ -1065,11 +1089,7 @@ fn installed_query_report(
     label: &str,
     stale_resource_uri: Option<&str>,
 ) -> Value {
-    let mut steps = vec![json!({
-        "id": "status",
-        "operation": "call_tool",
-        "name": "get_code_graph_status",
-    })];
+    let mut steps = Vec::new();
     if let Some(uri) = stale_resource_uri {
         steps.push(json!({
             "id": "stale_resource",
@@ -1095,6 +1115,11 @@ fn installed_query_report(
         "id": "manifest",
         "operation": "read_resource",
         "uri": {"$ref": "query.structured_content.manifest.uri"},
+    }));
+    steps.push(json!({
+        "id": "status",
+        "operation": "call_tool",
+        "name": "get_code_graph_status",
     }));
     let scenario =
         modern_client_scenario(fixture, stack, "policy-one", json!([]), Value::Array(steps));
@@ -1136,7 +1161,9 @@ fn wp44_int_thin_binaries_delegate_to_strict_library_settings() {
 
 #[test]
 fn wp44_beh_real_supervisor_ready_requires_durable_fresh_activation() {
-    let fixture = ProductionFixture::new();
+    // Hold the background successor so exact genesis assertions do not race semantics.
+    let fixture =
+        ProductionFixture::with_activation_startup_fault(Some("hold_semantic_update_publication"));
     let supervisor = fixture.start_supervisor();
     let discovery = supervisor.discovery();
     assert_eq!(discovery.daemon_generation, 1);
@@ -2032,47 +2059,15 @@ fn pragmatic_python_semantics_publish_real_call_targets() {
     let stack = InstalledProductionStack::build();
     fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
-    let rows = decoded_activation_control_rows(&fixture);
-    let (_, pin) = rows[0]
-        .table_versions()
-        .components()
-        .find(|(id, _)| *id == "provider.pyrefly.call_target.v1")
-        .expect("real daemon published the Pyrefly call-target relation");
-    assert_eq!(
-        pin.version(),
-        1,
-        "fresh provider relation has one data commit"
-    );
-    let root = pin.canonical_root().to_file_path().unwrap();
-    let log = fs::File::open(root.join("_delta_log/00000000000000000001.json")).unwrap();
-    let paths = BufReader::new(log)
-        .lines()
-        .map(|line| serde_json::from_str::<Value>(&line.unwrap()).unwrap())
-        .filter_map(|action| {
-            action
-                .get("add")
-                .and_then(|add| add.get("path"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-        .collect::<Vec<_>>();
     let mut targets = BTreeSet::new();
-    for path in paths {
-        let reader =
-            ParquetRecordBatchReaderBuilder::try_new(fs::File::open(root.join(path)).unwrap())
-                .unwrap()
-                .build()
-                .unwrap();
-        for batch in reader {
-            let batch = batch.unwrap();
-            let values = batch
-                .column_by_name("qualified_target")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<arrow::array::StringArray>()
-                .unwrap();
-            targets.extend(values.iter().flatten().map(ToOwned::to_owned));
-        }
+    for batch in fresh_activation_relation_batches(&fixture, "provider.pyrefly.call_target.v1") {
+        let values = batch
+            .column_by_name("qualified_target")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
+        targets.extend(values.iter().flatten().map(ToOwned::to_owned));
     }
     assert_eq!(targets, BTreeSet::from(["sample.current".to_owned()]));
     let entities = canonical_entity_names(&fixture);
@@ -3386,8 +3381,47 @@ fn fresh_activation_relation_batches(
     fixture: &ProductionFixture,
     relation: &str,
 ) -> Vec<RecordBatch> {
-    let rows = decoded_activation_control_rows(fixture);
-    let (_, pin) = rows[0]
+    let selected = wait_for_semantic_activation(fixture);
+    selected_relation_batches(&selected, relation)
+}
+
+fn wait_for_semantic_activation(fixture: &ProductionFixture) -> PersistedActivationControlRow {
+    use arrow::array::{Array as _, BooleanArray};
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        let selected = all_activation_control_rows(fixture)
+            .into_iter()
+            .max_by_key(|row| row.row().ordinal.get())
+            .expect("durable activation");
+        let state = selected_relation_batches(&selected, "source.input_inventory_state");
+        let rows = state.iter().map(RecordBatch::num_rows).sum::<usize>();
+        assert_eq!(rows, 1, "one exact source inventory state");
+        let pending = state
+            .iter()
+            .find(|batch| batch.num_rows() == 1)
+            .unwrap()
+            .column_by_name("semantic_pending")
+            .is_some_and(|column| {
+                let values = column.as_any().downcast_ref::<BooleanArray>().unwrap();
+                assert!(!values.is_null(0));
+                values.value(0)
+            });
+        if !pending {
+            return selected;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "semantic activation did not converge"
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn selected_relation_batches(
+    selected: &PersistedActivationControlRow,
+    relation: &str,
+) -> Vec<RecordBatch> {
+    let (_, pin) = selected
         .table_versions()
         .components()
         .find(|(id, _)| *id == relation)
@@ -4552,8 +4586,8 @@ fn wp63_ops_installed_restart_reconstructs_only_exact_activation_authority() {
     fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
     let mut supervisor = fixture.start_supervisor_with(&stack.codefabric);
     let initial_discovery = supervisor.discovery();
-    let initial_activation = decoded_activation_control_rows(&fixture);
     let first = installed_query_report(&fixture, &stack, "restart-before", None);
+    let initial_activation = all_activation_control_rows(&fixture);
     let first_status = modern_structured(modern_step(&first, "status"));
     let first_query = modern_structured(modern_step(&first, "query"));
     let first_handle = first_query["manifest"]["uri"]
@@ -4603,11 +4637,8 @@ fn wp63_ops_installed_restart_reconstructs_only_exact_activation_authority() {
         second_status["authority"]["daemon_generation"],
         restarted.daemon_generation
     );
-    assert_eq!(
-        decoded_activation_control_rows(&fixture),
-        initial_activation
-    );
-    assert_eq!(activation_control_versions(&fixture).len(), 2);
+    assert_eq!(all_activation_control_rows(&fixture), initial_activation);
+    assert_eq!(activation_control_versions(&fixture).len(), 3);
 
     supervisor.stop();
     let replacement = fixture.start_supervisor_with(&stack.codefabric);
@@ -4625,11 +4656,8 @@ fn wp63_ops_installed_restart_reconstructs_only_exact_activation_authority() {
     );
     assert_eq!(first_query["epoch_id"], third_query["epoch_id"]);
     assert_eq!(first_query["total_rows"], third_query["total_rows"]);
-    assert_eq!(
-        decoded_activation_control_rows(&fixture),
-        initial_activation
-    );
-    assert_eq!(activation_control_versions(&fixture).len(), 2);
+    assert_eq!(all_activation_control_rows(&fixture), initial_activation);
+    assert_eq!(activation_control_versions(&fixture).len(), 3);
     assert_no_modern_secret_projection(&first, &fixture);
     assert_no_modern_secret_projection(&second, &fixture);
     assert_no_modern_secret_projection(&third, &fixture);
