@@ -54,6 +54,7 @@ pub(super) fn build(
                 "surrounding lines",
                 "declaration-line-anchor",
             )?)?
+            .union(exact(inputs, "syntax outline", "declaration-span")?)?
             .build()?;
     if python {
         result = LogicalPlanBuilder::from(result)
@@ -85,10 +86,14 @@ fn exact(
     kind: &str,
     mapping: &str,
 ) -> Result<LogicalPlan, TransformationPlanError> {
-    let declarations = LogicalPlanBuilder::from(plan(inputs, super::DECLARATION)?)
-        .filter(col("public_entity_id").is_not_null())?
-        .alias("d")?
-        .build()?;
+    let mut declarations = LogicalPlanBuilder::from(plan(inputs, super::DECLARATION)?)
+        .filter(col("public_entity_id").is_not_null())?;
+    if kind == "syntax outline" {
+        // Function declarations may carry only a compiler header span. Their exact CST owner
+        // supplies the complete outline anchor in `functions` below.
+        declarations = declarations.filter(col("entity_kind").not_eq(lit("function")))?;
+    }
+    let declarations = declarations.alias("d")?.build()?;
     let bytes = LogicalPlanBuilder::from(plan(inputs, super::SOURCE)?)
         .alias("s")?
         .build()?;
@@ -243,6 +248,7 @@ fn functions(
     Ok(
         LogicalPlanBuilder::from(descriptor("function definition", "f")?)
             .union(descriptor("function body", "b")?)?
+            .union(descriptor("syntax outline", "f")?)?
             .build()?,
     )
 }

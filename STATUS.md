@@ -48,6 +48,48 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+Named traversal stops are committed in `f0a70a03`. The P03 syntax-outline slice now passes validation.
+A new source-context capability role advertises outline anchors only on supporting snapshots.
+Functions use their full exact CST owner; other captured subjects use their source spans. Native
+joins select CST rows wholly contained in an anchor's exact workspace/file/digest/generation,
+retaining node/parent identity, raw/normalized kinds, parser flags, ordinal/depth, source positions,
+and both semantic-anchor and syntax-provider contexts. The output is a flat source-range outline,
+with deterministic node ordering before limits. Whole-file bytes and source-text payloads are
+removed before outline expansion. A volatile native scalar function checks live source disclosure;
+retained results continue to carry their source dependency.
+
+The installed mixed Python/Rust function scenario passes in 811.901 s: exact definitions/bodies,
+full CST outlines, edits/restoration and both independent clean comparisons agree. The installed
+syntax-only case passes in 105.342 s, including explicit row truncation, every advertised page,
+exact reopen and retained/new-query disclosure revocation. Both compiler return-action cases also
+pass (four total in 917.262 s, `/tmp/codefabric-p03-outline-explicit-and-live.log`). Six focused
+source-processing checks pass in 0.031 s, including the distinct semantic/function-owner/parser
+context dependencies (`/tmp/codefabric-p03-outline-processing-final.log`). The exact occurrence
+validity/provenance check passed earlier. The final installed run also verifies `additional_rows: true` for each explicit three-row outline
+limit and passes in 105.768 s (`/tmp/codefabric-p03-outline-observed-limit.log`).
+
+Default/featureless checks pass in `/tmp/codefabric-p03-outline-root-check.log`. Final Clippy reports
+no diagnostics on changed lines in `/tmp/codefabric-p03-outline-final-clippy-v2.jsonl`; existing
+warnings in large surrounding functions remain. Documentation/navigation and changed-line spelling
+checks pass. Whole-file spelling still flags existing escaped Latin-1 fixture bytes; these are
+preserved. No full CI or doctest claim is made. Validation uses the existing installed providers,
+shared incremental target and delegated user-systemd scope. Commands were `just root-check`,
+`cargo clippy --locked --all-targets --message-format=json` through `cargo-check-mode.sh`, and
+`just root-test-incremental -j 1` with the exact test selectors shown in the logs, plus
+`just docs-check`, changed-line `typos` and `git diff --check`.
+
+The initial private-byte binding failure and missing explicit truncation binding were corrected.
+The first mixed fixture run exceeded the adapter's 120-second timeout before its first entity query
+finished. The fixture now waits for a semantic activation containing the exact edited Python/Rust
+bytes and allows 15 minutes for its five preparations; production timeouts are unchanged. The
+four-file/462-byte initial snapshot measured 30.872 s for source relational execution/writes,
+25.919 s in Cargo/rustc and 96.547 s for semantic execution/writes across 132 relations. These are
+small-workload observations for P04/P12/P14, not representative optimization evidence. Earlier
+failures remain attributable in `/tmp/codefabric-p03-outline-*.log`.
+
+The next work is related occurrence contexts, followed by the remaining P03 meanings, reusable
+roles and precise dependency scope. P04–P14 remain open.
+
 The bounded-call slice is committed in `69beaec3`. The next P03 slice adds named stopping
 conditions through the existing canonical name selector and native DataFusion left anti joins.
 An arriving witness remains visible; expansion from a stop entity is excluded, including an

@@ -143,7 +143,7 @@ async fn occurrence_sources_require_exact_pins_valid_spans_and_provenance() {
         .unwrap();
     assert_eq!(
         batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
-        2,
+        3,
         "one valid occurrence, deduplicated across candidates, in each source context meaning"
     );
     for batch in batches {

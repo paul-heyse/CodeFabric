@@ -1220,6 +1220,8 @@ pub struct EpochBoundExecutionSelectionRow {
 pub enum EpochBoundReturnAction {
     /// The directive selects the existing output-field contract.
     OutputFields,
+    /// Use the released finite row limit and report observed truncation.
+    Truncate,
     /// Requested semantic sort keys precede the program's deterministic tie breakers.
     OrderBy { fields: Vec<ProgramSortField> },
 }
@@ -4930,6 +4932,14 @@ fn validate_epoch_execution_catalog<'a>(
                 detail: "return realization field is absent from its node".to_owned(),
             });
         }
+        if matches!(realization.action, EpochBoundReturnAction::Truncate)
+            && !matches!(node.operator, ProgramRelationalOperator::Limit { .. })
+        {
+            return Err(EpochBoundSemanticCompileError::InvalidNode {
+                node: realization.realization_node_id.to_string(),
+                detail: "truncation is not attached to a native result limit".into(),
+            });
+        }
         if let EpochBoundReturnAction::OrderBy { fields } = &realization.action
             && (!matches!(node.operator, ProgramRelationalOperator::Sort { .. })
                 || fields.is_empty()
@@ -5384,7 +5394,7 @@ fn return_ordering(
             }
             match &realization.action {
                 EpochBoundReturnAction::OrderBy { fields } => Some((row.ordinal, fields)),
-                EpochBoundReturnAction::OutputFields => None,
+                EpochBoundReturnAction::OutputFields | EpochBoundReturnAction::Truncate => None,
             }
         })
         .collect::<Vec<_>>();
@@ -7549,6 +7559,35 @@ mod tests {
                 family: "consumer slot role",
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn epoch_bound_truncation_requires_a_native_result_limit() {
+        let mut catalog = epoch_execution_catalog();
+        catalog.returns[0].action = EpochBoundReturnAction::Truncate;
+        assert!(matches!(
+            compile_epoch_bound_semantic_request(
+                &validated_epoch_ingress(),
+                &catalog,
+                &epoch_runtime_closure()
+            ),
+            Err(EpochBoundSemanticCompileError::InvalidNode { .. })
+        ));
+        catalog.returns[0].realization_node_id = Arc::from("entities.limit");
+        let compiled = compile_epoch_bound_semantic_request(
+            &validated_epoch_ingress(),
+            &catalog,
+            &epoch_runtime_closure(),
+        )
+        .unwrap();
+        assert!(matches!(
+            compiled.compiled().blocks()[0]
+                .output()
+                .unwrap()
+                .program()
+                .root,
+            RelationalExpression::Limit { .. }
         ));
     }
 

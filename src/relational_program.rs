@@ -311,6 +311,11 @@ pub enum ScalarExpression {
         parameters: crate::fabric::source_context_query::SourceContextParameters,
         arguments: Vec<ScalarExpression>,
     },
+    /// Live source disclosure check for structural contexts that contain no source text.
+    #[cfg(feature = "daemon")]
+    SourceAccessCheck {
+        parameters: crate::fabric::source_context_query::SourceContextParameters,
+    },
     /// One native scalar operation. Arity and type are checked during compilation.
     Call {
         operator: ScalarOperator,
@@ -1410,6 +1415,21 @@ impl CompileState {
                     Expr::ScalarFunction(datafusion::logical_expr::expr::ScalarFunction::new_udf(
                         Arc::clone(&function),
                         arguments,
+                    ));
+                self.query_functions.push(function);
+                expression.get_type(schema)?;
+                expression.nullable(schema)?;
+                Ok(expression)
+            }
+            #[cfg(feature = "daemon")]
+            ScalarExpression::SourceAccessCheck { parameters } => {
+                self.require_intrinsic(RelationalPrimitive::ScalarFunction)?;
+                let function =
+                    crate::fabric::source_context_query::authorization_function(parameters.clone());
+                let expression =
+                    Expr::ScalarFunction(datafusion::logical_expr::expr::ScalarFunction::new_udf(
+                        Arc::clone(&function),
+                        vec![],
                     ));
                 self.query_functions.push(function);
                 expression.get_type(schema)?;

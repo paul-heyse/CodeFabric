@@ -33,6 +33,8 @@ fn query_syntax(
             json!({"request":"retrieve facts about code","query_id":format!("facts-{language}"),"about":[prior.clone()],"facts":["syntax node properties"]}),
             json!({"request":"follow code relationships","query_id":format!("parents-{language}"),"starting_from":[prior],"relationship":"syntax parents","direction":"outgoing","distance":"one step"}),
             json!({"request":"retrieve source and syntax context","query_id":format!("source-{language}"),"about":[format!("{language} syntax node `{function}`")],"context":"exact source span","return":{"maximum_source_bytes":512}}),
+            json!({"request":"retrieve source and syntax context","query_id":format!("outline-{language}"),"about":[format!("{language} syntax node `{root}`"),format!("{language} syntax node `{root}`")],"context":"syntax outline"}),
+            json!({"request":"retrieve source and syntax context","query_id":format!("outline-limited-{language}"),"about":[format!("{language} syntax node `{root}`")],"context":"syntax outline","return":{"limit":{"maximum_results":3,"when_exceeded":"truncate"}}}),
             json!({"request":"follow code relationships","query_id":format!("children-{language}"),"starting_from":[format!("{language} syntax node `{root}`")],"relationship":"syntax parents","direction":"incoming","distance":"one step"}),
         ]);
     }
@@ -46,6 +48,9 @@ fn query_syntax(
     let report = modern_client_report(&run_modern_client(stack, &path));
     let result = modern_structured(modern_step(&report, "query"));
     assert_eq!(result["execution_state"], "SUCCEEDED", "{result}");
+    for outcome in result["query_results"].as_array().unwrap() {
+        assert_ne!(outcome["execution_state"], "FAILED", "{outcome}");
+    }
     let manifest: Value = serde_json::from_slice(&resource_bytes(&report, "manifest")).unwrap();
     let pages = result["pages"].as_array().unwrap();
     assert!(pages.len() <= 128);
@@ -59,7 +64,8 @@ fn query_syntax(
             .unwrap()
             .iter()
             .find(|block| block["query_id"] == query)
-            .unwrap()["relation_id"];
+            .unwrap_or_else(|| panic!("missing binding for {query}: {}", result["query_results"]))
+            ["relation_id"];
         let entry = manifest["relations"]
             .as_array()
             .unwrap()
@@ -147,6 +153,42 @@ fn query_syntax(
         assert_eq!(processing["requested_partitions"], 1);
         assert_eq!(processing["completed_partitions"], 1);
         assert_eq!(processing["remaining_partitions"], 0);
+        let outline = rows(&format!("outline-{language}"));
+        assert_eq!(outline.len(), facts.len());
+        assert_eq!(rows(&format!("outline-limited-{language}")), outline[..3]);
+        let limited = result["processing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["query_id"] == format!("outline-limited-{language}"))
+            .unwrap();
+        assert_eq!(limited["maximum_rows"], 3);
+        assert_eq!(limited["additional_rows"], true);
+        assert_eq!(outline[0]["syntax_raw_kind"], root_kind);
+        assert_eq!(outline[0]["syntax_start_byte"], 0);
+        assert_eq!(outline[0]["syntax_end_byte"], text.len());
+        for node in &outline {
+            assert_eq!(node["context_kind"], "syntax outline");
+            assert!(node.get("source_bytes").is_none());
+            assert!(node.get("source_context").is_none());
+            let fact = facts
+                .iter()
+                .find(|fact| fact["public_entity_id"] == node["syntax_node_id"])
+                .unwrap();
+            assert_eq!(node["syntax_raw_kind"], fact["raw_kind"]);
+            assert_eq!(node["syntax_start_byte"], fact["start_byte"]);
+            assert_eq!(node["syntax_end_byte"], fact["end_byte"]);
+            if fact["parent_entity_id"].is_null() {
+                assert!(node["syntax_parent_id"].is_null());
+            } else {
+                let parent = facts
+                    .iter()
+                    .find(|parent| parent["entity_id"] == fact["parent_entity_id"])
+                    .unwrap();
+                assert_eq!(node["syntax_parent_id"], parent["public_entity_id"]);
+            }
+        }
+        exact.extend(outline);
         exact.extend(facts);
     }
     exact
@@ -167,6 +209,7 @@ fn pragmatic_syntax_nodes_properties_parents_and_source_survive_public_reopen() 
     let stack = InstalledProductionStack::build();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
     let original = query_syntax(&fixture, &stack, "initial");
+    outline_disclosure(&fixture, &stack);
     let selected = wait_for_semantic_activation(&fixture);
     supervisor.stop();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
@@ -176,4 +219,69 @@ fn pragmatic_syntax_nodes_properties_parents_and_source_survive_public_reopen() 
     );
     assert_eq!(original, query_syntax(&fixture, &stack, "reopened"));
     supervisor.stop();
+}
+
+fn outline_disclosure(fixture: &ProductionFixture, stack: &InstalledProductionStack) {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "request:outline-policy",
+        "unused",
+    );
+    request["scope"]["analysis_contexts"] = json!({"mode":"source"});
+    request["scope"]["representations"] = json!(["syntax"]);
+    request["queries"] = json!([{"request":"retrieve source and syntax context", "query_id":"outline",
+        "about":["Python syntax node `module`"], "context":"syntax outline"}]);
+    let mut denied = request.clone();
+    denied["semantic_request_id"] = json!("request:outline-denied");
+    let scenario = modern_client_scenario(
+        fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id":"source","operation":"call_tool","name":"query_code_graph","arguments":{"request":request,"delivery":"resource"}},
+            {"id":"before","operation":"read_resource","uri":{"$ref":"source.structured_content.manifest.uri"}},
+            {"id":"pause","operation":"barrier","name":"outline-policy"},
+            {"id":"after","operation":"read_resource","uri":{"$ref":"source.structured_content.pages.0.uri"},"expect_error":"CLIENT_OPERATION_FAILED"},
+            {"id":"denied","operation":"call_tool","name":"query_code_graph","arguments":{"request":denied,"delivery":"resource"}}
+        ]),
+    );
+    let path = write_modern_client_scenario(fixture, "outline-policy", &scenario);
+    let mut client = spawn_modern_client(stack, &path);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !path.parent().unwrap().join("outline-policy.ready").exists() {
+        assert!(
+            client.try_wait().unwrap().is_none(),
+            "outline client exited before barrier"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "outline client did not reach policy barrier"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    let policy = |allow| {
+        let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
+        WorkspaceRegistry::new(&mut store)
+            .set_source_disclosure(fixture.workspace.workspace_id, allow)
+            .unwrap();
+    };
+    policy(false);
+    fs::write(
+        path.parent().unwrap().join("outline-policy.resume"),
+        b"resume\n",
+    )
+    .unwrap();
+    let report = modern_client_report(&client.wait_with_output().unwrap());
+    assert_eq!(
+        modern_step(&report, "after")["public_error"],
+        "PERMISSION_DENIED:NOT_AUTHORIZED"
+    );
+    let denied = modern_structured(modern_step(&report, "denied"));
+    assert_eq!(denied["query_results"][0]["execution_state"], "FAILED");
+    assert_eq!(
+        denied["query_results"][0]["errors"][0]["code"],
+        "SOURCE_ACCESS_DENIED"
+    );
+    policy(true);
 }

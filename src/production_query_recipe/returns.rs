@@ -9,6 +9,23 @@ use crate::relational_semantic_query::ProgramSortField;
 
 pub(super) fn install(programs: &mut [ProductionSemanticFormProgram]) {
     for program in programs {
+        if program.operators.iter().any(|node| {
+            node.node_id == program.root_node_id
+                && matches!(node.operator, ProgramRelationalOperator::Limit { .. })
+        }) {
+            program.returns.push(ProductionReturnDefinition {
+                return_id: Arc::from("return.when-exceeded"),
+                value_kind: SemanticValueKind::Text,
+                minimum_values: 0,
+                maximum_values: 1,
+                realizations: vec![ProductionReturnRealization {
+                    value: SemanticClauseValue::Text(Arc::from("truncate")),
+                    realization_node_id: program.root_node_id.clone(),
+                    realization_field_ids: program.output_fields.clone(),
+                    action: EpochBoundReturnAction::Truncate,
+                }],
+            });
+        }
         let Some(sort) = program.operators.iter().find(|node| {
             matches!(node.operator, ProgramRelationalOperator::Sort { .. })
                 && node.output_fields == program.output_fields

@@ -422,7 +422,8 @@ impl Canonical {
             fields,
         );
         if matches!(kind, Kind::SourceContext { .. }) {
-            output = output.with_semantic_role(crate::production_query_recipe::SOURCE_SYNTAX_ROLE);
+            output =
+                output.with_semantic_role(crate::production_query_recipe::SOURCE_OUTLINES_ROLE);
         }
         if matches!(kind, Kind::Entity) {
             // Kept distinct from the predecessor Ruff-only role until scoped public queries

@@ -1446,7 +1446,19 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 maximum_source_bytes,
                 line_window,
             };
-            *output = match output.clone().with_source_context(parameters) {
+            let outline = validated.ingress().selections.iter().any(|selection| {
+                selection.query_id == *query_id
+                    && selection.selection_id.as_ref() == "selection.context"
+                    && matches!(&selection.value, SemanticClauseValue::Text(value) if value.as_ref() == "syntax outline")
+            });
+            let materialized = if outline {
+                output
+                    .clone()
+                    .with_syntax_outline(authority.epoch(), parameters)
+            } else {
+                output.clone().with_source_context(parameters)
+            };
+            *output = match materialized {
                 Ok(output) => output,
                 Err(error) => {
                     return failed(&artifacts, "source_materialization", error.to_string());
@@ -1591,13 +1603,20 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                         Some(
                             crate::production_query_recipe::SOURCE_OCCURRENCES_ROLE
                                 | crate::production_query_recipe::SOURCE_SYNTAX_ROLE
+                                | crate::production_query_recipe::SOURCE_OUTLINES_ROLE
                         )
                     );
                     scope = match scope.for_source_subjects(
                         clause,
                         &validated.ingress().selections,
                         occurrence_sources,
-                        source_role == Some(crate::production_query_recipe::SOURCE_SYNTAX_ROLE),
+                        matches!(
+                            source_role,
+                            Some(
+                                crate::production_query_recipe::SOURCE_SYNTAX_ROLE
+                                    | crate::production_query_recipe::SOURCE_OUTLINES_ROLE
+                            )
+                        ),
                     ) {
                         Ok(scope) => scope,
                         Err(error) => return failed(&artifacts, "source_dependency_scope", error),

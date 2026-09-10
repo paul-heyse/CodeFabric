@@ -22,6 +22,8 @@ fn scalar(expression: &mut ScalarExpression, mapping: &BTreeMap<FieldId, FieldId
     match expression {
         ScalarExpression::Field(field) => rename(field, mapping),
         ScalarExpression::Literal(_) => {}
+        #[cfg(feature = "daemon")]
+        ScalarExpression::SourceAccessCheck { .. } => {}
         ScalarExpression::Call { arguments, .. } => {
             for argument in arguments {
                 scalar(argument, mapping);

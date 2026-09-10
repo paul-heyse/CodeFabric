@@ -71,6 +71,7 @@ pub(crate) const RELEASE_SELECTION_MAXIMUM_VALUES: usize = 64;
 
 pub(crate) const SOURCE_OCCURRENCES_ROLE: &str = "canonical.source-context.occurrences.v1";
 pub(crate) const SOURCE_SYNTAX_ROLE: &str = "canonical.source-context.syntax.v1";
+pub(crate) const SOURCE_OUTLINES_ROLE: &str = "canonical.source-context.outlines.v1";
 
 pub(crate) const CANONICAL_OCCURRENCE_SELECTOR_ROLE: &str =
     "canonical.entity-selector.occurrences.v1";
@@ -1570,6 +1571,11 @@ fn validate_program_bindings(
                     .get(realization.realization_node_id.as_ref())
                     .is_none_or(|node| {
                         realization.realization_field_ids.is_empty()
+                            || (matches!(realization.action, EpochBoundReturnAction::Truncate)
+                                && !matches!(
+                                    node.operator,
+                                    ProgramRelationalOperator::Limit { .. }
+                                ))
                             || realization
                                 .realization_field_ids
                                 .iter()
@@ -2552,6 +2558,7 @@ fn encode_return_realization(value: &ProductionReturnRealization) -> CanonicalId
     frame.frames(3, value.realization_field_ids.iter().map(encode_field_id));
     match &value.action {
         EpochBoundReturnAction::OutputFields => frame.u64(4, 0),
+        EpochBoundReturnAction::Truncate => frame.u64(4, 2),
         EpochBoundReturnAction::OrderBy { fields } => {
             frame.u64(4, 1);
             frame.nested(

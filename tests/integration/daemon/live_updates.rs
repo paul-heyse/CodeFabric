@@ -247,6 +247,7 @@ fn public_query(
         for name in [
             "source_generation",
             "provider_run_id",
+            "syntax_provider_run_id",
             "provider_observation_id",
         ] {
             fields.remove(name);
@@ -1228,6 +1229,7 @@ fn function_source_observation(
     phase: &str,
     expected: &[(String, String, String)],
 ) -> Vec<SemanticObservation> {
+    wait_for_function_sources(fixture);
     let mut request = semantic_request(
         &fixture.workspace.public_id(),
         "unused",
@@ -1320,8 +1322,115 @@ fn function_source_observation(
         assert_eq!(source["omitted_bytes"], 2);
         assert_eq!(source["complete"], false);
     }
+    observed.push(function_outline_observation(
+        fixture, stack, phase, expected, &subjects,
+    ));
     observed.insert(0, entities);
     observed
+}
+
+fn wait_for_function_sources(fixture: &ProductionFixture) {
+    // Expanded semantic families currently take longer to publish than one adapter call's
+    // timeout. Wait for the exact edited inputs, not an older ready semantic activation.
+    let root = Path::new(&fixture.workspace.root_path_display);
+    let expected = ["sample.py", "src/lib.rs"]
+        .map(|path| (path.as_bytes().to_vec(), fs::read(root.join(path)).unwrap()));
+    let deadline = Instant::now() + Duration::from_secs(180);
+    loop {
+        let selected = wait_for_semantic_activation_with_timeout(
+            fixture,
+            deadline.saturating_duration_since(Instant::now()),
+        );
+        let captured = selected_relation_batches(&selected, "source.exact_source_bytes")
+            .into_iter()
+            .flat_map(|batch| {
+                let binary = |name| {
+                    batch
+                        .column_by_name(name)
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<arrow::array::BinaryArray>()
+                        .unwrap()
+                };
+                binary("relative_path")
+                    .iter()
+                    .zip(binary("source_bytes").iter())
+                    .map(|(path, bytes)| (path.unwrap().to_vec(), bytes.unwrap().to_vec()))
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .collect::<BTreeMap<_, _>>();
+        if expected
+            .iter()
+            .all(|(path, bytes)| captured.get(path) == Some(bytes))
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "exact function inputs did not converge"
+        );
+        thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn function_outline_observation(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+    expected: &[(String, String, String)],
+    subjects: &[Value],
+) -> SemanticObservation {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "function declarations",
+    );
+    request["queries"] = json!([{"request":"retrieve source and syntax context", "query_id":"outline",
+        "about":subjects, "context":"syntax outline", "return":{"limit":{"maximum_results":1024}}}]);
+    let result = public_query(fixture, stack, &format!("{phase}-outline"), request);
+    assert_eq!(result.processing[0]["remaining_partitions"], 0);
+    for (name, definition, _) in expected {
+        let nodes = result
+            .rows
+            .iter()
+            .filter(|row| row["name"] == *name)
+            .collect::<Vec<_>>();
+        assert!(!nodes.is_empty(), "missing outline for {name}");
+        let rust = name.starts_with("fixture::");
+        let source = fs::read(
+            Path::new(&fixture.workspace.root_path_display).join(if rust {
+                "src/lib.rs"
+            } else {
+                "sample.py"
+            }),
+        )
+        .unwrap();
+        assert!(nodes.iter().any(|node| {
+            node["syntax_raw_kind"]
+                == if rust {
+                    "function_item"
+                } else {
+                    "function_definition"
+                }
+                && node["syntax_start_byte"] == node["start_byte"]
+                && node["syntax_end_byte"] == node["end_byte"]
+        }));
+        for node in nodes {
+            let start = usize::try_from(node["start_byte"].as_u64().unwrap()).unwrap();
+            let end = usize::try_from(node["end_byte"].as_u64().unwrap()).unwrap();
+            assert_eq!(&source[start..end], definition.as_bytes());
+            assert!(node["syntax_start_byte"].as_u64().unwrap() >= start as u64);
+            assert!(node["syntax_end_byte"].as_u64().unwrap() <= end as u64);
+            assert_eq!(
+                node["syntax_context_id"],
+                "ffffffffffffffffffffffffffffffff"
+            );
+            assert_ne!(node["context_id"], node["syntax_context_id"]);
+            assert!(node.get("source_bytes").is_none());
+            assert!(node.get("source_context").is_none());
+        }
+    }
+    result
 }
 
 #[test]

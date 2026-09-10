@@ -97,6 +97,29 @@ pub(crate) fn function(parameters: SourceContextParameters) -> Arc<ScalarUDF> {
     ))
 }
 
+pub(crate) fn authorization_function(parameters: SourceContextParameters) -> Arc<ScalarUDF> {
+    let name = format!(
+        "codefabric_source_access_{}",
+        blake3::hash(format!("{parameters:?}").as_bytes()).to_hex()
+    );
+    Arc::new(create_udf(
+        &name,
+        vec![],
+        DataType::Boolean,
+        Volatility::Volatile,
+        Arc::new(move |_| {
+            if parameters.authority.authorize().map_err(error)? != parameters.grant {
+                return Err(error(
+                    "source disclosure authorization changed during execution",
+                ));
+            }
+            Ok(ColumnarValue::Scalar(
+                datafusion::common::ScalarValue::Boolean(Some(true)),
+            ))
+        }),
+    ))
+}
+
 fn error(detail: impl std::fmt::Display) -> DataFusionError {
     DataFusionError::Execution(detail.to_string())
 }

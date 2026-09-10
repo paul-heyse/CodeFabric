@@ -253,6 +253,15 @@ impl EntityQueryScope {
             );
         }
         let mut scope = self.with_families(families)?;
+        if resolved(clause.query_id(), "selection.context") == Some("syntax outline") {
+            scope.families.insert("syntax-nodes");
+            if scope.families.contains("function-declarations") {
+                scope.families.insert("function-source-context");
+            }
+            if !scope.contexts.is_empty() {
+                scope.contexts.insert(crate::identity::SOURCE_CONTEXT_ID);
+            }
+        }
         if all_languages_known {
             scope
                 .languages
@@ -422,6 +431,32 @@ mod tests {
             .narrow_location_files(&clause(vec![subject("outside.py")]))
             .unwrap();
         assert!(selected.languages.is_empty());
+    }
+
+    #[test]
+    fn function_outline_preserves_semantic_and_parser_dependencies() {
+        let selected = scope()
+            .for_source_subjects(
+                &clause(vec![SemanticReference::Phrase(
+                    "Python function `target`".into(),
+                )]),
+                &[selection("source", "selection.context", "syntax outline")],
+                true,
+                true,
+            )
+            .unwrap();
+        assert_eq!(selected.languages, BTreeSet::from(["python".into()]));
+        assert_eq!(
+            selected.families,
+            BTreeSet::from([
+                "function-declarations",
+                "function-source-context",
+                "syntax-nodes"
+            ])
+        );
+        let mut contexts = scope().contexts;
+        contexts.insert(crate::identity::SOURCE_CONTEXT_ID);
+        assert_eq!(selected.contexts, contexts);
     }
 
     #[test]

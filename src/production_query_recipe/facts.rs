@@ -169,7 +169,22 @@ fn subject_facts(
             (
                 "selection.context",
                 "context_kind",
-                if matches!(
+                if source
+                    .contract
+                    .relation_semantic_role(SchemaRole::Logical)
+                    .map_err(|error| ProductionQueryRecipeError::InvalidCompiledRelease {
+                        detail: error.to_string(),
+                    })?
+                    == Some(super::SOURCE_OUTLINES_ROLE)
+                {
+                    &[
+                        "exact source span",
+                        "function definition",
+                        "function body",
+                        "surrounding lines",
+                        "syntax outline",
+                    ]
+                } else if matches!(
                     source
                         .contract
                         .relation_semantic_role(SchemaRole::Logical)

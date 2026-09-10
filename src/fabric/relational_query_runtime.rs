@@ -70,6 +70,8 @@ pub struct RelationalQueryAuthorization {
 pub(crate) mod source_boundary;
 #[cfg(feature = "daemon")]
 mod source_location;
+#[cfg(feature = "daemon")]
+mod source_outline;
 
 impl RelationalQueryAuthorization {
     /// Construct a bounded authorization input without selecting an epoch.
