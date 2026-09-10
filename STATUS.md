@@ -4,7 +4,7 @@ Updated 2026-09-10 from the canonical `/home/paul/CodeFabric` working tree on `m
 Implementation has resumed from `b2a97b9c` in the detailed plan's P01–P14 package order, as requested.
 P01's initial captured dependency/context vertical and phase costs are committed in `a31e2a3a`.
 P02 is in progress; canonical diagnostics and the initial Python module/import/semantic-reference
-cluster and initial Python structural types are implemented with scoped coverage and exact reopen.
+cluster and initial Python/Rust structural types are implemented with scoped coverage and exact reopen.
 The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
 Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
 
@@ -83,7 +83,7 @@ completes with the existing warning backlog; full-suite, doctest and public fami
 completion are not claimed by this slice. The code-facts and DataFusion reference skills and exact
 local sources guided the bulk resolver, typed Arrow boundary, joins, aggregates and alias metadata.
 
-Initial Rust type/import/reference normalization and public family selection remain P02 work.
+Initial Rust import/reference normalization and public family selection remain P02 work.
 P03–P14 remain required in package order.
 
 ### Initial Python structural types
@@ -130,12 +130,70 @@ metadata change (`/tmp/codefabric-p02-types-sidecar-tests-final.log`). All-targe
 completes with the existing warning backlog; its one new test allocation warning was corrected
 (`/tmp/codefabric-p02-types-clippy-final.jsonl`). Tooling golden selection, focused lint/format,
 document navigation and diff checks pass. Focused spelling passes; whole-file spelling still flags
-six unchanged escaped `caf` byte fragments in existing encoding fixtures. Full-suite/doctest and
+six unchanged escaped byte fragments in existing encoding fixtures. Full-suite/doctest and
 strict repository-wide lint completion are not claimed.
 The code-facts, DataFusion and petgraph reference skills and exact resolved sources guided this slice.
 Full recursive/binder/alias/overload/ParamSpec/TypedDict normalization, expanded type observation
-roles and members remain P06; Rust's initial structural type vertical and public family selection
-remain P02. No full type-universe or public-query completion is claimed by this slice.
+roles and members remain P06; public family selection remains P02. No full type-universe or
+public-query completion is claimed by this slice.
+
+### Initial Rust structural types
+
+The dated compiler emitter now carries primitive kinds, native definition kinds, array lengths,
+generic-argument and binder counts, region classes, and function-pointer ABI, safety, variadic and
+explicit unwind flags as typed Arrow fields. Rust ABI has no invented unwind flag. Native graph
+keys use the compiler's stable type hashing without TypeId's region erasure; static and erased
+reference observations cannot merge before normalization. Provider keys remain provenance, never
+canonical type identity. Both build domains share the changed schema and exact bundle handshake.
+
+DataFusion groups each exact accepted compiler owner/context/source graph for the shared iterative
+SCC normalizer and application TypeInterner. `system.canonical_rust_type_graph` feeds the same
+canonical type, observation and component relations as Python. Supported initial shapes include
+primitives, never, tuples, arrays/slices, pointers/references, function pointers and canonically
+resolved nominal/function definitions with type-only arguments. Array length, ABI, safety, explicit
+unwind and region distinctions participate in structural identity. Erased regions retain their
+identity and precision gap. Non-type generic arguments, binders, unresolved nominal definitions,
+cycles and advanced shapes retain unknowns, including dependent types.
+
+Compiler item observations and MIR local/argument/return type observations remain distinct. MIR
+slot indices never mint source occurrence IDs. Native owner, compilation unit, type key and
+component ordinal remain available beside canonical identities. Locations require exact captured
+owner-file bytes and source-authored spans. Requested `types` coverage is target/context scoped;
+missing canonical graphs and normalization/location gaps can only downgrade completion. Python
+coverage remains per-file, and source-first epochs preserve pending semantic scope.
+
+The real mixed-language daemon case passes independently specified primitive/array identities,
+function-pointer distinctions, MIR argument/component provenance, explicit unknown coverage and
+exact Delta reopen of all type relations (60.89 s;
+`/tmp/codefabric-p02-rust-types-joins-tests.log`). Independent Arrow inputs in that same passing run
+cover stale digests/generations, unaccepted runs, context separation, identical native keys in
+different compiler owners, missing children and stable IDs after run/generation changes.
+`canonical-rust-types` selects the native scenario. All 21 extractor tests pass, including actual
+native static/erased region-key separation (`/tmp/codefabric-p02-rust-types-extractor-tests-3.log`);
+strict extractor check/Clippy passes after the final native changes
+(`/tmp/codefabric-p02-rust-types-extractor-check-verified.log`). All 29 affected canonical,
+normalizer, processing, provider-recipe and real Python/Rust type/reopen cases pass with final
+schemas and metadata (62.01 s; `/tmp/codefabric-p02-rust-types-final-tests.log`). Default/featureless
+`just root-check` passes (`/tmp/codefabric-p02-rust-types-root-check-verified.log`). Tooling golden
+selection, focused Ruff/format/spelling, documentation navigation and diff checks pass. All-target
+root Clippy completes with the existing warning backlog and no warnings in the new normalization
+modules (`/tmp/codefabric-p02-rust-types-clippy-verified.jsonl`); the new independent-availability
+boolean warning has an explicit rationale. No full-suite/doctest or strict repository-wide lint
+claim is made.
+
+Validation exposed duplicate dependencies in the combined-language observation plan; those are
+now deduplicated. It also exposed a preparation retry defect: identical source/context inputs reused
+private Cargo output paths, obscuring the original publication error with `File exists`. Attempts
+now use fresh private output names while semantic identity remains stable. The daemon initializes
+the resolved tracing-subscriber 0.3.23 formatter on supervisor-owned stderr, making CodeFabric
+warnings and dependency errors visible without a daemon log queue or retained log-file history. This addresses
+the immediate E26 diagnostic sink gap; correlated metrics, finite provider-output retention and
+integrated retry/recovery acceptance remain in their packages.
+
+The code-facts, DataFusion, petgraph and Rust daemon references and exact local sources guided this
+slice. Complete binders/regions, const generics, aliases, trait objects, nominal/member census and
+additional type propositions remain P06/P08. Initial Rust imports/references and public family
+retrieval remain P02. No outcome is closed.
 
 ### Canonical diagnostics (`cf42d574`)
 
@@ -911,9 +969,9 @@ mapping remain open.
 
 Remaining: additional project configuration settings and ordered external import roots; namespaces/re-exports and
 `.pyi` precedence across dependencies; external distribution/stub materialization and identity;
-canonical structural type/member/import/reference output and all declared/computed/expected/narrowed
-propositions; full overload/descriptor/decorator semantics; retained checker updates and context
-invalidation. Current bulk raw output and selected call resolution do not close those families.
+complete canonical type/member/import/reference coverage beyond the initial P02 clusters above;
+additional declared/expected/narrowed propositions; full overload/descriptor/decorator semantics;
+retained checker updates and context invalidation. Initial normalization does not close those families.
 
 ### 4C — source and syntax: partial
 
@@ -978,8 +1036,8 @@ reverse; buffers and schema metadata remain intact. Exact Delta reopen restores 
 and numeric types from storage representations. `068e8fd4` fixes empty metadata-rich IPC schema validation
 to use the admitted allocation bound instead of encoded page length.
 
-Remaining: full module/class/lambda/callable entities; semantic imports/exports and references for both
-languages; canonical structural types and propositions; members/signatures/argument binding; complete
+Remaining: full module/class/lambda/callable entities; Rust imports/references and full exports/reference
+census; complete structural types and propositions beyond the P02 initial shapes; members/signatures/argument binding; complete
 candidate/dispatch and executable-instance relations; external endpoints and generated/lowered correspondence;
 full per-proposition authority/conflict retention; identity continuity and owner replacement under edits.
 Raw provider coverage is not complete canonical-family coverage.

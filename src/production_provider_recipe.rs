@@ -2220,8 +2220,17 @@ fn compiled_provider_field_role(
             | "def_path_hash"
             | "definition_stable_crate_id"
             | "definition_def_path_hash" => Some(NATIVE_STABLE_KEY_ROLE),
-            "type_kind" | "component_role" => Some(PROVIDER_KIND_ROLE),
-            "definition_path" | "component_ordinal" | "mutability" => Some(PROVIDER_FACT_ROLE),
+            "type_kind" | "component_role" | "primitive_kind" | "definition_kind"
+            | "region_kind" | "function_abi" => Some(PROVIDER_KIND_ROLE),
+            "definition_path"
+            | "component_ordinal"
+            | "mutability"
+            | "generic_argument_count"
+            | "array_length"
+            | "bound_variable_count"
+            | "function_abi_unwind"
+            | "function_unsafe"
+            | "function_variadic" => Some(PROVIDER_FACT_ROLE),
             "scalar_value" => Some(RAW_RENDERING_ROLE),
             _ => None,
         },

@@ -48,7 +48,7 @@ pub(super) fn output_fields() -> Vec<FieldSpec> {
     fields
 }
 
-pub(super) fn dependencies(pyrefly: bool, rust: bool) -> Vec<&'static str> {
+pub(super) fn dependencies(pyrefly: bool, rust: bool, rust_types: bool) -> Vec<&'static str> {
     let mut result = vec![
         INPUT,
         super::calls::RELATION,
@@ -57,6 +57,7 @@ pub(super) fn dependencies(pyrefly: bool, rust: bool) -> Vec<&'static str> {
         super::imports::RELATION,
         super::types::OBSERVATION,
         super::types::GRAPH,
+        super::types::RUST_GRAPH,
         super::DECLARATION,
         super::source_context::RELATION,
     ];
@@ -74,6 +75,9 @@ pub(super) fn dependencies(pyrefly: bool, rust: bool) -> Vec<&'static str> {
             crate::pyrefly_service::PyreflyRelation::CallTarget.relation_id(),
             NativeSyntaxRelation::RuffCallableSyntax.as_str(),
         ]);
+    }
+    if rust_types {
+        result.extend([RUN, super::RustcRelation::Type.relation_id()]);
     }
     result.sort_unstable();
     result.dedup();
@@ -100,6 +104,7 @@ pub(super) fn build(
     inputs: &TransformationInputs,
     pyrefly: bool,
     rust: bool,
+    rust_types: bool,
     workspace: [u8; 16],
 ) -> Result<LogicalPlan, TransformationPlanError> {
     let calls = plan(inputs, super::calls::RELATION)?;
@@ -119,7 +124,7 @@ pub(super) fn build(
         )?
         .alias("g")?
         .build()?;
-    let base = LogicalPlanBuilder::from(qualify_references(inputs)?)
+    let base = LogicalPlanBuilder::from(qualify_references(inputs, rust_types)?)
         .union(function_source_scope(inputs)?)?
         .build()?;
     let fields = fields();
@@ -238,6 +243,7 @@ pub(super) fn build(
 
 fn qualify_references(
     inputs: &TransformationInputs,
+    rust_types: bool,
 ) -> Result<LogicalPlan, TransformationPlanError> {
     let mut base = plan(inputs, INPUT)?;
     for (relation, family, reason) in [
@@ -267,10 +273,28 @@ fn qualify_references(
                 .or(col("target_entity_id").is_null()),
         )?;
     }
-    for relation in [super::types::GRAPH, super::types::OBSERVATION] {
+    for (relation, language) in [
+        (super::types::GRAPH, Some("python")),
+        (super::types::RUST_GRAPH, Some("rust")),
+        (super::types::OBSERVATION, None),
+    ] {
+        let observations = plan(inputs, relation)?;
+        let observations = if let Some(language) = language {
+            let columns = observations
+                .schema()
+                .fields()
+                .iter()
+                .map(|field| col(field.name()))
+                .collect::<Vec<_>>();
+            LogicalPlanBuilder::from(observations)
+                .project(columns.into_iter().chain([lit(language).alias("language")]))?
+                .build()?
+        } else {
+            observations
+        };
         base = qualify_observation_gaps(
             base,
-            plan(inputs, relation)?,
+            observations,
             "types",
             "canonical_types_unknown",
             col("type_id")
@@ -278,7 +302,64 @@ fn qualify_references(
                 .or(col("unknown_reason").is_not_null()),
         )?;
     }
+    if rust_types {
+        base = qualify_observation_gaps(
+            base,
+            missing_rust_type_graphs(inputs)?,
+            "types",
+            "native_type_source_unavailable",
+            col("graph_type_key").is_null(),
+        )?;
+    }
     Ok(base)
+}
+
+fn missing_rust_type_graphs(
+    inputs: &TransformationInputs,
+) -> Result<LogicalPlan, TransformationPlanError> {
+    let raw = LogicalPlanBuilder::from(plan(inputs, super::RustcRelation::Type.relation_id())?)
+        .filter(col("component_role").eq(lit("self")))?
+        .alias("p")?
+        .build()?;
+    let runs = LogicalPlanBuilder::from(plan(inputs, RUN)?)
+        .filter(col("provider").eq(lit("rustc")))?
+        .alias("r")?
+        .build()?;
+    let graph = LogicalPlanBuilder::from(plan(inputs, super::types::RUST_GRAPH)?)
+        .alias("g")?
+        .build()?;
+    let file = super::file_id_udf().call(vec![col("p.source_file_id")]);
+    Ok(LogicalPlanBuilder::from(raw)
+        .join(
+            runs,
+            JoinType::Inner,
+            (
+                vec!["p.provider_run_id", "p.source_generation"],
+                vec!["r.provider_run_identity", "r.source_generation"],
+            ),
+            None,
+        )?
+        .join_on(
+            graph,
+            JoinType::Left,
+            vec![
+                col("p.provider_run_id").eq(col("g.provider_run_identity")),
+                col("p.owner_id").eq(col("g.provider_owner")),
+                col("p.compilation_unit_id").eq(col("g.provider_compilation_unit")),
+                col("p.type_key").eq(col("g.type_key")),
+                col("p.source_generation").eq(col("g.source_generation")),
+                col("p.source_content_digest").eq(col("g.content_digest")),
+                file.clone().eq(col("g.file_id")),
+            ],
+        )?
+        .project(vec![
+            lit("rust").alias("language"),
+            col("r.context_id").alias("context_id"),
+            file.alias("file_id"),
+            col("p.source_generation").alias("source_generation"),
+            col("g.type_key").alias("graph_type_key"),
+        ])?
+        .build()?)
 }
 
 fn qualify_observation_gaps(
@@ -291,20 +372,43 @@ fn qualify_observation_gaps(
     let gaps = LogicalPlanBuilder::from(references)
         .filter(condition)?
         .aggregate(
-            vec![col("context_id"), col("file_id"), col("source_generation")],
+            vec![
+                col("language"),
+                col("context_id"),
+                scope_key()?.alias("scope_key"),
+                col("source_generation"),
+            ],
             vec![count(lit(1_i64)).alias("gaps")],
         )?
         .alias("r")?
         .build()?;
-    let base = LogicalPlanBuilder::from(base).alias("b")?.join(
-        gaps,
-        JoinType::Left,
-        (
-            vec!["b.context_id", "b.file_id", "b.source_generation"],
-            vec!["r.context_id", "r.file_id", "r.source_generation"],
-        ),
-        None,
-    )?;
+    let base = LogicalPlanBuilder::from(base)
+        .project(
+            fields()
+                .iter()
+                .map(|(name, _, _)| col(*name))
+                .chain([scope_key()?.alias("scope_key")]),
+        )?
+        .alias("b")?
+        .join(
+            gaps,
+            JoinType::Left,
+            (
+                vec![
+                    "b.language",
+                    "b.context_id",
+                    "b.scope_key",
+                    "b.source_generation",
+                ],
+                vec![
+                    "r.language",
+                    "r.context_id",
+                    "r.scope_key",
+                    "r.source_generation",
+                ],
+            ),
+            None,
+        )?;
     let incomplete = col("b.family")
         .eq(lit(family))
         .and(col("b.processing_state").eq(lit("complete")))

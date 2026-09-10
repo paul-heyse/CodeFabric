@@ -302,7 +302,7 @@ here are starting points, not instructions to replace entire files.
 | E23 | Confirmed in native source and `delta_guarded_maintenance.rs`: optimize/start-vacuum lose caller transaction policy and destructive maintenance is unavailable. Correct native commits; replace approval-receipt gating with live exclusion | 8B/8D: real compaction and safe reclamation, including uncertain acknowledgement recovery |
 | E24 | Confirmed open integration: source/result/snapshot leases and broad budgets exist, but one coordinated finite policy across providers, tables, logs, sources, diagnostics and caches does not. Complete retention ownership | 8C/8D: protected reads survive maintenance; expired/unleased state is measurably reclaimed |
 | E25 | Confirmed existing wrappers in `fabric/provider.rs` and `programmatic_schema.rs` already preserve pushdown/schema behavior. Qualify structured scan/statistics requests and physical properties through real canonical/Delta/query consumers | 4D/8F: native pruning/projection/limits improve actual work without corrupting schema, authorization or residual filters |
-| E26 | Confirmed observability gap: phase metrics remain open; update reconciliation emits `tracing::warn!` but no `tracing_subscriber` initialization was found in `src`. Connect compact runtime outcomes and an owned diagnostic sink, then tune from representative profiles | 8E/8F: detection-to-answer, queue, IO, memory and recovery costs are attributable; warning call sites alone are not evidence of observable operation |
+| E26 | Baseline observability gap: phase metrics remain open. P01 added finite preparation reports; P02 now initializes the daemon warning formatter on supervisor-owned stderr. Complete correlated runtime outcomes and tune from representative profiles | 8E/8F: detection-to-answer, queue, IO, memory and recovery costs are attributable; warning call sites alone are not evidence of observable operation |
 
 ### 3.3 Dependency-ordered implementation packages
 
@@ -414,7 +414,33 @@ integer key/ID, callable parameters, unknowns and all new relations after exact 
 Default/featureless root checks, strict sidecar checks and all 39 sidecar tests pass. STATUS records
 commands, evidence and limits; strict root lint and full-suite completion are not claimed.
 
-Continue P02 with initial Rust structural types/imports/semantic references and public family
+**P02 initial Rust structural type slice implemented, 2026-09-10.** The exact dated compiler
+emits typed primitive/definition kinds, lengths, generic/binder counts, region classes and function
+ABI/safety/variadic/unwind distinctions. Stable native type hashing preserves observed regions;
+the TypeId hash that erased them is no longer used for graph correspondence. DataFusion selects
+each exact accepted compiler owner/context/source graph and uses the shared iterative SCC
+normalizer and application TypeInterner. Provider hashes remain provenance.
+
+The common canonical type/observation/component relations now include Rust primitives, never,
+tuples, arrays/slices, pointers/references, function pointers and resolved type-only nominal/function
+applications. Unsupported binders/non-type generic arguments, missing definitions, recursion and
+erased-region precision remain explicit gaps. MIR slots retain compiler owner/slot provenance and
+do not mint source occurrence IDs. Target-scoped type coverage includes missing canonical source
+graphs and normalization/location gaps. The real mixed-language case verifies independently
+specified array/primitive keys, pointer distinctions, MIR argument/component evidence and exact
+reopen (60.89 s); independent Arrow cases verify stale inputs, context/owner isolation and stable
+IDs across runs/generations. `canonical-rust-types` selects the native scenario. All 21 extractor
+tests and strict extractor checks pass. The final 29-case regression run, including real Python
+and Rust type/reopen cases, passes (62.01 s), as do default/featureless root checks. STATUS records
+commands, evidence and remaining validation limits.
+
+The mixed-language case also exposed and corrected duplicate plan dependencies and reuse of
+private Cargo output paths on retry. Fresh attempt paths preserve stable semantic identity. The
+daemon now initializes existing warning events on supervisor-owned stderr using the resolved
+tracing formatter. E26's immediate missing-sink issue is corrected; complete correlated metrics
+and provider-output retention/recovery remain in their packages.
+
+Continue P02 with initial Rust imports/semantic references and public family
 selection for the canonical clusters. Complete recursive/binder/alias/overload/ParamSpec/TypedDict
 normalization, expanded type observation roles and members in P06. This does not defer or close any
 of P02's required semantic verticals. P03–P14 remain in the table's order.
@@ -630,8 +656,9 @@ choosing more checker contexts or finer extraction.
 The P02 diagnostic continuation adds canonical Python/Rust messages, Rust child/span/suggestion/edit
 relations and separate requested diagnostic coverage. The Python module/import/semantic-reference
 cluster now has typed native observations, canonical joins, scoped coverage and exact reopen, as
-recorded in §3.3. Public family selection, structural types, the Rust import/reference cluster and
-the broader semantic families below remain open.
+recorded in §3.3. Initial Python/Rust structural types, observations and components also publish
+with explicit unknown coverage and exact reopen. Public family selection, full type normalization,
+the Rust import/reference cluster and the broader semantic families below remain open.
 
 1. Route raw source/syntax, Pyrefly and rustc outputs into typed canonical entity, occurrence, declaration, binding, reference, import/export, type, member, callable, call-site and dispatch relations. Preserve raw relations alongside normalized facts.
 2. Join ranges on `(file_id, content_digest, start_byte, end_byte)` and semantic role. Use exact matches first; a permitted containment/overlap rule records method and ambiguity. Never match unrelated declarations just because their ranges coincide.
@@ -971,7 +998,7 @@ Each row includes its raw observations, canonical properties/relationships, deri
 | §5 Source and lexical ontology; §6 Syntax ontology | Files, bytes/ranges/lines, tokens/comments/trivia, syntax structure, raw/normalized kinds, malformed/generated input and coordinate mappings | 4C, 7A, 7D | Partial: real Python/Rust syntax; full lexical/coordinates and live replacement open |
 | §7 Semantic identity ontology; §8 Scope, binding, and name-resolution ontology | Declarations, symbols, definitions/references, lexical owners, qualified identity, overload/candidate sets, local/global/nonlocal scopes and Rust namespaces | 4D, 7A, 7D | Partial: canonical declarations and Python lexical references; semantic scopes/references open |
 | §9 Module, import, export, and dependency ontology | Packages/modules/crates, aliases/re-exports/globs, dependencies, external endpoints, positive and negative resolution inputs | 4A–4B, 7A, 7D | Partial captured Cargo inputs; canonical modules/imports/exports and external roots open |
-| §10 Type ontology; §35 Python type ontology extensions; §47 Rust type ontology extensions | Canonical structural type algebra; declared/computed/expected/narrowed propositions; generics, unions, callable types, traits/projections and unknown/error forms | 4B/4D, 7A, 7D | Raw semantic inputs only; complete canonical type algebra/propositions open |
+| §10 Type ontology; §35 Python type ontology extensions; §47 Rust type ontology extensions | Canonical structural type algebra; declared/computed/expected/narrowed propositions; generics, unions, callable types, traits/projections and unknown/error forms | 4B/4D, 7A, 7D | Initial Python/Rust canonical structural types and observation roles publish with unknown coverage; complete algebra/propositions open |
 | §11 Member and object-model ontology; §36 Python object-model ontology | Fields/properties/descriptors, inheritance/MRO/protocols, visibility, overrides, Rust impl/trait items and associated members | 7A, 7D | Selected provider observations only; complete canonical/public object model open |
 | §12 Callable contract ontology; §13 Call-site ontology; §14 Dispatch ontology | Signatures, defaults/argument binding, receiver, call occurrence, resolved/possible/unknown target, callable value and executable instance distinctions | 4D, 7A, 7D | Partial: actual canonical calls; full contracts/dispatch and public traversal open |
 | §15 Control-flow ontology; §16 Derived control-flow facts | Normal/exception/cleanup/unwind/suspend edges, entry/exits, reachability, dominance/post-dominance, control dependence and loops | 7B, 7E, 7F | Existing algorithms/raw inputs; real complete CFG/derived delivery open |
@@ -1518,7 +1545,7 @@ Preserve platform-specific truth: the implemented RSS/containment profile is Lin
 
 ### 8E. Runtime phase metrics and representative measurements
 
-**Current status — open.** RSS/cgroup/headroom observations and benchmark/corpus tooling exist; small fixture timings are recorded. Correlated phase coverage, representative mixed/real-repository workloads, distributions and sustained update/retention/recovery measurements have not been completed. Existing timings are not latency objectives or a performance pass.
+**Current status — partial foundations; acceptance open.** RSS/cgroup/headroom observations and benchmark/corpus tooling exist; small fixture timings and finite source/semantic preparation reports are recorded. The daemon initializes a warning sink on supervisor-owned stderr. Correlated phase coverage, representative mixed/real-repository workloads, distributions and sustained update/retention/recovery measurements have not been completed. Existing timings are not latency objectives or a performance pass.
 
 **Surfaces:** existing tracing/metrics, source watcher/coordinator, providers, DataFusion execution/publication, `tooling/product/benchmark.py`, golden driver and reusable scale fixtures.
 

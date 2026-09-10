@@ -137,6 +137,7 @@ pub(super) fn install(
             "diagnostic-messages",
             "diagnostic-locations",
             "diagnostic-suggestions",
+            "types",
         ] {
             rows.push(Partition {
                 family,
@@ -304,6 +305,7 @@ fn append_rust_partitions<'a>(
         rows.push(partition);
         rows.push(unsupported_rust_references(partition));
         for (family, relations) in [
+            ("types", &[RustcRelation::Type][..]),
             ("diagnostic-messages", &[RustcRelation::Diagnostic][..]),
             (
                 "diagnostic-locations",

@@ -90,7 +90,7 @@ pub(super) fn normalizer(nodes: DataType, edges: DataType) -> Arc<ScalarUDF> {
     ))
 }
 
-fn column<'a, T: Array + 'static>(
+pub(super) fn column<'a, T: Array + 'static>(
     rows: &'a StructArray,
     name: &str,
 ) -> Result<&'a T, DataFusionError> {
@@ -210,7 +210,7 @@ fn literal(rows: &StructArray, row: usize) -> Result<Option<CbefValue>, DataFusi
     }))
 }
 
-fn encode(nodes: &[NodeIdentity]) -> Result<ArrayRef, DataFusionError> {
+pub(super) fn encode(nodes: &[NodeIdentity]) -> Result<ArrayRef, DataFusionError> {
     let types = nodes
         .iter()
         .map(|node| node.identity.as_ref().map(|identity| identity.type_id))

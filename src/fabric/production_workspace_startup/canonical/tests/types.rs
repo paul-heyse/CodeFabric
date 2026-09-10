@@ -228,18 +228,27 @@ async fn fixture(generation: u64, run: u8, context: u8) -> datafusion::prelude::
             .add_transformation(Arc::new(Canonical::new(
                 Kind::Type {
                     relation,
-                    pyrefly: true,
+                    inputs: super::super::types::Inputs::new(true, RustInputs::from_relations([])),
                 },
                 &inventory,
             )))
             .unwrap();
     }
+    builder
+        .add_transformation(Arc::new(Canonical::new(
+            Kind::Type {
+                relation: super::super::types::Relation::RustGraph,
+                inputs: super::super::types::Inputs::new(false, RustInputs::from_relations([])),
+            },
+            &inventory,
+        )))
+        .unwrap();
     let mut assembly = builder.into_assembly_parts().3;
     assembly.install_transformations().await.unwrap();
     assembly.candidate_context()
 }
 
-async fn rows(
+pub(super) async fn rows(
     context: &datafusion::prelude::SessionContext,
     table: &str,
 ) -> Vec<serde_json::Value> {

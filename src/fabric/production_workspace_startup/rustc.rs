@@ -15,7 +15,9 @@ use crate::analysis_context::{
     ContextSearchUniverse, RustToolchainSettings,
 };
 use crate::cancellation::{Cancellation, StructuredCancellationScope};
-use crate::identity::{IdentityDomain, decode_public_id, encode_public_id};
+use crate::identity::{
+    IdentityDomain, decode_public_id, encode_public_id, random_registration_nonce,
+};
 use crate::integrity::{digest_bytes, frame_digest};
 use crate::provider_admission::{ExactProviderLaneRuns, ProviderLaneGap};
 use crate::provider_contracts::{
@@ -419,8 +421,13 @@ fn prepare_and_run(
     };
     let seccomp =
         CompiledProviderSeccomp::compile().map_err(|error| step("rust-seccomp", error))?;
-    let metadata_paths = RustCompilationPrivatePaths::prepare(&view.output_root, "metadata")
-        .map_err(|error| step("rust-metadata-output", error))?;
+    // Input/context identity is stable across retries; writable compiler output is not.
+    // A fresh attempt must never reuse a previous subprocess's private output tree.
+    let attempt =
+        lower_hex(&random_registration_nonce().map_err(|error| step("rust-attempt-id", error))?);
+    let metadata_paths =
+        RustCompilationPrivatePaths::prepare(&view.output_root, &format!("metadata-{attempt}"))
+            .map_err(|error| step("rust-metadata-output", error))?;
     let metadata_profile = profile(&compilation_inputs, &metadata_paths)?;
     let metadata_plan = compile_rust_metadata_launch_plan(
         &policy,
@@ -540,8 +547,9 @@ fn prepare_and_run(
         .map_err(|error| step("rust-provider-job", error))?;
     let identity: serde_json::Value = serde_json::from_slice(TOOLCHAIN_IDENTITY)
         .map_err(|error| step("rust-toolchain-identity", error))?;
-    let paths = RustCompilationPrivatePaths::prepare(&view.output_root, "compiler")
-        .map_err(|error| step("rust-output", error))?;
+    let paths =
+        RustCompilationPrivatePaths::prepare(&view.output_root, &format!("compiler-{attempt}"))
+            .map_err(|error| step("rust-output", error))?;
     let profile = profile(&compilation_inputs, &paths)?;
     let admission = RustcRunAdmission {
         provider_run_id: request.context.provider_run_id.clone(),

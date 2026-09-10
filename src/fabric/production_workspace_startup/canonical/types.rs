@@ -1,6 +1,7 @@
 //! Canonical structural types and source propositions over admitted native type graphs.
 
 mod normalize;
+mod rust;
 mod udf;
 
 use super::{
@@ -16,13 +17,38 @@ use datafusion::logical_expr::when;
 mod graph;
 
 pub(super) const GRAPH: &str = "system.canonical_python_type_graph";
+pub(super) const RUST_GRAPH: &str = rust::GRAPH;
 pub(super) const TYPE: &str = "fact.code_type";
 pub(super) const OBSERVATION: &str = "fact.code_type_observation";
 pub(super) const COMPONENT: &str = "fact.code_type_component";
 
 #[derive(Clone, Copy)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent native relation availability is not a global provider state machine"
+)]
+pub(super) struct Inputs {
+    python: bool,
+    rust: bool,
+    rust_observations: bool,
+    rust_locals: bool,
+}
+
+impl Inputs {
+    pub fn new(python: bool, rust: super::RustInputs) -> Self {
+        Self {
+            python,
+            rust: rust.types,
+            rust_observations: rust.types && rust.declarations,
+            rust_locals: rust.bodies,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub(super) enum Relation {
     Graph,
+    RustGraph,
     Type,
     Observation,
     Component,
@@ -32,6 +58,7 @@ impl Relation {
     pub fn name(self) -> &'static str {
         match self {
             Self::Graph => GRAPH,
+            Self::RustGraph => RUST_GRAPH,
             Self::Type => TYPE,
             Self::Observation => OBSERVATION,
             Self::Component => COMPONENT,
@@ -41,6 +68,7 @@ impl Relation {
     pub fn fields(self) -> Vec<FieldSpec> {
         match self {
             Self::Graph => graph::fields(),
+            Self::RustGraph => rust::fields(),
             Self::Type => vec![
                 ("type_id", DataType::FixedSizeBinary(16), true),
                 ("type_kind_code", DataType::Int32, true),
@@ -55,10 +83,16 @@ impl Relation {
                     ("type_occurrence_id", DataType::FixedSizeBinary(16), true),
                     ("type_id", DataType::FixedSizeBinary(16), true),
                     ("type_role", DataType::Utf8, false),
-                    ("start_byte", DataType::UInt64, false),
-                    ("end_byte", DataType::UInt64, false),
+                    ("start_byte", DataType::UInt64, true),
+                    ("end_byte", DataType::UInt64, true),
                     ("unknown_reason", DataType::Utf8, true),
                     ("provider_occurrence_ordinal", DataType::UInt64, false),
+                    ("provider_occurrence_kind", DataType::Utf8, false),
+                    ("owner_entity_id", DataType::FixedSizeBinary(16), true),
+                    ("provider_owner", DataType::Utf8, true),
+                    ("provider_compilation_unit", DataType::Utf8, true),
+                    ("provider_type_key", DataType::FixedSizeBinary(32), true),
+                    ("provider_local_type_index", DataType::UInt64, true),
                 ]);
                 fields
             }
@@ -73,63 +107,147 @@ impl Relation {
                     ("parameter_name", DataType::Utf8, true),
                     ("parameter_required", DataType::Boolean, true),
                     ("unknown_reason", DataType::Utf8, true),
-                    ("owner_local_type_index", DataType::UInt64, false),
+                    ("owner_local_type_index", DataType::UInt64, true),
                     ("referenced_local_type_index", DataType::UInt64, true),
+                    ("provider_owner", DataType::Utf8, true),
+                    ("provider_compilation_unit", DataType::Utf8, true),
+                    (
+                        "provider_owner_type_key",
+                        DataType::FixedSizeBinary(32),
+                        true,
+                    ),
+                    (
+                        "provider_referenced_type_key",
+                        DataType::FixedSizeBinary(32),
+                        true,
+                    ),
+                    ("provider_component_ordinal", DataType::UInt64, false),
                 ]);
                 fields
             }
         }
     }
 
-    pub fn dependencies(self, available: bool) -> Vec<&'static str> {
-        if !available {
-            return vec![];
-        }
-        match self {
-            Self::Graph => vec![
+    pub fn dependencies(self, available: Inputs) -> Vec<&'static str> {
+        let mut result = match self {
+            Self::Graph if available.python => vec![
                 SOURCE,
                 RUN,
                 DECLARATION,
                 PyreflyRelation::TypeNode.relation_id(),
                 PyreflyRelation::TypeEdge.relation_id(),
             ],
-            Self::Type => vec![GRAPH],
-            Self::Observation => vec![
+            Self::RustGraph if available.rust => vec![
+                SOURCE,
+                RUN,
+                DECLARATION,
+                crate::rustc_relation_schema::RustcRelation::Type.relation_id(),
+            ],
+            Self::Type => vec![GRAPH, RUST_GRAPH],
+            Self::Observation if available.python => vec![
                 SOURCE,
                 RUN,
                 GRAPH,
                 PyreflyRelation::TypeObservation.relation_id(),
             ],
-            Self::Component => vec![GRAPH, PyreflyRelation::TypeEdge.relation_id()],
+            Self::Component if available.python => {
+                vec![GRAPH, PyreflyRelation::TypeEdge.relation_id()]
+            }
+            _ => vec![],
+        };
+        if matches!(self, Self::Observation) && available.rust_observations {
+            result.extend([
+                SOURCE,
+                RUN,
+                DECLARATION,
+                RUST_GRAPH,
+                super::RustcRelation::PublicItem.relation_id(),
+            ]);
+            if available.rust_locals {
+                result.push(super::RustcRelation::MirLocal.relation_id());
+            }
         }
+        if matches!(self, Self::Component) && available.rust {
+            result.extend([RUST_GRAPH, super::RustcRelation::Type.relation_id()]);
+        }
+        result.sort_unstable();
+        result.dedup();
+        result
     }
 
     pub fn build(
         self,
         workspace: [u8; 16],
         inputs: &TransformationInputs,
-        available: bool,
+        available: Inputs,
     ) -> Result<LogicalPlan, TransformationPlanError> {
-        if !available {
-            return empty(self.fields());
-        }
         match self {
-            Self::Graph => graph::build(inputs),
-            Self::Type => Ok(LogicalPlanBuilder::from(plan(inputs, GRAPH)?)
-                .filter(col("type_id").is_not_null())?
-                .project(self.fields().into_iter().map(|(name, _, _)| {
-                    if name == "language" {
-                        lit("python").alias(name)
+            Self::Graph if available.python => graph::build(inputs),
+            Self::Graph => empty(self.fields()),
+            Self::RustGraph => rust::build(workspace, inputs, available.rust),
+            Self::Type => type_union(inputs),
+            Self::Observation | Self::Component => {
+                let python = if available.python {
+                    Some(if matches!(self, Self::Observation) {
+                        observations(workspace, inputs)?
                     } else {
-                        col(name)
-                    }
-                }))?
-                .distinct()?
-                .build()?),
-            Self::Observation => observations(workspace, inputs),
-            Self::Component => components(inputs),
+                        components(inputs)?
+                    })
+                } else {
+                    None
+                };
+                let rust =
+                    match self {
+                        Self::Observation if available.rust_observations => Some(
+                            rust::observations(workspace, inputs, available.rust_locals)?,
+                        ),
+                        Self::Component if available.rust => Some(rust::components(inputs)?),
+                        _ => None,
+                    };
+                union(self, python.into_iter().chain(rust))
+            }
         }
     }
+}
+
+fn union(
+    relation: Relation,
+    plans: impl Iterator<Item = LogicalPlan>,
+) -> Result<LogicalPlan, TransformationPlanError> {
+    let mut output: Option<LogicalPlanBuilder> = None;
+    for plan in plans {
+        let plan = LogicalPlanBuilder::from(plan)
+            .project(super::canonical_projection(
+                relation.name(),
+                &relation.fields(),
+            ))?
+            .build()?;
+        output = Some(match output {
+            Some(output) => output.union(plan)?,
+            None => LogicalPlanBuilder::from(plan),
+        });
+    }
+    output.map_or_else(|| empty(relation.fields()), |plan| Ok(plan.build()?))
+}
+
+fn type_union(inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
+    let branch = |relation, language| -> Result<LogicalPlan, TransformationPlanError> {
+        Ok(LogicalPlanBuilder::from(plan(inputs, relation)?)
+            .filter(col("type_id").is_not_null())?
+            .project(Relation::Type.fields().iter().map(|(name, _, _)| {
+                if *name == "language" {
+                    lit(language).alias(*name)
+                } else {
+                    col(*name)
+                }
+            }))?
+            .project(super::canonical_projection(TYPE, &Relation::Type.fields()))?
+            .build()?)
+    };
+    Ok(LogicalPlanBuilder::from(branch(GRAPH, "python")?)
+        .union(branch(RUST_GRAPH, "rust")?)?
+        .distinct()?
+        .build()?)
 }
 
 fn scope_fields() -> Vec<FieldSpec> {
@@ -235,6 +353,12 @@ fn observations(
                 .otherwise(col("g.unknown_reason"))?
                 .alias("unknown_reason"),
             col("p.occurrence_ordinal").alias("provider_occurrence_ordinal"),
+            lit("checker-expression").alias("provider_occurrence_kind"),
+            lit(ScalarValue::FixedSizeBinary(16, None)).alias("owner_entity_id"),
+            lit(ScalarValue::Utf8(None)).alias("provider_owner"),
+            lit(ScalarValue::Utf8(None)).alias("provider_compilation_unit"),
+            lit(ScalarValue::FixedSizeBinary(32, None)).alias("provider_type_key"),
+            col("p.local_type_index").alias("provider_local_type_index"),
         ])?
         .build()?)
 }
@@ -282,5 +406,12 @@ fn components(inputs: &TransformationInputs) -> Result<LogicalPlan, Transformati
         ["owner_local_type_index", "referenced_local_type_index"]
             .map(|name| col(format!("p.{name}")).alias(name)),
     );
+    projection.extend([
+        lit(ScalarValue::Utf8(None)).alias("provider_owner"),
+        lit(ScalarValue::Utf8(None)).alias("provider_compilation_unit"),
+        lit(ScalarValue::FixedSizeBinary(32, None)).alias("provider_owner_type_key"),
+        lit(ScalarValue::FixedSizeBinary(32, None)).alias("provider_referenced_type_key"),
+        col("p.component_ordinal").alias("provider_component_ordinal"),
+    ]);
     Ok(joined.project(projection)?.distinct()?.build()?)
 }

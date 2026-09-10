@@ -23,6 +23,7 @@ use rustc_public_bridge::IndexedVal;
 use crate::rustc_relation_schema::{RUSTC_PUBLIC_RELEASE, RUSTC_TOOLCHAIN, RustcRelation};
 
 mod diagnostics;
+mod type_structure;
 
 /// Closed scalar set used by the extractor-owned relation rows.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -250,13 +251,12 @@ impl TypeCollector<'_, '_> {
         let kind = ty.kind();
         let kind_name = type_kind_name(&kind);
         let definition = type_definition(self.tcx, &kind);
-        let scalar = type_scalar(&kind);
         let mut root = OwnedRow::default()
             .fixed32("type_key", key)
             .utf8("type_kind", kind_name)
             .utf8("component_role", "self")
             .u64("component_ordinal", 0)
-            .maybe_utf8("scalar_value", scalar.clone())
+            .maybe_utf8("scalar_value", type_scalar(&kind))
             .maybe_utf8("mutability", type_mutability(&kind));
         if let Some((path, compiler_key)) = &definition {
             root = root
@@ -264,24 +264,16 @@ impl TypeCollector<'_, '_> {
                 .u64("definition_stable_crate_id", compiler_key.stable_crate_id)
                 .fixed16("definition_def_path_hash", compiler_key.def_path_hash);
         }
-        self.owner.push(RustcRelation::Type, root);
+        let root = type_structure::extend(root, &kind);
+        self.owner.push(RustcRelation::Type, root.clone());
 
         for (ordinal, (role, child)) in type_components(&kind).into_iter().enumerate() {
             let child_key = self.register(child);
-            let mut row = OwnedRow::default()
-                .fixed32("type_key", key)
-                .utf8("type_kind", kind_name)
+            let row = root
+                .clone()
                 .utf8("component_role", role)
                 .u64("component_ordinal", ordinal + 1)
-                .fixed32("component_type_key", child_key)
-                .maybe_utf8("scalar_value", scalar.clone())
-                .maybe_utf8("mutability", type_mutability(&kind));
-            if let Some((path, compiler_key)) = &definition {
-                row = row
-                    .utf8("definition_path", path)
-                    .u64("definition_stable_crate_id", compiler_key.stable_crate_id)
-                    .fixed16("definition_def_path_hash", compiler_key.def_path_hash);
-            }
+                .fixed32("component_type_key", child_key);
             self.owner.push(RustcRelation::Type, row);
         }
         key
@@ -334,9 +326,19 @@ fn compiler_key<T: CrateDef>(tcx: TyCtxt<'_>, definition: &T) -> OwnedCompilerKe
 }
 
 fn type_key(tcx: TyCtxt<'_>, ty: Ty) -> [u8; 32] {
+    use rustc_data_structures::stable_hash::{StableHash, StableHasher};
     let internal = rustc_public::rustc_internal::internal(tcx, ty);
-    let compiler_hash = tcx.type_id_hash(internal).as_u128().to_le_bytes();
-    framed_hash(b"codefabric.rustc.type-id.v1\0", [compiler_hash.to_vec()])
+    // TypeId erases/anonymizes regions. Native graph keys must retain the actual observed type;
+    // the application adapter separately decides which region/binder forms it can normalize.
+    let compiler_hash: rustc_hashes::Hash128 = tcx.with_stable_hashing_context(|mut context| {
+        let mut hasher = StableHasher::new();
+        context.while_hashing_spans(false, |context| internal.stable_hash(context, &mut hasher));
+        hasher.finish()
+    });
+    framed_hash(
+        b"codefabric.rustc.type-observation.v2\0",
+        [compiler_hash.as_u128().to_le_bytes().to_vec()],
+    )
 }
 
 fn owned_span(tcx: TyCtxt<'_>, span: rustc_public::ty::Span) -> OwnedSpan {

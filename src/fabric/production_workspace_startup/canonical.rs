@@ -47,10 +47,15 @@ mod types;
 /// Each canonical projection requires its own native input set. Diagnostic-only compilation and
 /// crates with no body are valid observations, but do not supply declaration/call/body tables.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "native relation prerequisites are independent availability sets, not mutually exclusive states"
+)]
 pub(super) struct RustInputs {
     declarations: bool,
     calls: bool,
     pub bodies: bool,
+    types: bool,
     diagnostics: diagnostics::Inputs,
 }
 
@@ -66,6 +71,7 @@ impl RustInputs {
                 && relations.contains(&RustcRelation::Call)
                 && relations.contains(&RustcRelation::MirTerminator),
             bodies: declarations && relations.contains(&RustcRelation::MirBody),
+            types: relations.contains(&RustcRelation::Type),
             diagnostics: diagnostics::Inputs::from_relations(&relations),
         }
     }
@@ -75,7 +81,7 @@ pub(super) fn install_processing(
     builder: &mut ProgrammaticFabricEpochBuilder,
     inventory: &ProviderSourceInventory,
     pyrefly: bool,
-    rust: bool,
+    rust: RustInputs,
 ) -> Result<(), ProductionWorkspaceStartupError> {
     builder
         .add_transformation(Arc::new(Canonical::new(
@@ -112,19 +118,23 @@ pub(super) fn install(
         Kind::Import { python },
         Kind::Type {
             relation: types::Relation::Graph,
-            pyrefly,
+            inputs: types::Inputs::new(pyrefly, rust),
+        },
+        Kind::Type {
+            relation: types::Relation::RustGraph,
+            inputs: types::Inputs::new(pyrefly, rust),
         },
         Kind::Type {
             relation: types::Relation::Type,
-            pyrefly,
+            inputs: types::Inputs::new(pyrefly, rust),
         },
         Kind::Type {
             relation: types::Relation::Observation,
-            pyrefly,
+            inputs: types::Inputs::new(pyrefly, rust),
         },
         Kind::Type {
             relation: types::Relation::Component,
-            pyrefly,
+            inputs: types::Inputs::new(pyrefly, rust),
         },
         Kind::Diagnostic {
             pyrefly,
@@ -171,11 +181,11 @@ pub(super) fn install(
 enum Kind {
     Type {
         relation: types::Relation,
-        pyrefly: bool,
+        inputs: types::Inputs,
     },
     Processing {
         pyrefly: bool,
-        rust: bool,
+        rust: RustInputs,
     },
     Source,
     Declaration {
@@ -233,15 +243,18 @@ impl Canonical {
     )]
     fn new(kind: Kind, inventory: &ProviderSourceInventory) -> Self {
         let (id, names, mut dependencies) = match kind {
-            Kind::Type { relation, pyrefly } => (
+            Kind::Type {
+                relation,
+                inputs: available,
+            } => (
                 relation.name(),
                 relation.fields(),
-                relation.dependencies(pyrefly),
+                relation.dependencies(available),
             ),
             Kind::Processing { pyrefly, rust } => (
                 processing::OUTPUT,
                 processing::output_fields(),
-                processing::dependencies(pyrefly, rust),
+                processing::dependencies(pyrefly, rust.bodies, rust.types),
             ),
             Kind::Source => (SOURCE, source_fields(), vec![INPUT]),
             Kind::Diagnostic { pyrefly, rust } => (
@@ -642,9 +655,12 @@ impl ProgrammaticTransformation for Canonical {
     )]
     fn build(&self, inputs: &TransformationInputs) -> Result<LogicalPlan, TransformationPlanError> {
         match self.kind {
-            Kind::Type { relation, pyrefly } => relation.build(self.workspace, inputs, pyrefly),
+            Kind::Type {
+                relation,
+                inputs: available,
+            } => relation.build(self.workspace, inputs, available),
             Kind::Processing { pyrefly, rust } => {
-                processing::build(inputs, pyrefly, rust, self.workspace)
+                processing::build(inputs, pyrefly, rust.bodies, rust.types, self.workspace)
             }
             Kind::CallSelector => call_selector::build(inputs),
             Kind::RelationshipSelector => relationship_selector::build(inputs),
@@ -768,7 +784,7 @@ fn canonical_field_identity(id: &str, name: &str) -> TransformationFieldIdentity
         "entity_kind" => field.with_semantic_role("semantic.entity.kind"),
         "type_id" => field.with_semantic_role("semantic.type.identity"),
         "type_kind_code" => field.with_semantic_role("semantic.type.kind"),
-        "canonical_key" if id == types::TYPE || id == types::GRAPH => {
+        "canonical_key" if [types::TYPE, types::GRAPH, types::RUST_GRAPH].contains(&id) => {
             field.with_semantic_role("semantic.type.canonical-key")
         }
         "type_occurrence_id" => field.with_semantic_role("semantic.type.source-occurrence"),
@@ -815,12 +831,16 @@ fn source_fields() -> Vec<FieldSpec> {
     ]
 }
 fn entity_projection() -> Vec<Expr> {
+    canonical_projection(ENTITY, &entity_fields())
+}
+
+fn canonical_projection(id: &str, fields: &[FieldSpec]) -> Vec<Expr> {
     // Union branches describe the same output fields. Give each branch that field identity
     // before DataFusion can prune an empty branch or propagate its physical schema.
-    entity_fields()
+    fields
         .iter()
         .map(|(name, _, _)| {
-            let identity = canonical_field_identity(ENTITY, name);
+            let identity = canonical_field_identity(id, name);
             let mut metadata = std::collections::HashMap::from([(
                 crate::schema_contract::FIELD_ID_METADATA_KEY.to_owned(),
                 identity.field_id().as_str().to_owned(),
@@ -1159,6 +1179,7 @@ fn source_occurrence_id(workspace: [u8; 16], name: &str, kind: u16, family: u16)
 #[cfg(test)]
 mod tests {
     mod diagnostics;
+    mod rust_types;
     mod semantic_references;
     mod types;
     use super::*;

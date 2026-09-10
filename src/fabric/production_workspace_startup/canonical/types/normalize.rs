@@ -37,10 +37,40 @@ pub(super) struct NodeIdentity {
     pub unknown_reason: Option<&'static str>,
 }
 
-pub(super) fn normalize(
+/// Native indices are graph-local. Language adapters own their constructor fields; this common
+/// driver owns bounded traversal, dependency gaps, SCC handling and application interning.
+pub(super) trait TypeNode {
+    fn index(&self) -> u64;
+    fn targets(&self) -> impl Iterator<Item = Option<u64>>;
+    fn term(&self, target: impl Fn(u64) -> Option<[u8; 16]>) -> Result<TypeTerm, &'static str>;
+    fn unknown_reason(&self) -> Option<&'static str> {
+        None
+    }
+}
+
+impl TypeNode for Node<'_> {
+    fn index(&self) -> u64 {
+        self.index
+    }
+    fn targets(&self) -> impl Iterator<Item = Option<u64>> {
+        self.components.iter().map(|component| component.target)
+    }
+    fn term(&self, target: impl Fn(u64) -> Option<[u8; 16]>) -> Result<TypeTerm, &'static str> {
+        term(self, target)
+    }
+    fn unknown_reason(&self) -> Option<&'static str> {
+        match self.kind {
+            "error" => Some("native_type_error"),
+            "unknown" => Some("native_type_unknown"),
+            _ => None,
+        }
+    }
+}
+
+pub(super) fn normalize<N: TypeNode>(
     workspace: [u8; 16],
     context: [u8; 16],
-    nodes: &[Node<'_>],
+    nodes: &[N],
 ) -> Result<Vec<NodeIdentity>, String> {
     if nodes.len() > 1_000_000 {
         return Err("canonical type graph exceeds the node bound".to_owned());
@@ -48,14 +78,14 @@ pub(super) fn normalize(
     let indices = nodes
         .iter()
         .enumerate()
-        .map(|(index, node)| (node.index, index))
+        .map(|(index, node)| (node.index(), index))
         .collect::<BTreeMap<_, _>>();
     if indices.len() != nodes.len() {
         return Err("duplicate native type graph index".to_owned());
     }
     let edge_count = nodes
         .iter()
-        .map(|node| node.components.len())
+        .map(|node| node.targets().count())
         .sum::<usize>();
     if edge_count > 1_000_000 {
         return Err("canonical type graph exceeds the edge bound".to_owned());
@@ -63,8 +93,8 @@ pub(super) fn normalize(
     let mut graph = DiGraph::<(), ()>::with_capacity(nodes.len(), edge_count);
     let vertices = nodes.iter().map(|_| graph.add_node(())).collect::<Vec<_>>();
     for (index, node) in nodes.iter().enumerate() {
-        for component in &node.components {
-            if let Some(target) = component.target.and_then(|target| indices.get(&target)) {
+        for target in node.targets() {
+            if let Some(target) = target.and_then(|target| indices.get(&target)) {
                 graph.add_edge(vertices[index], vertices[*target], ());
             }
         }
@@ -72,7 +102,7 @@ pub(super) fn normalize(
     let mut output = nodes
         .iter()
         .map(|node| NodeIdentity {
-            index: node.index,
+            index: node.index(),
             identity: None,
             unknown_reason: None,
         })
@@ -88,7 +118,7 @@ pub(super) fn normalize(
         }
         let index = component[0].index();
         let node = &nodes[index];
-        let term = term(node, |target| {
+        let term = node.term(|target| {
             indices
                 .get(&target)
                 .and_then(|index| output[*index].identity.as_ref())
@@ -101,20 +131,15 @@ pub(super) fn normalize(
                         .intern_type(workspace, context, &term)
                         .map_err(|error| error.to_string())?,
                 );
-                output[index].unknown_reason = match node.kind {
-                    "error" => Some("native_type_error"),
-                    "unknown" => Some("native_type_unknown"),
-                    _ => node
-                        .components
-                        .iter()
-                        .any(|component| {
-                            component
-                                .target
+                output[index].unknown_reason = node.unknown_reason().or_else(|| {
+                    node.targets()
+                        .any(|target| {
+                            target
                                 .and_then(|target| indices.get(&target))
                                 .is_some_and(|index| output[*index].unknown_reason.is_some())
                         })
-                        .then_some("type_component_unknown"),
-                };
+                        .then_some("type_component_unknown")
+                });
             }
             Err(reason) => output[index].unknown_reason = Some(reason),
         }

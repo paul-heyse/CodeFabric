@@ -162,6 +162,7 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
         "canonical-diagnostics",
         "canonical-python-references",
         "canonical-python-types",
+        "canonical-rust-types",
         "python-live",
         "mixed-clean-live",
         "staged-live",
