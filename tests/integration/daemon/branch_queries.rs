@@ -131,6 +131,7 @@ fn pragmatic_failed_query_branches_preserve_independent_results_and_exact_reopen
     let stack = InstalledProductionStack::build();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
     let expected = branch_queries(&fixture, &stack, "initial");
+    let failed = outcomes_only_queries(&fixture, &stack, "initial");
     let selected = wait_for_semantic_activation(&fixture);
     supervisor.stop();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
@@ -139,5 +140,58 @@ fn pragmatic_failed_query_branches_preserve_independent_results_and_exact_reopen
         wait_for_semantic_activation(&fixture).table_versions()
     );
     assert_eq!(expected, branch_queries(&fixture, &stack, "reopened"));
+    assert_eq!(failed, outcomes_only_queries(&fixture, &stack, "reopened"));
     supervisor.stop();
+}
+
+fn outcomes_only_queries(
+    fixture: &ProductionFixture,
+    stack: &InstalledProductionStack,
+    phase: &str,
+) -> Value {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        &format!("request:all-failed-{phase}"),
+        "unused",
+    );
+    request["queries"] = json!([
+        {"request":"retrieve facts about code","query_id":"blocked","about":[{"results_of":"failed","select":"entities"}],"facts":["declarations"]},
+        {"request":"find code entities","query_id":"failed","looking_for":"Python function declarations","return":{"order_by":["unknown key"]}}
+    ]);
+    let scenario = modern_client_scenario(
+        fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id":"query","operation":"call_tool","name":"query_code_graph","arguments":{"request":request,"delivery":"resource"}},
+            {"id":"manifest","operation":"read_resource","uri":{"$ref":"query.structured_content.manifest.uri"}}
+        ]),
+    );
+    let path = write_modern_client_scenario(fixture, &format!("outcomes-only-{phase}"), &scenario);
+    let report = modern_client_report(&run_modern_client(stack, &path));
+    let result = modern_structured(modern_step(&report, "query"));
+    assert_eq!(result["execution_state"], "SUCCEEDED", "{result}");
+    assert_eq!(
+        result["query_results"][0]["execution_state"],
+        "NOT_EXECUTED_DEPENDENCY"
+    );
+    assert_eq!(result["query_results"][1]["execution_state"], "FAILED");
+    for key in ["total_rows", "total_pages", "total_bytes"] {
+        assert_eq!(result[key], 0);
+    }
+    assert_eq!(result["pages"], json!([]));
+    assert_eq!(result["processing"], json!([]));
+    let manifest: Value = serde_json::from_slice(&resource_bytes(&report, "manifest")).unwrap();
+    assert_eq!(manifest["relations"], json!([]));
+    assert_eq!(manifest["pages"], json!([]));
+    assert_eq!(
+        manifest["canonical_semantic_response"]["queries"],
+        json!([])
+    );
+    assert_eq!(
+        manifest["canonical_semantic_response"]["query_results"],
+        result["query_results"]
+    );
+    result["query_results"].clone()
 }

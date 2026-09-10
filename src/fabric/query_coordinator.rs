@@ -1301,9 +1301,7 @@ impl QueryCoordinator {
             } => {
                 let expected = publication_intent(&handle.events)
                     .ok_or(QueryCoordinatorError::PublicationIntentMissing)?;
-                if expected != pending_object_set_from_locator(locator)
-                    || locator.page_object_paths.is_empty()
-                {
+                if expected != pending_object_set_from_locator(locator) {
                     return Err(QueryCoordinatorError::PublicationIntentConflict);
                 }
                 if retained_locator(&handle.events).is_some() {
@@ -2242,6 +2240,7 @@ fn validate_result_ready_payload(
         package_id,
         manifest_resource_id,
         manifest_checksum,
+        total_rows,
         total_pages,
         total_bytes,
         retained_locator,
@@ -2268,8 +2267,8 @@ fn validate_result_ready_payload(
         || retained_locator.package_id != *package_id
         || retained_locator.manifest_resource_id != *manifest_resource_id
         || retained_locator.expected_manifest_checksum != *manifest_checksum
-        || *total_pages == 0
-        || *total_bytes == 0
+        || (*total_pages == 0) != (*total_bytes == 0)
+        || (*total_pages == 0 && *total_rows != 0)
     {
         return Err(QueryCoordinatorError::InvalidRetainedPackageLocator);
     }
@@ -2286,8 +2285,7 @@ fn validate_pending_result_object_set(
     let expected_manifest_path = format!("{package_root}/manifest.json");
     let page_prefix = format!("{package_root}/pages/");
     let page_paths = &object_set.page_object_paths;
-    let valid_pages = !page_paths.is_empty()
-        && page_paths.len() <= 4_096
+    let valid_pages = page_paths.len() <= 4_096
         && page_paths.iter().all(|page| {
             page.is_ascii()
                 && page.len() <= 1_024
@@ -3861,6 +3859,55 @@ mod tests {
             restarted.pending_result_cleanups().await,
             [(query_id, expected)]
         );
+    }
+
+    #[tokio::test]
+    async fn failed_block_manifest_intent_survives_restart_without_page_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let limits = policy(1, 1_024, 64);
+        let mut locator = retained_locator();
+        locator.page_object_paths.clear();
+        let expected = pending_object_set(&locator);
+        let query_id = {
+            let coordinator = coordinator(&temp, limits, 7, 1_000);
+            let accepted = acceptance(
+                coordinator
+                    .accept(operation("failed-blocks", 1), 1_000)
+                    .await
+                    .unwrap(),
+            );
+            coordinator
+                .append_event(
+                    &accepted.query_id,
+                    QueryControlEventPayload::PublicationPending {
+                        object_set: expected.clone(),
+                    },
+                    1_001,
+                )
+                .await
+                .unwrap();
+            accepted.query_id
+        };
+        let restarted = coordinator(&temp, limits, 8, 1_100);
+        assert_eq!(
+            restarted.pending_result_cleanups().await,
+            [(query_id, expected)]
+        );
+        let payload = QueryControlEventPayload::ResultReady {
+            package_id: locator.package_id.clone(),
+            manifest_resource_id: locator.manifest_resource_id.clone(),
+            manifest_checksum: locator.expected_manifest_checksum.clone(),
+            total_rows: 0,
+            total_pages: 0,
+            total_bytes: 0,
+            retained_locator: locator,
+        };
+        assert!(validate_result_ready_payload(&payload).is_ok());
+        let mut invalid = payload;
+        if let QueryControlEventPayload::ResultReady { total_rows, .. } = &mut invalid {
+            *total_rows = 1;
+        }
+        assert!(validate_result_ready_payload(&invalid).is_err());
     }
 
     #[tokio::test]

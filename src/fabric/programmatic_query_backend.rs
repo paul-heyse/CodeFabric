@@ -1273,19 +1273,6 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             outputs.push(output);
             output_queries.push(Arc::clone(block.query_id()));
         }
-        if outputs.is_empty() {
-            let block = &compiled.blocks()[0];
-            return failed_error(
-                &artifacts,
-                "semantic_resolution",
-                SemanticQueryError::Phase {
-                    code: "SEMANTIC_REFERENCE_UNAVAILABLE",
-                    phase: "semantic_resolution",
-                    pointer: format!("queries.{}", block.query_id()),
-                    message: format!("no executable query blocks: {:?}", block.issues()),
-                },
-            );
-        }
         if ports.scope_authorization.policy_pin() != handoff.policy_pin {
             return failed(
                 &artifacts,
@@ -1798,28 +1785,6 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 Ok(lease) => lease,
                 Err(error) => return failed(&artifacts, "result_lease", error.to_string()),
             };
-        let transaction = match RelationalQueryTransaction::try_new(
-            context.owner(),
-            context.query_execution_pin(),
-            authorization,
-            outputs,
-            result_lease,
-            context.result_lease_token(),
-            authority.result_limits(),
-            issued_at,
-            cancellation.clone(),
-        ) {
-            Ok(transaction) => transaction,
-            Err(error) => return failed(&artifacts, "logical_planning", error.to_string()),
-        };
-        let transaction = if request_inputs_by_output.is_empty() {
-            transaction
-        } else {
-            match transaction.with_request_inputs_by_output(request_inputs_by_output) {
-                Ok(transaction) => transaction,
-                Err(error) => return failed(&artifacts, "request_input", error.to_string()),
-            }
-        };
         let response = serde_json::json!({
             "format": "codefabric.semantic-query-response.v2",
             "semantic_request_id": request.parsed().request.semantic_request_id,
@@ -1852,8 +1817,30 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
             Ok(response) => response,
             Err(error) => return failed(&artifacts, "response_encoding", error.to_string()),
         };
+        let transaction = match RelationalQueryTransaction::try_new_with_response(
+            context.owner(),
+            context.query_execution_pin(),
+            authorization,
+            outputs,
+            result_lease,
+            context.result_lease_token(),
+            authority.result_limits(),
+            issued_at,
+            cancellation.clone(),
+            Some(Arc::from(canonical_response)),
+        ) {
+            Ok(transaction) => transaction,
+            Err(error) => return failed(&artifacts, "logical_planning", error.to_string()),
+        };
+        let transaction = if request_inputs_by_output.is_empty() {
+            transaction
+        } else {
+            match transaction.with_request_inputs_by_output(request_inputs_by_output) {
+                Ok(transaction) => transaction,
+                Err(error) => return failed(&artifacts, "request_input", error.to_string()),
+            }
+        };
         let transaction = transaction
-            .with_canonical_semantic_response(canonical_response)
             .with_processing(processing_summaries)
             .with_deadline(context.deadline());
         if cancellation.is_cancelled() {

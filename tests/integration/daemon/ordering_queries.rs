@@ -186,9 +186,18 @@ fn ordered_queries(
     let report = modern_client_report(&run_modern_client(stack, &path));
     for id in ["unknown", "duplicate"] {
         let rejected = modern_structured(modern_step(&report, id));
-        assert_eq!(rejected["execution_state"], "FAILED");
-        assert_eq!(rejected["error"]["code"], "VALIDATION_REJECTED");
-        assert_eq!(rejected["error"]["retryable"], false);
+        assert_eq!(rejected["execution_state"], "SUCCEEDED");
+        assert_eq!(rejected["query_results"][0]["execution_state"], "FAILED");
+        assert_eq!(
+            rejected["query_results"][0]["errors"][0]["code"],
+            if id == "unknown" {
+                "SEMANTIC_REFERENCE_UNAVAILABLE"
+            } else {
+                "INVALID_RETURN_DIRECTIVE"
+            }
+        );
+        assert_eq!(rejected["total_rows"], 0);
+        assert_eq!(rejected["total_bytes"], 0);
         assert!(rejected["pages"].as_array().unwrap().is_empty());
     }
     rows("default")

@@ -770,10 +770,35 @@ inconsistency; unset related IDs are now omitted consistently. `query-branches` 
 The preceding Python/Rust ordering regression passes in 150.49 s; STATUS records commands, logs
 and limits. Navigation, affected spelling and diff checks pass. Full-suite closure is not claimed.
 
-Early phrase/input/authorization errors, native planning/stream failures, all-failed request
-envelopes and ready-block concurrency remain open. The native fixture exposed the missing
+Early phrase/input/authorization errors, native planning/stream failures and ready-block concurrency
+remain open. The native fixture exposed the missing
 FindEntities prior-result `within` slot; that scope must be added as remaining P03 composition.
-Current all-failed requests retain their request-level failure. No package exit is claimed.
+All-failed envelopes are added in the following continuation. No package exit is claimed.
+
+**P03 all-failed result continuation passes native validation, 2026-09-10.** A compiler request
+whose blocks all failed now retains a manifest with typed outcomes, zero relations and zero pages.
+The operation completes while block states remain failed/skipped; it does not fabricate empty
+facts or attest complete absence. Ordinary zero-match results still publish their typed Arrow
+schema. A narrowly validated semantic-response transaction admits this case; generic transactions
+still require output relations. No execution child is opened when there is no executable block.
+
+Manifest-only publication receives a durable pre-write checkpoint. Existing exact lease/owner,
+checksum and private-path checks govern reissue and restart deletion. Public data totals stay zero;
+the manifest itself retains its independent byte length and checksum. The petgraph reference
+§16.10 (`toposort`) and resolved 0.8.3 iterative implementation validate retained failed-dependency
+chains in linear graph time, using the already-enabled compact `DiGraph`; no graph feature or
+public node identity is added. Unknown dependencies, successful prerequisites and cycles are invalid.
+
+The installed mixed-success/all-failed branch case and exact reopen pass in 79.65 s. The existing
+Python/Rust ordering scenario passes in 149.98 s, with all 14 selected native/registry cases green.
+Package reissue/cleanup, undeclared-empty/dependency tests, default/featureless root builds,
+218 tooling cases, navigation, affected spelling and diff checks pass. Final Clippy has no affected
+findings. All 32 expanded coordinator/package/runtime regression cases pass in 0.38 s; STATUS
+carries the logs and validation limits. Full-suite closure is not claimed.
+Native runtime failure isolation remains next. A failed stream may already have written private
+pages: delete those owned objects before reconciling its durable cleanup checkpoint, then remove
+its relation/output summary. A crash before reconciliation retains an idempotently deletable old
+checkpoint. Do not buffer every leaf result solely to avoid handling this native streaming seam.
 
 **Next:** remaining first-four scopes/meanings, precise dependency scope and independent block
 execution/failure, then proceed to P04 in package order.

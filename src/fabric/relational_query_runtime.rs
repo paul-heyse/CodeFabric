@@ -413,8 +413,43 @@ impl RelationalQueryTransaction {
     /// Rejects absent execution/agent identity, no outputs, duplicate output relations, or
     /// undeclared completeness. Output order is normalized by stable relation identity so causal
     /// observations and package construction are deterministic.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::result_large_err,
+        reason = "preserve the established transaction inputs and shared runtime error type"
+    )]
     pub fn try_new(
+        owner: PublishedResultOwner,
+        query_execution: QueryExecutionPin,
+        authorization: RelationalQueryAuthorization,
+        outputs: Vec<SelectedQueryOutput>,
+        result_lease: ResultResourceLease,
+        lease_token: OpaqueResultLeaseToken,
+        result_limits: ArrowResultResourceLimits,
+        observed_at_unix_ms: i64,
+        cancellation: Cancellation,
+    ) -> Result<Self, RelationalQueryRuntimeError> {
+        Self::try_new_with_response(
+            owner,
+            query_execution,
+            authorization,
+            outputs,
+            result_lease,
+            lease_token,
+            result_limits,
+            observed_at_unix_ms,
+            cancellation,
+            None,
+        )
+    }
+
+    /// A semantic response may retain all-failed block outcomes without a positive relation.
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::result_large_err,
+        reason = "preserve the established transaction inputs and shared runtime error type"
+    )]
+    pub(crate) fn try_new_with_response(
         owner: PublishedResultOwner,
         query_execution: QueryExecutionPin,
         authorization: RelationalQueryAuthorization,
@@ -424,6 +459,7 @@ impl RelationalQueryTransaction {
         result_limits: ArrowResultResourceLimits,
         observed_at_unix_ms: i64,
         cancellation: Cancellation,
+        response: Option<Arc<[u8]>>,
     ) -> Result<Self, RelationalQueryRuntimeError> {
         if all_zero(query_execution.as_bytes()) {
             return Err(RelationalQueryRuntimeError::QueryExecutionPinMissing);
@@ -432,7 +468,16 @@ impl RelationalQueryTransaction {
             return Err(RelationalQueryRuntimeError::AgentNotAuthorized);
         }
         if outputs.is_empty() {
-            return Err(RelationalQueryRuntimeError::OutputRelationsEmpty);
+            let response = response
+                .as_deref()
+                .ok_or(RelationalQueryRuntimeError::OutputRelationsEmpty)?;
+            let value = serde_json::from_slice(response)
+                .map_err(StreamedResultPackageError::CanonicalResponse)?;
+            if !super::query_block_outcomes::QueryBlockOutcomes::parse(&value)?
+                .is_some_and(|outcomes| outcomes.all_failed())
+            {
+                return Err(RelationalQueryRuntimeError::OutputRelationsEmpty);
+            }
         }
         outputs.sort_by(|left, right| left.relation_id.cmp(&right.relation_id));
         for window in outputs.windows(2) {
@@ -461,7 +506,7 @@ impl RelationalQueryTransaction {
             request_inputs: BTreeMap::new(),
             observed_at_unix_ms,
             cancellation,
-            canonical_semantic_response: None,
+            canonical_semantic_response: response,
             processing: Vec::new(),
             deadline: None,
         })
@@ -986,12 +1031,18 @@ impl RelationalQueryRuntime {
         let seal_cancellation = cancellation.clone();
         let (package, observations) = work
             .run(async move {
-                let child = epoch
-                    .authorized_child_session(
-                        authorization.into_child_policy(epoch_id)?,
-                        &execution_resources,
+                let child = if outputs.is_empty() {
+                    None
+                } else {
+                    Some(
+                        epoch
+                            .authorized_child_session(
+                                authorization.into_child_policy(epoch_id)?,
+                                &execution_resources,
+                            )
+                            .await?,
                     )
-                    .await?;
+                };
                 let reusable = outputs
                     .iter()
                     .flat_map(|output| &output.prior_results)
@@ -1004,6 +1055,9 @@ impl RelationalQueryRuntime {
                 let mut relation_streams = Vec::with_capacity(outputs.len());
                 let mut compiled_outputs = Vec::with_capacity(outputs.len());
                 for output in outputs {
+                    let child = child
+                        .as_ref()
+                        .expect("nonempty output execution owns its child");
                     let coverage = output.coverage.ok_or_else(|| {
                         RelationalQueryRuntimeError::CompletenessUndeclared(
                             output.relation_id.as_str().to_owned(),

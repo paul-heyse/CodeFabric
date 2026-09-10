@@ -48,6 +48,27 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The continuation after `82bda01b` now retains an all-failed compiler request as a typed result
+manifest with zero relations, pages and data rows. The request operation finishes successfully;
+each failed/skipped block keeps its actual execution outcome. No empty fact relation is fabricated.
+Ordinary empty query results retain their typed Arrow schema, and the existing generic transaction
+constructor still rejects undeclared empty output sets. This does not change early request/input
+or authorization errors into successful result packages.
+
+The durable publication checkpoint can own the manifest alone. Exact registration/reissue and
+restart cleanup accept that shape while preserving checksums, paths, owner/lease checks and zero
+data counts. Shared typed outcome validation uses the already-enabled petgraph 0.8.3 `DiGraph`
+and iterative `toposort` for linear dependency-cycle checks; indices remain private and public
+request order stays unchanged. Missing/complete dependencies and cycles cannot explain a skipped
+block. The expanded installed branch/reopen case passes in 79.65 s
+(`/tmp/codefabric-p03-outcomes-only-native-1.log`), including the all-failed request. Package
+reissue/cleanup, undeclared-empty rejection and dependency-chain tests pass. The ordering scenario
+also passes in 149.98 s; all 14 selected native/registry cases pass. Default/featureless root checks,
+218 tooling cases, navigation, affected spelling and diff checks pass. Final Clippy has no new-file/
+changed-line findings (`/tmp/codefabric-p03-outcomes-only-clippy-final.jsonl`). All 32 expanded
+coordinator/package/runtime regression cases pass in 0.38 s
+(`/tmp/codefabric-p03-outcomes-only-regression.log`). Full-suite and baseline lint closure are not claimed.
+
 The independent compiler-branch continuation after `c7012005` isolates unavailable return meanings
 and invalid return ordering to their owning block. Valid dependents of failed blocks receive
 `NOT_EXECUTED_DEPENDENCY`; independent compiled outputs still execute and publish real Arrow
@@ -75,9 +96,9 @@ generated wire and public adapter. `query-branches` selects the scenario. Naviga
 spelling and diff checks pass; full-suite/strict baseline lint closure is not claimed.
 
 This is the initial compiler-failure vertical. Runtime stream/planning failures, early phrase/input
-and authorization failures, all-failed request result envelopes, ready-block concurrency, prior
-FindEntities scopes and broader first-four semantics remain P03 work. An all-failed request retains
-the existing request-level failure. P03 and subsequent packages remain open.
+and authorization failures, ready-block concurrency, prior FindEntities scopes and broader
+first-four semantics remain P03 work. The subsequent continuation above adds all-failed request
+result envelopes. P03 and subsequent packages remain open.
 
 The semantic-ordering continuation after `b81ef8c9` adds admitted `return.order_by` meanings to
 all first-four production programs. Native sort keys support ascending/descending order and retain

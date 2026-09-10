@@ -1346,7 +1346,6 @@ impl StreamedResultRegistry {
             object_set.epoch_id, object_set.query_execution
         );
         if package_root != expected_package_root
-            || pages.is_empty()
             || pages.len() > 1_024
             || pages.iter().collect::<BTreeSet<_>>().len() != pages.len()
             || object_set
@@ -3061,6 +3060,98 @@ mod tests {
                 .await,
             Err(StreamedResultRegistryError::RetainedLocatorMismatch)
         ));
+    }
+
+    #[tokio::test]
+    async fn failed_block_manifest_without_pages_reissues_and_cleans_up_after_restart() {
+        let sink = Arc::new(FaultSink::new());
+        let builder = test_package_builder(Arc::clone(&sink) as Arc<dyn ResultObjectSink>);
+        let response = serde_json::json!({"queries":[],"query_results":[
+            {"query_id":"failed","execution_state":"FAILED","errors":[{"code":"SEMANTIC_REFERENCE_UNAVAILABLE","subject_id":"return.order-by"}]}
+        ]});
+        let package = builder
+            .seal(
+                EpochId::from_bytes([0x31; 16]),
+                QueryExecutionPin::from_bytes([0x32; 32]),
+                &serde_json_canonicalizer::to_vec(&response).unwrap(),
+                vec![],
+                ResultResourceLease::try_new(LeaseId::from_bytes([0x33; 16]), 10, 10_000).unwrap(),
+                &Cancellation::default(),
+                Instant::now() + Duration::from_secs(5),
+                &AcceptPublicationIntent,
+            )
+            .await
+            .unwrap();
+        assert_eq!(sink.object_count().await, 1);
+        assert!(package.manifest().relations.is_empty());
+        let initial = StreamedResultRegistry::try_new(32, test_resource_budget()).unwrap();
+        let registered = initial
+            .publish_package(
+                "query:failed",
+                PRINCIPAL,
+                WORKSPACE,
+                7,
+                8,
+                9,
+                package.clone(),
+                ResultCleanup::Package(package),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(registered.pages.is_empty());
+        let recovered = StreamedResultRegistry::try_new(32, test_resource_budget()).unwrap();
+        recovered.install_package_builder(builder.clone());
+        let reissued = recovered
+            .reissue_retained(
+                "query:failed",
+                PRINCIPAL,
+                WORKSPACE,
+                17,
+                18,
+                19,
+                &registered.retained_locator,
+                20,
+            )
+            .await
+            .unwrap();
+        assert_eq!(registered.query_results, reissued.query_results);
+        let locator = &registered.retained_locator;
+        recovered
+            .cleanup_pending_object_set(&PendingResultObjectSet {
+                manifest_object_path: locator.manifest_object_path.clone(),
+                page_object_paths: vec![],
+                epoch_id: locator.epoch_id.clone(),
+                query_execution: locator.query_execution.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(sink.object_count().await, 0);
+
+        for invalid in [
+            serde_json::json!({"queries":[]}),
+            serde_json::json!({
+                "queries":[{"query_id":"complete","relation_id":"query.result.v1"}],
+                "query_results":[{"query_id":"complete","execution_state":"COMPLETE","errors":[]}]
+            }),
+        ] {
+            assert!(
+                builder
+                    .seal(
+                        EpochId::from_bytes([0x31; 16]),
+                        QueryExecutionPin::from_bytes([0x32; 32]),
+                        &serde_json_canonicalizer::to_vec(&invalid).unwrap(),
+                        vec![],
+                        ResultResourceLease::try_new(LeaseId::from_bytes([0x33; 16]), 10, 10_000)
+                            .unwrap(),
+                        &Cancellation::default(),
+                        Instant::now() + Duration::from_secs(5),
+                        &AcceptPublicationIntent,
+                    )
+                    .await
+                    .is_err()
+            );
+        }
     }
 
     #[tokio::test]

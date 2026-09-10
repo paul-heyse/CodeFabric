@@ -227,65 +227,18 @@ impl StreamedResultPackageManifest {
         Option<Vec<crate::semantic_query_contract::QueryBlockOutcome>>,
         StreamedResultPackageError,
     > {
-        use crate::semantic_query_contract::QueryBlockExecutionState;
-
-        let Some(value) = self.canonical_semantic_response.get("query_results") else {
+        let Some(outcomes) = super::query_block_outcomes::QueryBlockOutcomes::parse(
+            &self.canonical_semantic_response,
+        )?
+        else {
             return Ok(None);
         };
-        let outcomes: Vec<crate::semantic_query_contract::QueryBlockOutcome> =
-            serde_json::from_value(value.clone())
-                .map_err(StreamedResultPackageError::CanonicalResponse)?;
-        let ids = outcomes
-            .iter()
-            .map(|outcome| outcome.query_id.as_str())
-            .collect::<BTreeSet<_>>();
-        if outcomes.is_empty()
-            || ids.len() != outcomes.len()
-            || outcomes.iter().any(|outcome| !outcome.valid())
-        {
-            return Err(StreamedResultPackageError::ManifestShape);
-        }
-        let complete = outcomes
-            .iter()
-            .filter(|outcome| outcome.execution_state == QueryBlockExecutionState::Complete)
-            .map(|outcome| outcome.query_id.as_str())
-            .collect::<BTreeSet<_>>();
-        let bindings = self.canonical_semantic_response["queries"]
-            .as_array()
-            .ok_or(StreamedResultPackageError::ManifestShape)?;
-        let mut bound_queries = BTreeSet::new();
-        let mut bound_relations = BTreeSet::new();
-        for binding in bindings {
-            let query = binding["query_id"]
-                .as_str()
-                .ok_or(StreamedResultPackageError::ManifestShape)?;
-            let relation = binding["relation_id"]
-                .as_str()
-                .ok_or(StreamedResultPackageError::ManifestShape)?;
-            if !bound_queries.insert(query) || !bound_relations.insert(relation) {
-                return Err(StreamedResultPackageError::ManifestShape);
-            }
-        }
-        if bound_queries != complete
-            || bound_relations
-                != self
-                    .relations
-                    .iter()
-                    .map(|entry| entry.relation_id.as_str())
-                    .collect()
-            || outcomes.iter().any(|outcome| {
-                outcome.execution_state == QueryBlockExecutionState::NotExecutedDependency
-                    && outcome.errors.iter().any(|error| {
-                        let related = error.related_id.as_deref().expect("validated dependency");
-                        related == outcome.query_id
-                            || !ids.contains(related)
-                            || complete.contains(related)
-                    })
-            })
-        {
-            return Err(StreamedResultPackageError::ManifestShape);
-        }
-        Ok(Some(outcomes))
+        outcomes.validate_relations(
+            self.relations
+                .iter()
+                .map(|entry| entry.relation_id.as_str()),
+        )?;
+        Ok(Some(outcomes.into_outcomes()))
     }
 
     pub(crate) fn requires_source_disclosure(&self) -> bool {
@@ -823,7 +776,7 @@ impl StreamedResultPackageBuilder {
                 .and_then(|n| n.checked_add(65_536))
                 .ok_or(StreamedResultPackageError::CounterOverflow)?,
         )?;
-        if relations.is_empty() || relations.len() > self.limits.max_relations.get() {
+        if relations.len() > self.limits.max_relations.get() {
             return Err(StreamedResultPackageError::RelationLimit {
                 observed: relations.len(),
                 limit: self.limits.max_relations.get(),
@@ -835,6 +788,15 @@ impl StreamedResultPackageBuilder {
             .map_err(StreamedResultPackageError::CanonicalResponse)?;
         if recanonicalized != canonical_semantic_response {
             return Err(StreamedResultPackageError::NonCanonicalResponse);
+        }
+        if relations.is_empty()
+            && !super::query_block_outcomes::QueryBlockOutcomes::parse(&response)?
+                .is_some_and(|outcomes| outcomes.all_failed())
+        {
+            return Err(StreamedResultPackageError::RelationLimit {
+                observed: 0,
+                limit: self.limits.max_relations.get(),
+            });
         }
         relations.sort_by(|left, right| left.relation_id.cmp(&right.relation_id));
         for pair in relations.windows(2) {
@@ -1104,6 +1066,16 @@ impl StreamedResultPackageBuilder {
                 ..ResourceAmounts::default()
             })?;
             check_cancel_deadline(cancellation, deadline)?;
+            if manifest.pages.is_empty() {
+                publication_intent
+                    .record_publication_intent(PendingResultObjectSet {
+                        manifest_object_path: manifest_path.to_string(),
+                        page_object_paths: Vec::new(),
+                        epoch_id: hex(epoch_id.as_bytes()),
+                        query_execution: hex(query_execution.as_bytes()),
+                    })
+                    .await?;
+            }
             self.storage.create(&manifest_path, manifest_bytes).await?;
             Ok(SealedStreamedResultPackage {
                 epoch_id,
@@ -1466,11 +1438,16 @@ fn validate_manifest(
     manifest: &StreamedResultPackageManifest,
     limits: StreamedResultPackageLimits,
 ) -> Result<(), StreamedResultPackageError> {
-    manifest.query_results()?;
+    let all_failed = manifest.query_results()?.is_some_and(|outcomes| {
+        outcomes.iter().all(|outcome| {
+            outcome.execution_state
+                != crate::semantic_query_contract::QueryBlockExecutionState::Complete
+        })
+    });
     if manifest.format != STREAMED_RESULT_PACKAGE_FORMAT
-        || manifest.relations.is_empty()
+        || (manifest.relations.is_empty() && !all_failed)
         || manifest.relations.len() > limits.max_relations.get()
-        || manifest.pages.is_empty()
+        || (manifest.pages.is_empty() && !all_failed)
         || manifest.pages.len() > limits.max_pages.get()
         || manifest.processing.len() > manifest.relations.len()
         || manifest.processing.iter().any(|value| !value.validate())

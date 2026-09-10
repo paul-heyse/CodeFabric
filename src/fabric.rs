@@ -98,6 +98,8 @@ pub mod published_arrow_result;
 #[cfg(feature = "daemon")]
 pub mod query_artifact;
 #[cfg(feature = "daemon")]
+pub(crate) mod query_block_outcomes;
+#[cfg(feature = "daemon")]
 pub mod query_coordinator;
 #[cfg(feature = "daemon")]
 pub mod relation_publication_command_effect;
