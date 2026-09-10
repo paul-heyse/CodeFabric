@@ -2,6 +2,73 @@ use super::*;
 use arrow_array::{Array as _, BinaryArray};
 
 #[test]
+fn native_type_graph_includes_unreferenced_nested_declarations() {
+    let root = claim_001_temp_root("native-declaration-types");
+    std::fs::create_dir_all(&root).unwrap();
+    let source = b"class Unused:\n    def method(self, value: int) -> str:\n        return ''\ndef outer(value: bytes) -> bool:\n    def inner(text: str) -> int:\n        return 1\n    return True\n";
+    let mut context =
+        SemanticContext::test_only_fixture(&root, "native-declaration-types").unwrap();
+    let result = context
+        .analyze_modules(
+            &inventory_run(1),
+            &complete([inventory_module(&root, "main", source)]),
+        )
+        .unwrap();
+    let relation = result.modules[0]
+        .relations
+        .iter()
+        .find(|relation| relation.relation == PyreflyRelation::TypeNode)
+        .unwrap();
+    let batches = StreamReader::try_new(Cursor::new(&relation.arrow_ipc), None).unwrap();
+    let mut functions = BTreeSet::new();
+    let mut classes = BTreeSet::new();
+    for batch in batches {
+        let batch = batch.unwrap();
+        let kinds = batch
+            .column_by_name("type_kind")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let starts = batch
+            .column_by_name("definition_start_byte")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .unwrap();
+        let ends = batch
+            .column_by_name("definition_end_byte")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            if starts.is_null(row) {
+                continue;
+            }
+            let name = &source[usize::try_from(starts.value(row)).unwrap()
+                ..usize::try_from(ends.value(row)).unwrap()];
+            match kinds.value(row) {
+                "function" => {
+                    functions.insert(name.to_vec());
+                }
+                "class-object" => {
+                    classes.insert(name.to_vec());
+                }
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(
+        functions,
+        [b"method".to_vec(), b"outer".to_vec(), b"inner".to_vec()].into()
+    );
+    assert!(classes.contains(b"Unused".as_slice()));
+    drop(context);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 #[allow(
     clippy::too_many_lines,
     reason = "one checker run independently checks native structural distinctions and a bounded repeat"

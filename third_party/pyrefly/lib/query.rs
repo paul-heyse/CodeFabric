@@ -1367,7 +1367,7 @@ impl Query {
     where
         F: Fn(&TypeShapeContext, &Type) -> T,
     {
-        self.get_types_in_file_with_optional_timing(name, path, walker, transform, None)
+        self.get_types_in_file_with_optional_timing(name, path, walker, transform, None, None)
     }
 
     fn get_types_in_file_with_timing<T, F>(
@@ -1388,6 +1388,7 @@ impl Query {
             walker,
             transform,
             Some(&mut timing),
+            None,
         )?;
         timing.total = total_start.elapsed();
         Some((types, timing))
@@ -1400,6 +1401,7 @@ impl Query {
         walker: Option<&TypeQueryStmtWalker>,
         transform: F,
         mut timing: Option<&mut TypeQueryTiming>,
+        finish: Option<&dyn Fn(&TypeShapeContext, &[Stmt])>,
     ) -> Option<Vec<(PythonASTRange, T)>>
     where
         F: Fn(&TypeShapeContext, &Type) -> T,
@@ -1538,6 +1540,9 @@ impl Query {
             for stmt in &ast.body {
                 stmt.visit(&mut |x| visit_expr(x, None, &mut record_expr));
             }
+        }
+        if let Some(finish) = finish {
+            finish(&type_shape_context, &ast.body);
         }
         Some(res)
     }

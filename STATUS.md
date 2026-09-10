@@ -48,6 +48,21 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P03 in progress: block composition and first-four completion
 
+The P03 continuation after `695a51e2` adds a validated declaration-type census inside the existing
+Pyrefly expression-type transaction. Native Ruff AST visitation reaches unused and nested function/
+class declarations; exact native `Key::Definition`/`Answers::get_type_at` lookups seed the same
+bounded structural graph without inventing expression occurrences or repeating positional AST searches. This prepares native class-member discovery and improves callable evidence for unused
+definitions. Sidecar check/Clippy passes. Both focused native declaration/structural tests pass in 0.33 s
+(`/tmp/codefabric-p03-declaration-census-sidecar-tests.log`), including unused nested functions,
+methods and classes plus bounded graph/unchanged occurrence census behavior. The sidecar binary
+is rebuilt for the final indexed lookup. All 40 sidecar cases pass in 2.40 s
+(`/tmp/codefabric-p03-declaration-census-indexed-sidecar-all.log`); sidecar check/Clippy and
+affected root Clippy pass. The final installed public unused-function/prior/reopen case passes
+in 181.706 s (`/tmp/codefabric-p03-declaration-census-native-final.log`), including independent
+primitive type identities and exact-version facts. The earlier positional prototype also passed
+(196.511 s); those timings are not a controlled performance comparison. Docs, spelling and diff
+checks pass. Member extraction, full signature variants and P03 completion remain open.
+
 The callable-type continuation after `b6fa5af8` passes native validation. A new canonical
 `fact.code_callable_type` relation binds Python callable components through Pyrefly's native
 function-definition anchors and exact run/context/source keys, and Rust parameter/return types

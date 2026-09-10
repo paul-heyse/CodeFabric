@@ -960,6 +960,26 @@ uses the existing separate 180-second preparation helper. STATUS records command
 remaining startup qualification limit. Full declaration signatures, members, callable specializations,
 update/clean acceptance and P03/P06 remain open.
 
+**P03 declaration census passes native/public validation, 2026-09-10.**
+The next native boundary improvement replaces expression-use-dependent discovery. A finish hook
+inside the existing Pyrefly type-query transaction visits native function/class declarations,
+including nested bodies, looks up exact native `Key::Definition(ShortIdentifier)` bindings and
+export-boundary `Answers::get_type_at` values, and seeds the same bounded graph. This avoids a
+position-based AST search per declaration. It does
+not manufacture expression occurrences or infer types from rendered names. This supplies unused
+callable evidence and a class census for the ensuing native member path. Pinned Pyrefly
+`BindingClassField` exposes exact name ranges, native definition variants and `KeyClassField`
+answers; reuse those and structured native types for member normalization. Preserve descriptor
+roles, source-declaration identity and missing answers; effective inherited/MRO members need their
+own evidence. Sidecar check/Clippy and both focused native graph/census tests pass (0.33 s).
+All 40 sidecar tests pass with the final indexed lookup in 2.40 s. The rebuilt final sidecar
+passes installed public unused-function parameter/return retrieval, prior-result consumption
+and exact-version reopen in 181.706 s. Sidecar and affected root Clippy, docs, spelling and diff
+checks pass. This closes the unused-declaration discovery gap for supported native type variants;
+full signatures, member extraction and P03 completion remain open. ONT §11/§36 requires declared
+member evidence to stay distinct from resolved, inherited and descriptor lookup behavior in the
+next member slice.
+
 **Next:** remaining first-four scopes/meanings, reusable subject roles and precise dependency
 scope, then proceed to P04 in package order.
 Full source/syntax selection and remaining P03 acceptance are still open.

@@ -30,6 +30,8 @@ use super::{
 use crate::binding::binding::KeyUndecoratedFunctionRange;
 use ruff_text_size::Ranged;
 
+mod declarations;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeTypeKind {
     Any,
@@ -123,12 +125,22 @@ impl Query {
     ) -> Option<TypeFactsResponseData> {
         let presentation = RefCell::new(TypeTableBuilder::new());
         let structural = RefCell::new(GraphBuilder::new(maximum_nodes));
-        let types = self.get_types_in_file_transformed(name, path, None, |context, ty| {
-            (
-                type_to_indexed_shape(context, ty, &mut presentation.borrow_mut()),
-                structural.borrow_mut().index(context, ty),
-            )
-        })?;
+        let finish = |context: &TypeShapeContext, body: &[ruff_python_ast::Stmt]| {
+            declarations::collect(context, body, &mut structural.borrow_mut());
+        };
+        let types = self.get_types_in_file_with_optional_timing(
+            name,
+            path,
+            None,
+            |context, ty| {
+                (
+                    type_to_indexed_shape(context, ty, &mut presentation.borrow_mut()),
+                    structural.borrow_mut().index(context, ty),
+                )
+            },
+            None,
+            Some(&finish),
+        )?;
         let (old, native): (Vec<_>, Vec<_>) = types
             .into_iter()
             .map(|(location, (old, native))| {

@@ -52,19 +52,23 @@ fn primitive(owner: &Value, language: &str) -> String {
     encoded
 }
 
-fn is_target(row: &Value, language: &str) -> bool {
+fn is_named(row: &Value, language: &str, expected: &str) -> bool {
     row["language"] == language
         && row["name"].as_str().is_some_and(|name| {
-            name == "target" || (language == "rust" && name.ends_with("::target"))
+            name == expected || (language == "rust" && name.rsplit("::").next() == Some(expected))
         })
 }
 
 pub(super) fn assert_facts(fixture: &ProductionFixture, rows: &[Value]) {
     let declarations = canonical_diagnostic_rows(fixture, "fact.code_declaration");
-    for language in ["python", "rust"] {
+    for (language, name) in [
+        ("python", "target"),
+        ("rust", "target"),
+        ("python", "subject"),
+    ] {
         let owner = declarations
             .iter()
-            .find(|row| is_target(row, language))
+            .find(|row| is_named(row, language, name))
             .unwrap();
         let types = rows
             .iter()
@@ -119,11 +123,15 @@ pub(super) fn scoped(
     phase: &str,
 ) -> Vec<Vec<Value>> {
     let mut all = Vec::new();
-    for language in ["Python", "Rust"] {
+    for (language, name) in [
+        ("Python", "target"),
+        ("Rust", "target"),
+        ("Python", "subject"),
+    ] {
         let mut request = semantic_request(
             &fixture.workspace.public_id(),
-            &format!("request:callable-{language}-{phase}"),
-            &format!("{language} function named `target`"),
+            &format!("request:callable-{language}-{name}-{phase}"),
+            &format!("{language} function named `{name}`"),
         );
         let producer = request["queries"][0]["query_id"].clone();
         request["queries"].as_array_mut().unwrap().push(json!({
@@ -143,7 +151,7 @@ pub(super) fn scoped(
         );
         let path = write_modern_client_scenario(
             fixture,
-            &format!("callable-{language}-{phase}"),
+            &format!("callable-{language}-{name}-{phase}"),
             &scenario,
         );
         let report = modern_client_report(&run_modern_client(stack, &path));
@@ -169,7 +177,7 @@ pub(super) fn scoped(
         ));
         let path = write_modern_client_scenario(
             fixture,
-            &format!("callable-pages-{language}-{phase}"),
+            &format!("callable-pages-{language}-{name}-{phase}"),
             &scenario,
         );
         let report = modern_client_report(&run_modern_client(stack, &path));
@@ -180,7 +188,7 @@ pub(super) fn scoped(
         let declarations = canonical_diagnostic_rows(fixture, "fact.code_declaration");
         let owner = declarations
             .iter()
-            .find(|row| is_target(row, &language.to_ascii_lowercase()))
+            .find(|row| is_named(row, &language.to_ascii_lowercase(), name))
             .unwrap();
         assert!(rows.len() >= 2, "{rows:?}");
         assert!(
