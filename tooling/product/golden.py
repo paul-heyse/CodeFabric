@@ -78,7 +78,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--timeout",
         type=float,
-        help="per-case deadline; defaults to 240s, 600s for mixed cases, 900s for Python clean/live comparisons, 1200s for staged/Python edit sequences, 1500s for function-source comparisons, or 2100s for Python context/retention sequences",
+        help="per-case deadline; defaults to 240s, 600s for mixed cases, 900s for Python clean/live comparisons, 1200s for staged/Python edit sequences, 1500s for function-source comparisons, or 2100s for Python context/retention and processing pagination sequences",
     )
     parser.add_argument(
         "--output", type=Path, default=ROOT / "target/product/golden.json"
@@ -150,7 +150,6 @@ def main(argv=None) -> int:
                         "cargo-linkage-live",
                         "cargo-selections-live",
                         "decoded-source-live",
-                        "processing-pages",
                     },
                     600,
                 ),
@@ -160,6 +159,7 @@ def main(argv=None) -> int:
                 **dict.fromkeys({"staged-live", "python-live"}, 1200),
                 "function-source-live": 1500,
                 "python-context-live": 2100,
+                "processing-pages": 2100,
             }
             timeout = (
                 args.timeout if args.timeout is not None else defaults.get(name, 240)

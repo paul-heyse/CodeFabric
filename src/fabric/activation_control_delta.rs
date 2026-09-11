@@ -1670,7 +1670,7 @@ impl ActivationEventPort for DeltaActivationRuntimeAuthority {
                 .run_draining_mutation(
                     "activation-append",
                     crate::resource_budget::ResourceClass::Control,
-                    std::time::Instant::now() + std::time::Duration::from_secs(120),
+                    Some(std::time::Instant::now() + std::time::Duration::from_secs(120)),
                     move |_, _| async move {
                         let table = super::delta_exact::session_delta_table_builder(
                             pin.canonical_root().clone(), &session,

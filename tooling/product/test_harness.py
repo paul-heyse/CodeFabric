@@ -217,7 +217,7 @@ def test_clean_live_case_has_a_bounded_default_and_honors_explicit_deadline(
     if override is not None:
         args.extend(["--timeout", str(override)])
     assert golden.main(args) == 0
-    if override is None and case == "python-context-live":
+    if override is None and case in {"python-context-live", "processing-pages"}:
         expected = 2100
     elif override is None and case == "function-source-live":
         expected = 1500

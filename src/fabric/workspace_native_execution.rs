@@ -46,7 +46,7 @@ struct WorkspaceNativeOwner {
 struct WorkspaceNativeRequest<'a> {
     name: &'a str,
     class: ResourceClass,
-    deadline: Instant,
+    deadline: Option<Instant>,
     mutation: bool,
     cancellation_mode: NativeCancellationMode,
 }
@@ -136,7 +136,7 @@ impl WorkspaceNativeExecution {
             WorkspaceNativeRequest {
                 name,
                 class,
-                deadline,
+                deadline: Some(deadline),
                 mutation: false,
                 cancellation_mode: NativeCancellationMode::DropFuture,
             },
@@ -185,7 +185,7 @@ impl WorkspaceNativeExecution {
             WorkspaceNativeRequest {
                 name,
                 class,
-                deadline,
+                deadline: Some(deadline),
                 mutation: true,
                 cancellation_mode: NativeCancellationMode::DropFuture,
             },
@@ -214,7 +214,7 @@ impl WorkspaceNativeExecution {
             WorkspaceNativeRequest {
                 name,
                 class,
-                deadline,
+                deadline: Some(deadline),
                 mutation: false,
                 cancellation_mode: NativeCancellationMode::DrainFuture,
             },
@@ -226,11 +226,13 @@ impl WorkspaceNativeExecution {
 
     /// The callback observes cancellation between bounded writes and joins every started
     /// write. Its runtime stays alive through that drain, including after the caller leaves.
+    /// A finite background work set uses no wall-clock deadline; it remains resource-bounded
+    /// and cancellable through its owned scope. Caller/control operations retain deadlines.
     pub(crate) async fn run_draining_mutation<T, E, F, O>(
         &self,
         name: &str,
         class: ResourceClass,
-        deadline: Instant,
+        deadline: Option<Instant>,
         operation: O,
     ) -> Result<T, NativeLaneError>
     where

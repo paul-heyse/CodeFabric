@@ -17,6 +17,10 @@ fn processing_remainder_pages_keep_exact_scope_across_reopen_and_updates() {
         .unwrap();
     }
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    // This case tests retained pagination across a completed repair. Full semantic publication
+    // is a setup prerequisite, independently of any individual public query's freshness deadline.
+    let initial =
+        wait_for_semantic_activation_with_timeout(&fixture, Duration::from_secs(600));
     let find = semantic_request(
         &fixture.workspace.public_id(),
         "unused",
@@ -90,6 +94,11 @@ fn processing_remainder_pages_keep_exact_scope_across_reopen_and_updates() {
         )
         .unwrap();
     }
+    wait_for_semantic_activation_after_generation(
+        &fixture,
+        Some(initial.row().pins.source_generation.get()),
+        Duration::from_secs(600),
+    );
     let repaired = public_query(&fixture, &stack, "remainder-repaired", find);
     assert_eq!(repaired.rows.len(), 1);
     let scenario = modern_client_scenario(

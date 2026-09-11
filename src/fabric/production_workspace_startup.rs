@@ -120,8 +120,9 @@ pub(super) mod syntax_cache;
 mod updates;
 
 // A started Delta write has no supported mid-write cancellation hook. Keep driving its native
-// runtime for the same finite interval admitted to publication, rather than treating it as a
-// disposable async task. The supervisor reserves an additional 30 seconds for control delivery
+// runtime through a finite shutdown drain, rather than treating it as a disposable async task.
+// Background publication itself is bounded by its work set and resources, not this shutdown
+// allowance. The supervisor reserves an additional 30 seconds for control delivery
 // and finalization. A failed join still retains the writer fence.
 pub(crate) const WORKSPACE_OPERATION_DRAIN_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -384,7 +385,7 @@ async fn open_activation_authority(
             .run_draining_mutation(
                 "activation-control-provision",
                 crate::resource_budget::ResourceClass::Control,
-                Instant::now() + Duration::from_secs(120),
+                Some(Instant::now() + Duration::from_secs(120)),
                 move |_, _| async move {
                     let (pin, _table) =
                         provision_activation_control_history(provision_root, &provision_session)
@@ -1091,9 +1092,11 @@ async fn build_fresh_candidate(
         .native_execution(task_scope)
         .map_err(|error| step("candidate-publish-executor", error))?
         .run_draining_mutation(
-            "candidate-publish",
-            crate::resource_budget::ResourceClass::Data,
-            Instant::now() + Duration::from_secs(120),
+                "candidate-publish",
+                crate::resource_budget::ResourceClass::Data,
+                // Source/semantic publication is workspace-owned background work. A caller's
+                // freshness timeout must not abandon a valid, still-advancing full CPG build.
+                None,
             move |cancellation, _| async move {
                 publish_fresh_candidate(
                     source,

@@ -3768,6 +3768,14 @@ fn wait_for_semantic_activation_with_timeout(
     fixture: &ProductionFixture,
     timeout: Duration,
 ) -> PersistedActivationControlRow {
+    wait_for_semantic_activation_after_generation(fixture, None, timeout)
+}
+
+fn wait_for_semantic_activation_after_generation(
+    fixture: &ProductionFixture,
+    after_generation: Option<u64>,
+    timeout: Duration,
+) -> PersistedActivationControlRow {
     use arrow::array::{Array as _, BooleanArray};
     let deadline = Instant::now() + timeout;
     loop {
@@ -3775,21 +3783,25 @@ fn wait_for_semantic_activation_with_timeout(
             .into_iter()
             .max_by_key(|row| row.row().ordinal.get())
             .expect("durable activation");
-        let state = selected_relation_batches(&selected, "source.input_inventory_state");
-        let rows = state.iter().map(RecordBatch::num_rows).sum::<usize>();
-        assert_eq!(rows, 1, "one exact source inventory state");
-        let pending = state
-            .iter()
-            .find(|batch| batch.num_rows() == 1)
-            .unwrap()
-            .column_by_name("semantic_pending")
-            .is_some_and(|column| {
-                let values = column.as_any().downcast_ref::<BooleanArray>().unwrap();
-                assert!(!values.is_null(0));
-                values.value(0)
-            });
-        if !pending {
-            return selected;
+        if after_generation
+            .is_none_or(|generation| selected.row().pins.source_generation.get() > generation)
+        {
+            let state = selected_relation_batches(&selected, "source.input_inventory_state");
+            let rows = state.iter().map(RecordBatch::num_rows).sum::<usize>();
+            assert_eq!(rows, 1, "one exact source inventory state");
+            let pending = state
+                .iter()
+                .find(|batch| batch.num_rows() == 1)
+                .unwrap()
+                .column_by_name("semantic_pending")
+                .is_some_and(|column| {
+                    let values = column.as_any().downcast_ref::<BooleanArray>().unwrap();
+                    assert!(!values.is_null(0));
+                    values.value(0)
+                });
+            if !pending {
+                return selected;
+            }
         }
         assert!(
             Instant::now() < deadline,

@@ -73,7 +73,7 @@ const ABANDONED_ADAPTER_EXIT_POLL: Duration = Duration::from_millis(25);
 const DAEMON_CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const DAEMON_ACCEPTED_WORK_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 // Source publication joins started native writes after accepted-query drain. Its finite
-// 120-second operation interval needs separate headroom from ordinary control I/O.
+// 120-second shutdown allowance needs separate headroom from ordinary control I/O.
 const DAEMON_WORKSPACE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(150);
 const SUPERVISOR_RENDEZVOUS_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const SUPERVISOR_RENDEZVOUS_HANDLE_TIMEOUT: Duration = Duration::from_secs(6);

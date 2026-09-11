@@ -61,11 +61,13 @@ slow-timeout = { period = "60s", terminate-after = 30 }
 
 [[profile.default.overrides]]
 filter = 'test(processing_remainder_pages_keep_exact_scope_across_reopen_and_updates)'
-slow-timeout = { period = "60s", terminate-after = 5 }
+# Two complete 131-file publications, exact reopen and retained native pages. This is a
+# generous hang bound around the whole scenario, not a publication performance target.
+slow-timeout = { period = "60s", terminate-after = 30 }
 
 [[profile.ci.overrides]]
 filter = 'test(processing_remainder_pages_keep_exact_scope_across_reopen_and_updates)'
-slow-timeout = { period = "60s", terminate-after = 5 }
+slow-timeout = { period = "60s", terminate-after = 30 }
 
 [profile.ci]
 fail-fast = false

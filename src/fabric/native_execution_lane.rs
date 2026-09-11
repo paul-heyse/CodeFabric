@@ -151,7 +151,8 @@ pub(crate) struct NativeLaneAdmission<'a> {
     pub name: &'a str,
     pub budget: &'a ResourceBudget,
     pub class: ResourceClass,
-    pub deadline: Instant,
+    /// Caller/control deadline; bounded background work uses scope cancellation instead.
+    pub deadline: Option<Instant>,
     pub cancellation_mode: NativeCancellationMode,
 }
 
@@ -433,17 +434,23 @@ impl NativeExecutionLane {
                         if probe.is_cancelled() {
                             return Err(NativeLaneError::Cancelled);
                         }
-                        if Instant::now() >= deadline {
+                        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                             return Err(NativeLaneError::Deadline);
                         }
                         // The future is constructed inside the private runtime, including libraries
                         // that capture Handle::current while creating a table, engine or stream.
                         let future = operation(probe.clone());
                         tokio::pin!(future);
+                        let deadline_elapsed = async {
+                            match deadline {
+                                Some(deadline) => tokio::time::sleep_until(deadline.into()).await,
+                                None => std::future::pending::<()>().await,
+                            }
+                        };
                         let interrupted = tokio::select! {
                             biased;
                             () = scope.cancelled() => NativeLaneError::Cancelled,
-                            () = tokio::time::sleep_until(deadline.into()) => NativeLaneError::Deadline,
+                            () = deadline_elapsed => NativeLaneError::Deadline,
                             result = &mut future => {
                                 let value = result.map_err(NativeLaneError::into_owned_failure)?;
                                 value.validate_retained_owner(&output_budget)?;
@@ -613,7 +620,7 @@ mod tests {
             name: "native",
             budget,
             class,
-            deadline: Instant::now() + Duration::from_secs(10),
+            deadline: Some(Instant::now() + Duration::from_secs(10)),
             cancellation_mode: NativeCancellationMode::DropFuture,
         }
     }
@@ -743,7 +750,11 @@ mod tests {
         let mut request = admission(&root, &budget, ResourceClass::Data);
         request.cancellation_mode = NativeCancellationMode::DrainFuture;
         if deadline {
-            request.deadline = Instant::now() + Duration::from_secs(1);
+            request.deadline = Some(Instant::now() + Duration::from_secs(1));
+        } else {
+            // Background publication has no caller deadline, but scope cancellation must
+            // still retain and join the kernel dependency before returning its outcome.
+            request.deadline = None;
         }
         let (started, running) = tokio::sync::oneshot::channel();
         let (release, released) = tokio::sync::oneshot::channel();
@@ -808,7 +819,7 @@ mod tests {
         let (started, running) = tokio::sync::oneshot::channel();
         let (cleaning, cleanup_started) = tokio::sync::oneshot::channel();
         let mut request = admission(&root, &budget, ResourceClass::Data);
-        request.deadline = Instant::now() + Duration::from_secs(1);
+        request.deadline = Some(Instant::now() + Duration::from_secs(1));
         let task = lane
             .spawn(
                 request,
@@ -955,9 +966,11 @@ mod tests {
         let constructed = Arc::new(AtomicBool::new(false));
         let work = constructed.clone();
         let mut request = admission(&root, &budget, ResourceClass::Data);
-        request.deadline = Instant::now()
-            .checked_sub(Duration::from_millis(1))
-            .unwrap();
+        request.deadline = Some(
+            Instant::now()
+                .checked_sub(Duration::from_millis(1))
+                .unwrap(),
+        );
         let result = lane
             .spawn(
                 request,
