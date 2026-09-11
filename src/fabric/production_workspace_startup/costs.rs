@@ -28,6 +28,7 @@ struct Report {
     relation_versions: usize,
     reused_relation_versions: usize,
     workspace_syntax_cache: Option<super::syntax_cache::SyntaxCacheObservation>,
+    workspace_pyrefly_cache: Option<super::pyrefly_cache::PyreflyCacheObservation>,
     finished: bool,
     phases: Vec<PhaseCost>,
 }
@@ -55,6 +56,7 @@ impl PreparationCosts {
                 relation_versions: 0,
                 reused_relation_versions: 0,
                 workspace_syntax_cache: None,
+                workspace_pyrefly_cache: None,
                 finished: false,
                 phases: Vec::with_capacity(12),
             },
@@ -72,6 +74,13 @@ impl PreparationCosts {
         observation: super::syntax_cache::SyntaxCacheObservation,
     ) {
         self.report.workspace_syntax_cache = Some(observation);
+    }
+
+    pub(super) fn pyrefly_cache(
+        &mut self,
+        observation: super::pyrefly_cache::PyreflyCacheObservation,
+    ) {
+        self.report.workspace_pyrefly_cache = Some(observation);
     }
 
     pub(super) fn start(&mut self, phase: &'static str) {

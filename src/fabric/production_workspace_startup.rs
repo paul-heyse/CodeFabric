@@ -112,6 +112,7 @@ mod input_observations;
 mod inputs;
 mod processing;
 mod pyrefly;
+pub(super) mod pyrefly_cache;
 mod rust_syntax;
 mod rustc;
 mod source_context;
@@ -848,6 +849,13 @@ fn build_fresh_native_source(
         cancellation.clone(),
         work,
     )?;
+    costs.pyrefly_cache(
+        workspace_resources
+            .pyrefly_cache()
+            .lock()
+            .map_err(|error| step("pyrefly-cache-owner", error))?
+            .observation(),
+    );
     costs.start("cargo-rustc");
     let rustc = rustc::run(
         &workspace_root,
@@ -1374,6 +1382,12 @@ async fn compose_production_workspace(
             "slot or writer lease was substituted",
         ));
     }
+    workspace_resources
+        .pyrefly_cache()
+        .lock()
+        .map_err(|error| step("pyrefly-cache-owner", error))?
+        .bind(&task_scope)
+        .map_err(|error| step("pyrefly-cache-lifetime", error))?;
     let (observation, updates) = super::workspace_updates::WorkspaceObservation::new();
     let observation = Arc::new(observation);
     let source_root = PathBuf::from(OsString::from_vec(record.root_path_bytes.clone()));

@@ -48,10 +48,10 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 
 ## P04 retained inputs and syntax — implementation in progress
 
-P03's related-context integration and handoff are committed in `75687368`. The current P04
-working tree adds immutable-input pin reuse and workspace-owned parser state. P04 remains open;
-retained Pyrefly/Cargo contexts, complete invalidation/topology and shared update scheduling still
-follow in this package. P05–P14 remain open.
+P03's related-context integration is committed in `75687368`. P04's immutable-input pin reuse and
+workspace-owned syntax checkpoint is committed in `55c69cdd`. The working tree now integrates a
+retained Pyrefly service; its acceptance is in progress. P04 remains open: retained Cargo contexts,
+complete invalidation/topology and shared update scheduling still follow. P05–P14 remain open.
 
 Exact source bytes and line indexes now declare identities over their producer revision, workspace,
 generation, captured inventory and actual admitted image/line-index identities. Matching descriptors
@@ -91,9 +91,49 @@ fresh native trees, Ruff cache admission, eviction with held Arrow facts and can
 Final default/featureless `just root-check` passes in
 `/tmp/codefabric-p04-retained-syntax-root-final.log`; affected Clippy reports zero changed-line
 diagnostics in `/tmp/codefabric-p04-retained-syntax-clippy-final.jsonl`. Existing root warnings remain.
-All 40 product-harness tests pass in 0.74 s with focused Python lint/format clean. Installed combined
-clean/race/restart checks are running in `/tmp/codefabric-p04-retained-syntax-native-v2.log`; their
-acceptance remains pending. No full CI, doctest or outcome-completion claim is made.
+All 40 product-harness tests pass in 0.74 s with focused Python lint/format clean. The installed
+live/clean function definitions, bodies and outlines case passes in 899.664 s against the syntax
+checkpoint; the separate race/restart case passes in 814.946 s (two total, 1714.614 s;
+`/tmp/codefabric-p04-retained-syntax-native-v2.log`). Root checks overlapped parts of that native
+execution, so this is correctness evidence and an observed duration, not an isolated benchmark.
+No full CI, doctest or outcome-completion claim is made.
+
+The current Pyrefly continuation retains one contained checker under the workspace task scope.
+A stable read-only mount contains only captured Python input views; the sidecar's existing writable
+checker view receives digest-verified generations and native categorized changes serially. Its
+existing complete inventory fallback reconstructs native state after deletion. Configuration,
+provider executable metadata or ceiling changes retire the process; failed/partial runs, removal of
+the last Python file and ten-minute idle expiry also retire it. Failed joins retain ownership and
+block replacement. Census skips a busy checker so source observation can still cancel obsolete work.
+
+The process owner now retains the private socket-directory descriptor through actual cleanup,
+including cancelled construction. It samples aggregate cgroup CPU and peak memory every 250 ms;
+between-run rotation after 600 accumulated CPU seconds avoids consuming a fresh job's allowance
+from a one-shot lifetime limit. The contained service has an 1800-second cumulative CPU guard;
+per-run wall deadlines and memory/process containment are unchanged. One private writable output
+root is cleared only before launch or after a proved join; captured input/history is separate.
+Counters report starts, reuse attempts, retirement and retained generations. These changes do not
+claim complete shared CPU scheduling or representative memory calibration.
+
+Initial Pyrefly wiring passes default/featureless checks. The two updated actual process-owner
+cases pass (0.111/0.113 s) in `/tmp/codefabric-p04-pyrefly-retained-native.log`; cancelled construction
+keeps the socket descriptor and residency until join. The initial installed Python corpus stops
+at its 216.524-second reuse assertion: adding a module
+changes the canonical manifest's module map, so this is a new effective context. The corrected
+corpus tests real retained-checker call-target changes and restoration with a stable module map;
+inventory/configuration changes require fresh contexts and still compare with independent clean
+queries. The final cleanup/ownership selection passes all three cases in 0.238 s
+(`/tmp/codefabric-p04-pyrefly-cleanup-focused.log`), including symlink-safe private-output removal.
+Default/featureless checks pass in `/tmp/codefabric-p04-pyrefly-root-final.log`; final affected
+Clippy is clean in `/tmp/codefabric-p04-pyrefly-cache-clippy-v4.jsonl`, including the extracted
+context-transition assertion helper. The final installed corpus is running in
+`/tmp/codefabric-p04-pyrefly-retained-final-native.log`; source-only generation 2 records one
+process start, one reuse and two completed generations. Whole-corpus acceptance remains pending. The expanded eight-state context corpus now has an 1800-second nextest bound
+and 2100-second product-wrapper bound: the first one-file semantic pass alone spends 60.974 s in
+relational execution/Delta writes, while the kernel sample reports 245 ms of provider-group CPU. The
+initial failed invocation had a 900-second bound. These are observed
+small-fixture costs, not representative performance results. The final 40-case harness run passes in 0.70 s with the revised timeout expectations,
+and focused Python lint/format and documentation navigation pass.
 
 ## P03 first-release query boundary delivered
 

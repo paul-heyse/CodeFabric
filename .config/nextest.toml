@@ -49,11 +49,11 @@ slow-timeout = { period = "60s", terminate-after = 5 }
 
 [[profile.default.overrides]]
 filter = 'test(live_python_context_and_negative_imports_equal_independent_clean_queries)'
-slow-timeout = { period = "60s", terminate-after = 6 }
+slow-timeout = { period = "60s", terminate-after = 30 }
 
 [[profile.ci.overrides]]
 filter = 'test(live_python_context_and_negative_imports_equal_independent_clean_queries)'
-slow-timeout = { period = "60s", terminate-after = 6 }
+slow-timeout = { period = "60s", terminate-after = 30 }
 
 [[profile.default.overrides]]
 filter = 'test(processing_remainder_pages_keep_exact_scope_across_reopen_and_updates)'

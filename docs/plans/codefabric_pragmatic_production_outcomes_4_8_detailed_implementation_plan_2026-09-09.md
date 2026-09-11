@@ -1648,8 +1648,35 @@ All 21 focused adapter/ownership tests pass, including Unicode/disjoint edits ag
 trees, Ruff cache admission, owned Arrow survival through eviction and cancellation recovery.
 Default/featureless root checks and affected Clippy pass. Installed source/semantic
 race/restart and independent live/clean source/CST scenarios must pass with this owner enabled.
-The exact-input Delta branch in §8A passed its installed predecessor scenario; final combined
-parser/Delta integration is not yet accepted. Retained checker/Cargo state and scheduling remain open.
+The syntax/pin-reuse checkpoint is committed in `55c69cdd`. Its installed independent live/clean
+function-source scenario passes in 899.664 s; source/semantic race/restart passes in 814.946 s. Root checks
+overlap part of that duration, so it is not an isolated performance sample. STATUS records logs.
+Retained Cargo state, complete invalidation and shared scheduling remain open.
+
+**P04 checker continuation (2026-09-10; implementation under validation).** Production now retains
+one contained Pyrefly process beneath the workspace cancellation scope. The exact resolved context
+manifest selects native checker compatibility; fresh full inventories and their support evidence
+are still validated for every run. A stable read-only Python input-view mount exposes atomically
+published captures across generations. The sidecar's existing private writable view applies only
+verified captured bytes, uses native `Query::change_files` and exports all selected modules because
+the pinned API does not expose a complete affected set. Native deletion reconstructs `Query` before
+reloading the remaining inventory (Pyrefly reference §6, State, transactions, Require, epochs, and
+incrementality; resolved local `third_party/pyrefly/lib/query.rs`).
+
+Configuration/executable metadata/ceiling drift, incomplete runs, last-module deletion and idle
+expiry retire the owned process. Failed joins prevent replacement; periodic census skips busy
+checker mutation. The process worker owns its socket directory descriptor through termination,
+including dropped construction. Aggregate cgroup CPU/peak-memory samples support observation and
+between-run CPU-based retirement; the service's cumulative CPU guard accounts for its retained
+lifetime while job wall deadlines remain unchanged. Mutable checker output is cleared only with
+no process owner, preserving captured inputs and published Arrow facts. The installed corpus adds
+source-only call-target edits/restoration with native reuse counters, plus module and configuration
+changes with independent clean-query comparisons. The current canonical manifest includes the
+module map, so adding/removing a module selects a new context rather than retaining an incompatible
+one. An initial test incorrectly expected reuse across that change; the corrected corpus preserves
+the existing context authority. All three focused cleanup/ownership cases pass. Final installed
+native acceptance is still pending;
+this does not finish P04 or shared cost-aware scheduling.
 
 **Remaining implementation progression (E02/E04/E05/E12/E21/E22; P04).**
 
@@ -2139,8 +2166,10 @@ Focused tests pass for retained duplicate rows, changed/empty replacements, inel
 abandoned candidates and mixed-vector reopen. The installed source/semantic race/restart scenario
 passes in 792.455 s before parser-cache integration, verifying source-pin reuse and generation
 separation; three Delta tests bring that run to four passing cases in 794.051 s. Preparation costs
-count reused pins. The final combined parser/Delta working tree still needs installed acceptance.
-Provider/parser/Cargo retention, broader invalidation and owner-level reuse remain open in P04.
+count reused pins. The combined syntax/Delta checkpoint passes both installed live/clean and
+race/restart cases (899.664/814.946 s); STATUS records the exact commands, overlap and limits.
+Retained Pyrefly integration is under validation. Cargo retention, broader invalidation and
+owner-level reuse remain open in P04.
 
 **Remaining implementation progression (E11/E22/E24; P04/P12).**
 

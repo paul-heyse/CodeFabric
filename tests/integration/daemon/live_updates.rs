@@ -653,10 +653,55 @@ fn python_context_calls(
     vec![entities, calls]
 }
 
+fn pyrefly_cache_observation(fixture: &ProductionFixture) -> Value {
+    let costs: Value = serde_json::from_slice(
+        &fs::read(
+            fixture
+                .fabric_workspace_root()
+                .join("semantic-preparation-costs.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    costs["workspace_pyrefly_cache"].clone()
+}
+
+fn assert_pyrefly_cache_transition(
+    phase: &str,
+    cache: &Value,
+    prior_cache: &Value,
+    selected: Option<&str>,
+) {
+    if matches!(phase, "warm-source-edited" | "warm-source-restored") {
+        assert_eq!(
+            cache["process_starts"], prior_cache["process_starts"],
+            "{phase}: same contained process"
+        );
+        assert!(
+            cache["reused_runs"].as_u64().unwrap() > prior_cache["reused_runs"].as_u64().unwrap(),
+            "{phase}: native checker reuse: {cache}"
+        );
+        assert_eq!(cache["retained_processes"], 1);
+    } else if selected.is_some() {
+        assert!(
+            cache["process_starts"].as_u64().unwrap()
+                > prior_cache["process_starts"].as_u64().unwrap(),
+            "{phase}: configuration retires incompatible process: {cache}"
+        );
+        assert_eq!(cache["retained_processes"], 1);
+    } else {
+        assert_eq!(
+            cache["retained_processes"], 0,
+            "incomplete run retires native state"
+        );
+    }
+}
+
 #[test]
 fn live_python_context_and_negative_imports_equal_independent_clean_queries() {
     let fixture = ProductionFixture::with_source(b"import sys\nfrom dependency import imported\ndef legacy():\n    return 1\ndef current():\n    return 2\nif sys.version_info >= (3, 14) and sys.platform == 'linux':\n    selected = current\nelse:\n    selected = legacy\ndef caller():\n    return selected() + imported()\n");
     let root = Path::new(&fixture.workspace.root_path_display);
+    let original_source = fs::read_to_string(root.join("sample.py")).unwrap();
     fs::write(
         root.join("pyrefly.toml"),
         "python-version = '3.14'\npython-platform = 'linux'\n",
@@ -671,13 +716,30 @@ fn live_python_context_and_negative_imports_equal_independent_clean_queries() {
         .unwrap();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
     let initial = python_context_calls(&fixture, &stack, "missing-import", Some("current"), false);
+    let mut prior_cache = pyrefly_cache_observation(&fixture);
+    assert_eq!(prior_cache["process_starts"], 1);
+    assert_eq!(prior_cache["retained_processes"], 1);
     for (phase, version, platform, present, selected) in [
+        ("warm-source-edited", "3.14", "linux", false, Some("legacy")),
+        (
+            "warm-source-restored",
+            "3.14",
+            "linux",
+            false,
+            Some("current"),
+        ),
         ("import-created", "3.14", "linux", true, Some("current")),
         ("older-python", "3.12", "linux", true, Some("legacy")),
         ("other-platform", "3.14", "win32", true, Some("legacy")),
         ("unsupported-setting", "3.14", "linux", true, None),
         ("import-deleted", "3.14", "linux", false, Some("current")),
     ] {
+        let source = if phase == "warm-source-edited" {
+            original_source.replace("selected = current", "selected = legacy")
+        } else {
+            original_source.clone()
+        };
+        fs::write(root.join("sample.py"), source).unwrap();
         fs::write(
             root.join("pyrefly.toml"),
             format!(
@@ -696,10 +758,13 @@ fn live_python_context_and_negative_imports_equal_independent_clean_queries() {
                 b"def imported():\n    return 4\n",
             )
             .unwrap();
-        } else {
+        } else if root.join("dependency.py").exists() {
             fs::remove_file(root.join("dependency.py")).unwrap();
         }
         let live = python_context_calls(&fixture, &stack, phase, selected, present);
+        let cache = pyrefly_cache_observation(&fixture);
+        assert_pyrefly_cache_transition(phase, &cache, &prior_cache, selected);
+        prior_cache = cache;
         let clean = clean_fixture(&fixture, &registration, &stack);
         let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
         let expected =
@@ -708,7 +773,7 @@ fn live_python_context_and_negative_imports_equal_independent_clean_queries() {
             live, expected,
             "{phase}: context/dependency replacement must equal clean semantics"
         );
-        if !present {
+        if !present && selected == Some("current") {
             assert_eq!(
                 live, initial,
                 "restoring the original inputs restores their exact semantics"

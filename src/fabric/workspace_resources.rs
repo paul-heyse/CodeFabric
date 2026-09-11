@@ -26,6 +26,8 @@ pub(crate) struct ProductionWorkspaceResources {
     operational_writer: Arc<std::sync::Mutex<()>>,
     syntax_cache:
         Arc<std::sync::Mutex<super::production_workspace_startup::syntax_cache::SyntaxCache>>,
+    pyrefly_cache:
+        Arc<std::sync::Mutex<super::production_workspace_startup::pyrefly_cache::PyreflyCache>>,
     native: WorkspaceFabricResources,
     scheduler: WorkspaceResourceCoordinator,
     config: ProductionActiveWorkspaceConfig,
@@ -122,6 +124,11 @@ impl ProductionWorkspaceResources {
             syntax_cache: Arc::new(std::sync::Mutex::new(
                 super::production_workspace_startup::syntax_cache::SyntaxCache::new(budget.clone()),
             )),
+            pyrefly_cache: Arc::new(std::sync::Mutex::new(
+                super::production_workspace_startup::pyrefly_cache::PyreflyCache::new(
+                    budget.clone(),
+                ),
+            )),
             budget,
             native,
             scheduler,
@@ -139,6 +146,13 @@ impl ProductionWorkspaceResources {
     ) -> &Arc<std::sync::Mutex<super::production_workspace_startup::syntax_cache::SyntaxCache>>
     {
         &self.syntax_cache
+    }
+
+    pub(in crate::fabric) fn pyrefly_cache(
+        &self,
+    ) -> &Arc<std::sync::Mutex<super::production_workspace_startup::pyrefly_cache::PyreflyCache>>
+    {
+        &self.pyrefly_cache
     }
 
     /// Serializes short operational writes; provider computation never retains this gate.

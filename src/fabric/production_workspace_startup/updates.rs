@@ -127,6 +127,7 @@ impl SourceUpdateOwner {
         let observed = observation.clone();
         let writer = Arc::clone(self.resources.operational_writer());
         let syntax_cache = Arc::clone(self.resources.syntax_cache());
+        let pyrefly_cache = Arc::clone(self.resources.pyrefly_cache());
         let guard = budget
             .try_reserve(
                 ResourceClass::Control,
@@ -143,6 +144,15 @@ impl SourceUpdateOwner {
                     .lock()
                     .map_err(|error| step("syntax-cache-owner", error))?
                     .evict_idle(Instant::now());
+                // Census must not wait behind an active checker mutation. Idle maintenance
+                // is opportunistic; source observation and obsolete-work cancellation proceed.
+                match pyrefly_cache.try_lock() {
+                    Ok(mut cache) => tokio::runtime::Handle::current()
+                        .block_on(cache.evict_idle(Instant::now()))
+                        .map_err(|error| step("pyrefly-idle-retirement", error))?,
+                    Err(std::sync::TryLockError::WouldBlock) => {}
+                    Err(error) => return Err(step("pyrefly-cache-owner", error)),
+                }
                 let _writer = writer
                     .lock()
                     .map_err(|error| step("source-census-writer", error))?;

@@ -4,7 +4,7 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::cancellation::{Cancellation, StructuredCancellationScope};
+use crate::cancellation::Cancellation;
 use crate::identity::{IdentityDomain, encode_public_id};
 use crate::provider_admission::{
     ExactProviderLaneRuns, ProviderLaneGap, pyrefly_source_pin_from_modules,
@@ -42,7 +42,7 @@ impl PyreflyOutcome {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum StartupPyreflyError {
+pub(super) enum StartupPyreflyError {
     #[error(transparent)]
     Provider(#[from] crate::pyrefly_service::PyreflyServiceError),
     #[error("Pyrefly process cleanup did not join: {0}")]
@@ -50,7 +50,8 @@ enum StartupPyreflyError {
 }
 
 /// Called inside the source operation's owned blocking task. The existing daemon runtime
-/// drives UDS traffic; the blocking task retains the input leases until process cleanup joins.
+/// drives UDS traffic; the blocking task retains input leases through complete extraction.
+/// The workspace scope retains the contained checker across compatible generations.
 pub(super) fn run(
     workspace_root: &Path,
     release: &CompiledSemanticRelease,
@@ -60,7 +61,9 @@ pub(super) fn run(
     cancellation: Cancellation,
     work: super::PublicationWork<'_>,
 ) -> Result<PyreflyOutcome, ProductionWorkspaceStartupError> {
-    let super::PublicationWork { scope, stage, .. } = work;
+    let super::PublicationWork {
+        resources, stage, ..
+    } = work;
     let images = inputs
         .capture()?
         .images()
@@ -90,6 +93,15 @@ pub(super) fn run(
         gap: ProviderLaneGap::RequiredInputAbsent,
     };
     if images.is_empty() {
+        tokio::runtime::Handle::current()
+            .block_on(
+                resources
+                    .pyrefly_cache()
+                    .lock()
+                    .map_err(|error| step("pyrefly-cache-owner", error))?
+                    .retire(),
+            )
+            .map_err(|error| step("pyrefly-empty-retirement", error))?;
         return Ok(outcome);
     }
     if stage == super::PublicationStage::Source {
@@ -129,15 +141,24 @@ pub(super) fn run(
         b"codefabric.startup.pyrefly-run.v1\0",
         &[&source_pin.0, &context.effective_input_identity()],
     );
+    // A stable read-only mount contains only daemon-published Python input views. The
+    // checker copies each verified generation into its own writable native workspace.
+    let provider_root = workspace_root.join("pyrefly-workspace");
+    super::private_directory(&provider_root)?;
     let view = publish_provider_workspace_view(
-        workspace_root,
-        &lower_hex(&run_id),
+        &provider_root,
+        "pyrefly-workspace-service.v1",
         inputs.inventory.workspace_id(),
         generation,
         &images,
         &DependencyInputBundle::empty(),
     )
     .map_err(|error| step("pyrefly-source-view", error))?;
+    let input_root = provider_root.join("provider-views");
+    let mounted_view = view
+        .workspace_root
+        .strip_prefix(&input_root)
+        .map_err(|error| step("pyrefly-mounted-input", error))?;
     let modules = images
         .iter()
         .zip(&ids)
@@ -151,7 +172,9 @@ pub(super) fn run(
                 file_id: id.clone(),
                 module_name: binding.qualified_name.clone(),
                 source_blob_path: view.workspace_root.join(relative),
-                provider_source_blob_path: Path::new("/workspace").join(relative),
+                provider_source_blob_path: Path::new("/workspace")
+                    .join(mounted_view)
+                    .join(relative),
                 content_digest: format!("b3:{}", lower_hex(&image.digest)),
             })
         })
@@ -238,13 +261,19 @@ pub(super) fn run(
             },
         )
         .map_err(|error| step("pyrefly-job", error))?;
-    let result = tokio::runtime::Handle::current().block_on(analyze(
-        prepared.job(),
-        input,
-        executable,
-        view,
-        scope,
-    ));
+    let result = tokio::runtime::Handle::current().block_on(
+        resources
+            .pyrefly_cache()
+            .lock()
+            .map_err(|error| step("pyrefly-cache-owner", error))?
+            .analyze(
+                prepared.job(),
+                input,
+                executable,
+                &input_root,
+                view.output_root,
+            ),
+    );
     match result {
         Ok(result) => {
             outcome.gap = match result.result().terminal() {
@@ -279,94 +308,4 @@ pub(super) fn run(
         }
     }
     Ok(outcome)
-}
-
-#[cfg(target_os = "linux")]
-async fn analyze(
-    job: &crate::provider_contracts::ProviderJob,
-    input: PyreflyWorkspaceInput,
-    executable: PathBuf,
-    view: crate::source_image::ProviderWorkspaceView,
-    scope: &StructuredCancellationScope,
-) -> Result<crate::pyrefly_service::PyreflyProviderRunResult, StartupPyreflyError> {
-    use crate::provider_sandbox::{
-        CompiledProviderSeccomp, GeneratedSandboxProfile, ProviderLaunchRequest,
-        ProviderProcessLimits, ProviderSandboxLaunchMaterial, ProviderSandboxLauncher,
-        ProviderTrustProfile, SandboxCapabilityMatrix, SandboxMechanism,
-    };
-    use crate::pyrefly_service::{
-        PyreflyServiceError, SupervisedPyreflyWorkspace, analyze_pyrefly_uds,
-    };
-    use std::collections::BTreeMap;
-    use std::os::fd::AsRawFd as _;
-    let profile = GeneratedSandboxProfile::generate(
-        ProviderTrustProfile::UntrustedSandboxed,
-        SandboxMechanism::LinuxBubblewrap,
-        &view.workspace_root,
-        executable
-            .parent()
-            .ok_or(PyreflyServiceError::TrustUnavailable)?,
-        &view.output_root,
-    )
-    .map_err(|_| PyreflyServiceError::TrustUnavailable)?;
-    let policy =
-        CompiledProviderSeccomp::compile().map_err(|_| PyreflyServiceError::TrustUnavailable)?;
-    // Descriptor-relative dialing supports long state paths and pins the private output directory.
-    let output = crate::secure_path::open_absolute_directory_nofollow(&view.output_root)
-        .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))?;
-    let socket = PathBuf::from(format!("/proc/self/fd/{}/pyrefly.sock", output.as_raw_fd()));
-    let request = ProviderLaunchRequest {
-        contained_executable: Path::new("/dependencies").join(executable.file_name().unwrap()),
-        host_executable: executable,
-        arguments: vec!["--serve".into(), "unix:///output/pyrefly.sock".into()],
-        environment: BTreeMap::from([("PATH".into(), "/usr/bin:/bin".into())]),
-        output_root: view.output_root,
-        limits: ProviderProcessLimits {
-            cpu_seconds: 600,
-            open_files: 4096,
-            resident_memory_bytes: 16 * 1024 * 1024 * 1024,
-            output_file_bytes: 1024 * 1024 * 1024,
-            process_count: 256,
-        },
-    };
-    let cleanup = scope
-        .child_control("pyrefly-process")
-        .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))?;
-    let mut process =
-        match SupervisedPyreflyWorkspace::try_new(job, socket, cleanup.clone(), move || {
-            ProviderSandboxLauncher::new(SandboxCapabilityMatrix::probe_current_host()).launch(
-                &request,
-                &profile,
-                ProviderSandboxLaunchMaterial::LinuxSeccomp(&policy),
-            )
-        })
-        .await
-        {
-            Ok(process) => process,
-            Err(error) => {
-                cleanup
-                    .cancel_and_join(Duration::from_secs(10))
-                    .await
-                    .map_err(|join| StartupPyreflyError::Join(join.to_string()))?;
-                return Err(error.into());
-            }
-        };
-    let result = analyze_pyrefly_uds(&mut process, job, &input).await;
-    process
-        .drain_and_join()
-        .await
-        .map_err(|join| StartupPyreflyError::Join(join.to_string()))?;
-    drop(output);
-    result.map_err(Into::into)
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn analyze(
-    _: &crate::provider_contracts::ProviderJob,
-    _: PyreflyWorkspaceInput,
-    _: PathBuf,
-    _: crate::source_image::ProviderWorkspaceView,
-    _: &StructuredCancellationScope,
-) -> Result<crate::pyrefly_service::PyreflyProviderRunResult, StartupPyreflyError> {
-    Err(crate::pyrefly_service::PyreflyServiceError::TrustUnavailable.into())
 }

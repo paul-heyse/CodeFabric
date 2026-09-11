@@ -495,6 +495,7 @@ struct PyreflyProcessState {
     alive: AtomicBool,
     drain_requested: AtomicBool,
     terminal: std::sync::Mutex<Option<Result<(), String>>>,
+    kernel_usage: std::sync::Mutex<Option<crate::provider_sandbox::ProviderKernelUsage>>,
 }
 
 // Constructor cancellation must close the already admitted worker even when readiness was sent
@@ -512,9 +513,10 @@ impl Drop for CancelPyreflyConstruction {
 impl SupervisedPyreflyWorkspace {
     /// Admit the process owner before invoking the launcher. The supplied control task scope
     /// reserves cleanup execution capacity; the process residency reservation remains Data.
+    /// The owned output descriptor survives cancelled construction and stays pinned through join.
     pub(crate) async fn try_new<F>(
         job: &ProviderJob,
-        socket: PathBuf,
+        output: std::os::fd::OwnedFd,
         cleanup_tasks: crate::cancellation::StructuredCancellationScope,
         launch: F,
     ) -> Result<Self, PyreflyServiceError>
@@ -523,8 +525,10 @@ impl SupervisedPyreflyWorkspace {
             + Send
             + 'static,
     {
+        use std::os::fd::AsRawFd as _;
         validate_pyrefly_job(job)?;
-        if job.ceilings().max_workers() == 0 || !socket.is_absolute() {
+        let socket = PathBuf::from(format!("/proc/self/fd/{}/pyrefly.sock", output.as_raw_fd()));
+        if job.ceilings().max_workers() == 0 {
             return Err(PyreflyServiceError::Invalid(
                 "release-prepared Pyrefly job or private socket is invalid".to_owned(),
             ));
@@ -537,7 +541,7 @@ impl SupervisedPyreflyWorkspace {
         let worker_socket = socket.clone();
         let grace = Duration::from_millis(job.ceilings().cancellation_ack_millis());
         cleanup_tasks
-            .spawn_blocking_owned("process-owner", native_envelope, move |cancel| {
+            .spawn_blocking_owned("process-owner", (native_envelope, output), move |cancel| {
                 run_owned_pyrefly_process(
                     launch,
                     &cancel,
@@ -582,6 +586,15 @@ impl SupervisedPyreflyWorkspace {
     #[must_use]
     pub(crate) const fn completed_generations(&self) -> u64 {
         self.completed_generations
+    }
+
+    /// Latest aggregate cgroup sample from the process owner, including native allocations.
+    pub(crate) fn kernel_usage(&self) -> Option<crate::provider_sandbox::ProviderKernelUsage> {
+        *self
+            .process
+            .kernel_usage
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     #[must_use]
@@ -751,9 +764,19 @@ fn run_owned_pyrefly_process<F>(
                 if trusted {
                     state.alive.store(true, Ordering::Release);
                     let observed = ready.send(Ok(digest)).is_ok();
+                    let mut next_sample = std::time::Instant::now();
                     while observed && !cancel.is_cancelled() {
                         if !matches!(child.try_wait(), Ok(None)) {
                             break;
+                        }
+                        if std::time::Instant::now() >= next_sample {
+                            if let Ok(usage) = child.kernel_usage() {
+                                *state
+                                    .kernel_usage
+                                    .lock()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner) = usage;
+                            }
+                            next_sample = std::time::Instant::now() + Duration::from_millis(250);
                         }
                         std::thread::sleep(Duration::from_millis(10));
                     }
@@ -3797,6 +3820,8 @@ mod tests {
     }
 
     async fn rejected_process_construction(cancel_construction: bool) {
+        use std::os::fd::AsRawFd as _;
+
         struct ReleaseOnDrop(Arc<AtomicBool>);
         impl Drop for ReleaseOnDrop {
             fn drop(&mut self) {
@@ -3836,9 +3861,11 @@ mod tests {
         let release = Arc::new(AtomicBool::new(false));
         let _release_on_exit = ReleaseOnDrop(Arc::clone(&release));
         let worker_release = Arc::clone(&release);
+        let pinned_output = crate::secure_path::open_absolute_directory_nofollow(&output).unwrap();
+        let pinned_path = PathBuf::from(format!("/proc/self/fd/{}", pinned_output.as_raw_fd()));
         let mut construction = Box::pin(SupervisedPyreflyWorkspace::try_new(
             &job,
-            output.join("pyrefly.sock"),
+            pinned_output,
             cleanup.clone(),
             move || {
                 let child = launcher.launch(
@@ -3876,6 +3903,7 @@ mod tests {
             }
             drop(construction);
             assert!(cleanup.is_cancelled());
+            assert_eq!(std::fs::read_link(&pinned_path).unwrap(), output);
             assert!(budget.observation().used.memory_bytes > baseline);
             assert!(
                 cleanup
@@ -3908,5 +3936,9 @@ mod tests {
             Err(rustix::io::Errno::SRCH)
         );
         assert_eq!(budget.observation().used.memory_bytes, baseline);
+        assert_ne!(
+            std::fs::read_link(&pinned_path).ok().as_ref(),
+            Some(&output)
+        );
     }
 }
