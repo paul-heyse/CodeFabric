@@ -17,11 +17,11 @@ use crate::provider_contracts::{
 use crate::pyrefly_service::{AcceptedPyreflyRun, PyreflyModuleInput, PyreflyWorkspaceInput};
 use crate::relation_ipc::SourcePin;
 use crate::resource_budget::ChargedValue;
-use crate::semantic_release::ProviderJobInput;
+use crate::semantic_release::{PreparedProviderJob, ProviderJobInput};
 use crate::source_image::{DependencyInputBundle, SourceLanguage, publish_provider_workspace_view};
 
 use super::inputs::PreparedSourceInputs;
-use super::{CompiledSemanticRelease, ProductionWorkspaceStartupError, digest16, lower_hex, step};
+use super::{CompiledSemanticRelease, ProductionWorkspaceStartupError, lower_hex, step};
 
 pub(super) struct PyreflyOutcome {
     pub source_pin: SourcePin,
@@ -132,10 +132,6 @@ pub(super) fn run(
         tracing::warn!("Pyrefly executable unavailable; Python semantic scope remains incomplete");
         return Ok(outcome);
     };
-    let run_id = digest16(
-        b"codefabric.startup.pyrefly-run.v1\0",
-        &[&source_pin.0, &context.effective_input_identity()],
-    );
     // A stable read-only mount contains only daemon-published Python input views. The
     // checker copies each verified generation into its own writable native workspace.
     let provider_root = workspace_root.join("pyrefly-workspace");
@@ -190,69 +186,14 @@ pub(super) fn run(
         changed_module_ids: ids,
         modules,
     };
-    let prepared = release
-        .providers()
-        .prepare_job(
-            release.policy(),
-            ProviderJobInput {
-                lane: ProviderLane::Pyrefly,
-                source: ProviderSourceBinding::from_inventory(
-                    SourceIdentity::try_new(format!(
-                        "codefabric.python-input.{}",
-                        lower_hex(&source_pin.0)
-                    ))
-                    .map_err(|error| step("pyrefly-source-identity", error))?,
-                    inputs.inventory.clone(),
-                ),
-                context: context.clone(),
-                run: ProviderRunBinding::try_new(
-                    ProviderRunIdentity::try_new(format!(
-                        "codefabric.pyrefly-run.{}",
-                        lower_hex(&run_id)
-                    ))
-                    .map_err(|error| step("pyrefly-run-identity", error))?,
-                    run_id,
-                )
-                .map_err(|error| step("pyrefly-run-binding", error))?,
-                scope: ProviderScopeIdentity::try_new(format!(
-                    "codefabric.python-scope.{}",
-                    lower_hex(&inputs.inventory.workspace_id())
-                ))
-                .map_err(|error| step("pyrefly-scope", error))?,
-                requested_families: release
-                    .providers()
-                    .families(ProviderLane::Pyrefly)
-                    .map_err(|error| step("pyrefly-families", error))?
-                    .into_iter()
-                    .map(|family| (family, outcome.requested_units))
-                    .collect(),
-                operational_ceilings: ProviderResourceCeilings::try_new(
-                    ProviderResourceCeilingSpec {
-                        max_relations: 64,
-                        max_batches_per_relation: 65_536,
-                        max_input_bytes:
-                            crate::pyrefly_service::inventory_stream::MAX_SOURCE_BYTES_PER_RUN,
-                        max_rows: 4_000_000,
-                        max_bytes: 512 * 1024 * 1024,
-                        max_diagnostics: 20_000,
-                        max_work_units: 20_000_000,
-                        max_wall_millis: 120_000,
-                        max_visited_nodes: 4_000_000,
-                        max_traversal_depth: 512,
-                        max_workers: 16,
-                        max_retained_revisions: 1,
-                        cancellation_poll_work_units: 1_024,
-                        cancellation_ack_millis: 2_000,
-                    },
-                )
-                .map_err(|error| step("pyrefly-ceilings", error))?,
-                deadline: Instant::now() + Duration::from_secs(120),
-                cancellation: CancellationProbe::from_cancellation(cancellation, 1_024)
-                    .map_err(|error| step("pyrefly-cancellation", error))?,
-                resource_budget: inputs.provider_operation_budget()?,
-            },
-        )
-        .map_err(|error| step("pyrefly-job", error))?;
+    let prepared = prepare_job(
+        release,
+        inputs,
+        context,
+        source_pin,
+        outcome.requested_units,
+        cancellation,
+    )?;
     let result = tokio::runtime::Handle::current().block_on(
         resources
             .pyrefly_cache()
@@ -307,4 +248,81 @@ pub(super) fn run(
         }
     }
     Ok(outcome)
+}
+
+/// Prepare one exact observation/resource pair. Retrying unchanged inputs is a new run,
+/// while source/context identities and the retained checker's compatibility stay unchanged.
+pub(super) fn prepare_job(
+    release: &CompiledSemanticRelease,
+    inputs: &PreparedSourceInputs,
+    context: &ChargedValue<ProviderContextBinding>,
+    source_pin: SourcePin,
+    requested_units: u64,
+    cancellation: Cancellation,
+) -> Result<PreparedProviderJob, ProductionWorkspaceStartupError> {
+    let resource_budget = inputs.provider_operation_budget()?;
+    let run_id = resource_budget.owner().id;
+    release
+        .providers()
+        .prepare_job(
+            release.policy(),
+            ProviderJobInput {
+                lane: ProviderLane::Pyrefly,
+                source: ProviderSourceBinding::from_inventory(
+                    SourceIdentity::try_new(format!(
+                        "codefabric.python-input.{}",
+                        lower_hex(&source_pin.0)
+                    ))
+                    .map_err(|error| step("pyrefly-source-identity", error))?,
+                    inputs.inventory.clone(),
+                ),
+                context: context.clone(),
+                run: ProviderRunBinding::try_new(
+                    ProviderRunIdentity::try_new(format!(
+                        "codefabric.pyrefly-run.{}",
+                        lower_hex(&run_id)
+                    ))
+                    .map_err(|error| step("pyrefly-run-identity", error))?,
+                    run_id,
+                )
+                .map_err(|error| step("pyrefly-run-binding", error))?,
+                scope: ProviderScopeIdentity::try_new(format!(
+                    "codefabric.python-scope.{}",
+                    lower_hex(&inputs.inventory.workspace_id())
+                ))
+                .map_err(|error| step("pyrefly-scope", error))?,
+                requested_families: release
+                    .providers()
+                    .families(ProviderLane::Pyrefly)
+                    .map_err(|error| step("pyrefly-families", error))?
+                    .into_iter()
+                    .map(|family| (family, requested_units))
+                    .collect(),
+                operational_ceilings: ProviderResourceCeilings::try_new(
+                    ProviderResourceCeilingSpec {
+                        max_relations: 64,
+                        max_batches_per_relation: 65_536,
+                        max_input_bytes:
+                            crate::pyrefly_service::inventory_stream::MAX_SOURCE_BYTES_PER_RUN,
+                        max_rows: 4_000_000,
+                        max_bytes: 512 * 1024 * 1024,
+                        max_diagnostics: 20_000,
+                        max_work_units: 20_000_000,
+                        max_wall_millis: 120_000,
+                        max_visited_nodes: 4_000_000,
+                        max_traversal_depth: 512,
+                        max_workers: 16,
+                        max_retained_revisions: 1,
+                        cancellation_poll_work_units: 1_024,
+                        cancellation_ack_millis: 2_000,
+                    },
+                )
+                .map_err(|error| step("pyrefly-ceilings", error))?,
+                deadline: Instant::now() + Duration::from_secs(120),
+                cancellation: CancellationProbe::from_cancellation(cancellation, 1_024)
+                    .map_err(|error| step("pyrefly-cancellation", error))?,
+                resource_budget,
+            },
+        )
+        .map_err(|error| step("pyrefly-job", error))
 }

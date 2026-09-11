@@ -78,7 +78,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--timeout",
         type=float,
-        help="per-case deadline; defaults to 240s, 600s for mixed cases, 1200s for staged/function-source/Python edit sequences, or 2100s for Python context/retention sequences",
+        help="per-case deadline; defaults to 240s, 600s for mixed cases, 900s for Python clean/live comparisons, 1200s for staged/Python edit sequences, 1500s for function-source comparisons, or 2100s for Python context/retention sequences",
     )
     parser.add_argument(
         "--output", type=Path, default=ROOT / "target/product/golden.json"
@@ -133,26 +133,16 @@ def main(argv=None) -> int:
     for name, command in commands:
         print(f"product case: {name}", flush=True)
         try:
-            timeout = (
-                args.timeout
-                if args.timeout is not None
-                else 2100
-                if name == "python-context-live"
-                else 1200
-                if name in {"staged-live", "function-source-live", "python-live"}
-                else (
-                    600
-                    if name
-                    in {
+            defaults = {
+                **dict.fromkeys(
+                    {
                         "first-release-queries",
                         "mixed-clean-live",
                         "mixed-publication-shutdown",
                         "client-timeout-shutdown",
                         "provider-deployment-live",
                         "python-poll-live",
-                        "python-stubs-live",
-                        "python-roots-live",
-                        "python-paths-live",
+                        "python-site-packages",
                         "source-lines-live",
                         "rust-paths-live",
                         "cargo-build-live",
@@ -161,9 +151,18 @@ def main(argv=None) -> int:
                         "cargo-selections-live",
                         "decoded-source-live",
                         "processing-pages",
-                    }
-                    else 240
-                )
+                    },
+                    600,
+                ),
+                **dict.fromkeys(
+                    {"python-stubs-live", "python-roots-live", "python-paths-live"}, 900
+                ),
+                **dict.fromkeys({"staged-live", "python-live"}, 1200),
+                "function-source-live": 1500,
+                "python-context-live": 2100,
+            }
+            timeout = (
+                args.timeout if args.timeout is not None else defaults.get(name, 240)
             )
             outcome = run(command, cwd=ROOT, timeout=timeout)
             observation = {"case": name, **asdict(outcome)}

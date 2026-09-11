@@ -871,25 +871,6 @@ mod tests {
             database.clone(),
             std::sync::Arc::new(std::sync::Mutex::new(())),
         );
-        // A retained checker may still own the first attempt when the same captured inputs
-        // are retried after publication failure. Both attempts remain charged independently.
-        let retained_attempt = first.provider_operation_budget().unwrap();
-        let retained = retained_attempt
-            .try_reserve(
-                crate::resource_budget::ResourceClass::Data,
-                crate::resource_budget::ResourceAmounts {
-                    memory_bytes: 1024,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        let retry = first.provider_operation_budget().unwrap();
-        assert!(!retained_attempt.same_scope(&retry));
-        assert_eq!(retained_attempt.observation().used.memory_bytes, 1024);
-        drop(retry);
-        assert_eq!(retained_attempt.observation().used.memory_bytes, 1024);
-        drop(retained);
-        drop(retained_attempt);
         let concurrent_writer = OperationalStore::open(&database).unwrap();
         let reader = concurrent_writer.reader_factory().open().unwrap();
         let leases = || {
@@ -915,6 +896,50 @@ mod tests {
         drop(concurrent_writer);
         let initial_product = discover_python_inputs(&first, &record).unwrap();
         let initial = provider_context(&initial_product).unwrap();
+        // Exercise real compiled job admission: a resource-only nonce would be rejected
+        // because each job must carry exactly its resource owner's operation identity.
+        let release = crate::semantic_release::compile_current_v23_release(
+            crate::production_provider_recipe::current_v23_provider_program_definition().unwrap(),
+        )
+        .unwrap();
+        let prepare = || {
+            super::super::pyrefly::prepare_job(
+                &release,
+                &first,
+                &initial,
+                crate::relation_ipc::SourcePin(first.inventory.identity()),
+                1,
+                Cancellation::default(),
+            )
+            .unwrap()
+        };
+        let first_job = prepare();
+        let budget = first_job.job().resource_budget();
+        let before = budget.observation().used.memory_bytes;
+        let retained = budget
+            .try_reserve(
+                crate::resource_budget::ResourceClass::Data,
+                crate::resource_budget::ResourceAmounts {
+                    memory_bytes: 1024,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let retry = prepare();
+        assert_ne!(
+            first_job.job().run().provider_run_id(),
+            retry.job().run().provider_run_id()
+        );
+        for job in [&first_job, &retry] {
+            assert_eq!(
+                job.job().run().provider_run_id(),
+                job.job().resource_budget().owner().id
+            );
+        }
+        drop(retry);
+        assert_eq!(budget.observation().used.memory_bytes, before + 1024);
+        drop(retained);
+        drop(first_job);
         let retained_budget = first.budget().clone();
         assert_eq!(initial.python_version(), Some((3, 14)));
         let (file_id, digest) = first.inventory.selected_files().next().unwrap();

@@ -382,14 +382,14 @@ fn prepare_and_run(
         .context
         .fingerprint_bytes()
         .map_err(|error| step("rust-context-pin", error))?;
-    let run_id = digest16(
+    let view_id = digest16(
         b"codefabric.rust-provider-run.v1\0",
         &[&inventory.identity(), &context_pin],
     );
     let images = inputs.capture()?.images().iter().collect::<Vec<_>>();
     let view = publish_provider_workspace_view(
         root,
-        &lower_hex(&run_id),
+        &lower_hex(&view_id),
         record.workspace_id,
         inventory.source_generation(),
         &images,
@@ -427,6 +427,8 @@ fn prepare_and_run(
         limits,
         RustExecutableExtensionPolicy::ExecuteInsideSelectedLauncher,
     );
+    let resource_budget = inputs.provider_operation_budget()?;
+    let run_id = resource_budget.owner().id;
     let mut request = RustCompilationRunRequest {
         preparation: SelectedRustCompilationPreparation::from_discovered(&product)
             .map_err(|error| step("rust-selected-preparation", error))?,
@@ -482,7 +484,20 @@ fn prepare_and_run(
     .map_err(|error| step("rust-metadata", error))?;
     let metadata = metadata_plan
         .read_metadata(&metadata_paths, &terminal)
-        .map_err(|error| step("rust-metadata-result", error))?;
+        .map_err(|error| {
+            let observed = terminal.terminal();
+            step(
+                "rust-metadata-result",
+                format!(
+                    "{error}; state={:?}, exit={:?}, limit={:?}, elapsed_ms={}, process_group_empty={}",
+                    observed.terminal_state,
+                    observed.exit_code,
+                    observed.exceeded_limit,
+                    observed.usage.wall_time_millis,
+                    observed.process_group_empty,
+                ),
+            )
+        })?;
     request.context.cargo_metadata_digest = frame_digest(digest_bytes(&metadata));
     request.preparation = request
         .preparation
@@ -571,7 +586,7 @@ fn prepare_and_run(
                 deadline: Instant::now() + Duration::from_secs(120),
                 cancellation: CancellationProbe::from_cancellation(cancellation, 1024)
                     .map_err(|error| step("rust-cancellation", error))?,
-                resource_budget: inputs.provider_operation_budget()?,
+                resource_budget,
             },
         )
         .map_err(|error| step("rust-provider-job", error))?;
