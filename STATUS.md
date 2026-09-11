@@ -1,19 +1,14 @@
 # CodeFabric status
 
-Updated 2026-09-10 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-Implementation has resumed from `b2a97b9c` in the detailed plan's P01–P14 package order, as requested.
-P01's initial captured dependency/context vertical and phase costs are committed in `a31e2a3a`.
-P02's initial canonical semantic vertical now publishes diagnostics, Python modules, Python/Rust
-imports, references and structural types with scoped public retrieval and exact reopen.
-The Rust type and HIR reference slices are committed in `ba35b4c7` and `1b515b7b`.
-P02 public family selection is committed in `f7adca03`. P03 repeated-block output isolation is
-committed in `7eefd2ea`, and typed prior-entity result consumption in `bd7f3752`.
-Semantic-reference/import traversal is committed in `2ca3d45b`. First-class occurrence
-selection and typed outgoing traversal are committed in `fe0d17fe`.
-The occurrence/module source continuation now passes mixed native query/reopen validation;
-retained source revocation also passes after the block-provenance correction.
-The preceding production milestone is `4cc74d7c` (typed native Rust diagnostic details).
-Package boundaries cross outcomes 4–8; completing the first package does not complete an outcome.
+Updated 2026-09-10 from the canonical `/home/paul/CodeFabric` working tree on `master`, through
+implementation commit `722b57d4`. The current provider executable invalidation task is concluded;
+its installed live/reopen acceptance passes. Work is stopped at the user's request after updating
+this file and the detailed plan. No next implementation slice is started or scheduled.
+
+P01/P02 initial vertical exits and P03's first-release query boundary are delivered. P04 retained
+continuous operation is partial; P05–P14 remain open. The detailed plan §10 and the package handoff
+below identify the next unmet work. Package boundaries cross outcomes 4–8; an initial package exit
+does not complete an outcome or the first useful release.
 
 ## Current handoff
 
@@ -30,21 +25,20 @@ implemented portions, unfinished acceptance and the next work for every slice, w
 design enhancements integrated into the same delivery progression.
 
 Fresh daemon startup captures real Python/Rust inputs and publishes exact source/syntax Delta
-versions before readiness. The owned update coordinator runs contained semantic providers and
-publishes their exact successor. Canonical declarations, Python lexical references and Python/Rust
-call occurrences exist. Installed FastMCP clients have exercised function search and declaration
-fact retrieval, one-step incoming/outgoing call traversal and Python lexical-reference traversal with scoped processing and observed
-result truncation. Exact declaration source spans now pass through the same client with independent
-disclosure authorization. Python call/source queries also pass after exact reopen. A running daemon now reconciles Python edits,
-additions, deletions and atomic saves, with current-source query barriers and exact successor epochs.
-Live updates now publish source/syntax with semantic pending scope before their semantic successor.
-Fresh startup now uses this source-first path too. The first useful release remains open.
+versions before readiness; the owned coordinator publishes coherent semantic successors with
+requested/completed/unknown scope. Canonical diagnostics, Python modules, Python/Rust declarations,
+imports, semantic references, structural types and call occurrences are queryable within their
+implemented meanings. P03 adds typed repeated blocks and prior results, branch isolation, scoped
+family retrieval, bounded call walks, exact source/outline/related contexts and the first-release
+plan corpus. Exact reopen preserves IDs, facts and source disclosure rules.
 
-The call-query continuation present at session start was preserved, exercised and committed in
-`80bc6d18`; declaration kinds/public subjects followed in `1a60e748`, and lexical references in
-`5964e5ff`. The full plan remains unfinished. No outcome from 4 through 8 is closed. Implementation
-originally stopped at the diagnostic checkpoint. The subsequent user instruction resumes execution
-of the cross-cutting packages in §3.3 of the detailed plan.
+P04 now retains workspace-owned Tree-sitter/Ruff, contained Pyrefly and immutable Rust toolchain
+inputs; observes pruned native/poll source topology and selected Git metadata; reuses exact source/
+line and empty Arrow pins; bounds Delta writes; and detects selected provider executable replacement
+through live work and restart. Broader dependency validity, Cargo target/fact reuse, shared native
+CPU scheduling, full inclusion/topology, first-release edit coverage and sustained operation remain.
+The current checkpoint is detailed below; older dated entries retain attributable history and do
+not select an obsolete P02/P03 continuation.
 
 The uv CLI pin is removed in `a644b295` at the user's request. Local tooling accepts the installed
 uv; CI prefers an existing executable and uses an unpinned setup fallback only when absent. Python,
@@ -54,7 +48,7 @@ passes `just tools-doctor`, `just tool-version-contract-check`, shell syntax and
 (`/tmp/codefabric-system-uv-consumer.log`); the CLI report is `/tmp/codefabric-system-uv-report.log`.
 Earlier historical uv reconciliation entries below no longer prescribe a CLI version.
 
-## P04 retained inputs and syntax — implementation in progress
+## P04 retained inputs and syntax — partial, paused at accepted checkpoints
 
 P03's related-context integration is committed in `75687368`. P04's immutable-input pin reuse and
 workspace-owned syntax checkpoint is committed in `55c69cdd`. The retained Pyrefly service is
@@ -187,8 +181,8 @@ A restart-required `static_config.source_watch_profile` now explicitly selects `
 compatible default) or `poll`. Polling uses native `PollWatcher` with a two-second interval
 and independent 150 ms debounce/50 ms tick. Content comparison is disabled: the recovery-parent
 registration must not hash unrelated sibling files, and secure census already verifies source bytes. It shares the pruned topology and
-owned recovery path; it is not a silent fallback. Polling metadata IO and detection latency remain to be measured. Git inclusion/metadata topology, external-root selection, retained Cargo
-contexts, dependency-aware owner reuse and shared scheduling remain open in P04.
+owned recovery path; it is not a silent fallback. Polling metadata IO and detection latency remain to be measured. Selected Git metadata topology subsequently lands below. Full inclusion/conflict policy, external
+roots, retained Cargo contexts, dependency-aware owner reuse and shared scheduling remain open in P04.
 
 The assembled storage/watch code passes the native Python edit/delete/atomic-save/empty/reopen
 sequence in 605.277 s and the mixed source/semantic obsolete-completion/restart sequence in
@@ -283,9 +277,10 @@ and sidecar, and a delegated user-systemd scope on Linux, against `90e372ca` plu
 modified function headers (`/tmp/codefabric-p04-publication-drain-clippy-final.jsonl`). All 48
 product-harness tests pass in 0.79 s with focused Ruff checks clean
 (`/tmp/codefabric-p04-publication-drain-harness.log`). No full CI or doctest claim is made.
-Continue P04 input topology/invalidation and retained-context scheduling; P04 and P05–P14 remain open.
+P04 input topology/invalidation and retained-context scheduling remain open with P05–P14; the final
+user-requested pause and next entry point are recorded in the package handoff below.
 
-The next Git observation slice resolves the selected worktree's actual Git/common directories
+The subsequent Git observation slice (`20230937`) resolves the selected worktree's actual Git/common directories
 with isolated, worker-local gix 0.86 handles. It adds at most six non-recursive metadata/parent
 registrations, deduplicates source/metadata registrations and filters callbacks to the selected
 index, configuration, `.git`/administrative pointers and `info` policy inputs. Objects, refs, logs
@@ -363,6 +358,71 @@ The staged case now checks a real Ruff comment's empty reuse, creation and delet
 pending/semantic results. Shutdown probes wait for eight real candidate writes because empty-version
 reuse reduces the number of new tables; no fixed total table count is a correctness assumption.
 
+P04 selected provider deployment invalidation is committed in `722b57d4` and passes installed
+qualification on 2026-09-10.
+One small observation over the selected Pyrefly/rustc-extractor executable paths, canonical targets,
+inode, size, mode, ownership and nanosecond modification/change times is persisted in the existing
+source inventory state relation. Missing executables are observed explicitly; other observation
+errors leave freshness unavailable. This witness is independent of retained cache lifetimes and
+is an invalidation trigger, not a content identity or replacement for captured provider contexts.
+Capture, source reconciliation and candidate publication compare it alongside inventory/generation;
+old exact epochs without a witness require reconciliation. Source bytes remain separate. Changed
+executables trigger conservative source/pending/semantic replacement, including after restart.
+
+The same selected-path resolver feeds both production launch paths and observation. Periodic
+reconciliation now continues during long provider/relational work; an input mismatch cancels the
+private build scope and awaits its existing owner. Rust daemon reference §27.2, Select pattern,
+guides retaining/joining the build rather than assuming a dropped future stops native work.
+This observes two provider executables only. Complete sysroot/linker/runtime-image and external
+input observation, finer invalidation and shared CPU/context scheduling remain open.
+
+The initial ten focused deployment/watch tests pass in 15.046 s
+(`/tmp/codefabric-p04-provider-deployment-focused.log`). The added legacy-state mismatch and
+executable mutation cases also pass in the first installed selection. Its product case first fails
+because the fixture omitted independent source disclosure permission (107.757 s,
+`/tmp/codefabric-p04-provider-deployment-installed.log`, nextest
+`dd8ae54c-6d11-437e-a36e-db09b0dd2c93`). The second attempt passes initial four-form answers but fails
+in the independent raw-storage reader (105.650 s,
+`/tmp/codefabric-p04-provider-deployment-installed-v2.log`, nextest
+`3ba73612-c7f2-4eaf-b7ab-adb88d201ee6`): raw Delta stores logical UInt64 as Decimal128 and fixed IDs as
+Binary. The fixture now grants disclosure before launch, reads generation from selected activation
+pins and reads raw digest arrays as Binary. Production schema restoration and authorization were
+not weakened.
+
+The final installed case **passes in 443.603 s**
+(`/tmp/codefabric-p04-provider-deployment-installed-v3.log`, nextest
+`225ab70b-5d09-4915-b5be-8ad8bf7c1e48`). It replaces private installed provider copies while preserving
+length/mtime, observes a background successor without a query or source edit, rejects a completed
+obsolete deployment, and compares independently expected declarations/facts/calls/source after
+repair and changed/unchanged restart. Unchanged restart preserves the selected generation; captured
+source bytes/inventory remain unchanged throughout. Removal/symlink/raw-path variants are unit
+coverage; the real installed redeployment uses Pyrefly, while both production launch paths share
+the same observation resolver. This is scoped acceptance, not all-tool/all-platform deployment
+qualification or a full legacy schema migration exercise.
+
+The exact final command, against `096c6db7` plus the changes committed as `722b57d4`, is:
+
+```sh
+DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus XDG_RUNTIME_DIR=/run/user/1000 \
+CODEFABRIC_RUSTC_EXTRACTOR_BIN=/home/paul/CodeFabric/target/extractor/debug/codefabric-rustc-extractor \
+CODEFABRIC_PYREFLY_SIDECAR_BIN=/home/paul/CodeFabric/target/debug/codefabric-pyrefly-sidecar \
+systemd-run --user --scope --quiet --property=Delegate=yes \
+just root-test-incremental -j 1 --no-fail-fast --success-output immediate \
+-E 'test(selected_provider_redeployment_fences_delayed_facts_and_reconciles_reopen)' --no-tests=fail
+```
+
+Default/featureless `just root-check` passes
+(`/tmp/codefabric-p04-provider-deployment-root-final.log`). Final all-target affected Clippy
+completes with no changed-line or modified-function-header findings
+(`/tmp/codefabric-p04-provider-deployment-clippy-final.jsonl`); existing root warnings remain.
+The initial large-future finding is corrected with an owned boxed build future. The final installed
+run includes that correction and the corrected raw-storage helper. All 50 product-harness cases
+pass in 0.80 s (`/tmp/codefabric-p04-provider-deployment-harness.log`), with focused Python lint/format
+clean. New Rust modules pass focused rustfmt checking. The product selector is
+`just golden --case provider-deployment-live`, with a 600-second bound; its native case and wrapper
+are validated separately. These timings include concurrent static checks and are not isolated
+performance measurements. Full CI and doctests were not run for this slice.
+
 ## P03 first-release query boundary delivered
 
 The plan corpus is committed in `47b0c225`; the shared native schema-identity correction is
@@ -404,8 +464,8 @@ Global baseline lint/format issues remain separate; no full CI or doctest closur
 
 This delivers P03's first-release query integration boundary. Full first-four meanings/subject roles
 continue with their P06/P10 producers; target/family convergence and explicit historical query
-selection remain in P04/P11. P04 is in progress: retained source/provider state, exact invalidation and
-unchanged-version reuse under the existing owned coordinator. P05 still owns the assembled edit/
+selection remain in P04/P11. P04 has since delivered scoped retained source/provider state, exact
+source/empty pin reuse and provider executable invalidation; its complete boundary remains open. P05 still owns the assembled edit/
 clean/restart first-useful-release boundary. No outcome from 4 through 8 is complete.
 
 Named traversal stops are committed in `f0a70a03`. The P03 syntax-outline slice now passes validation.
@@ -1502,8 +1562,9 @@ before/after performance claim or representative scale qualification.
 This delivers P01's first external-input vertical using deliberately captured dependency material
 inside the authorized workspace. Separate external filesystem-root registration/fetching, full
 package/distribution identity, generated `OUT_DIR` freezing, effective Cargo unit/config closure,
-byte-safe compiler argv, retained providers/caches and measured shared scheduling remain in their
-4A–4C/P04/P06/8E slices. P02's initial canonical semantic vertical and scoped public retrieval are now delivered.
+byte-safe compiler argv and measured shared scheduling remain in their 4A–4C/P04/P06/8E slices.
+P04 subsequently delivers retained parser/checker/toolchain-input owners; retained Cargo target/fact
+state and full input/retention qualification remain open. P02's initial canonical semantic vertical and scoped public retrieval are now delivered.
 
 ## Detailed plan expansion, 2026-09-09
 
@@ -2083,264 +2144,99 @@ Generated protocol compatibility passes (28 tests and generator verification).
 All-family/owner/dependency scope, indexed status aggregation, target/family-specific barriers and
 the full outcomes 4–8 target remain open.
 
-## Outcome 4: real inputs, canonical facts and the first four forms
+## Outcome 4: real inputs, canonical facts and first-four queries — partial
 
-### 4A — Rust contexts and production compilation: partial
+P01/P02 initial semantic verticals and P03’s initial query boundary are delivered. Complete effective contexts, native unit/family coverage and the first useful release remain open.
 
-Implemented in `eba6f19a`, `baf533f4`, `52477365` and `b6a7d777`:
-
-- Contained locked/offline Cargo metadata and compilation during fresh startup, bound to captured
-  manifests, source generation, context, compiler/sysroot and the extractor source manifest.
-- Captured path dependencies, multiple compilation units, package and virtual workspaces with
-  inherited package settings; libraries, binaries, examples, tests and benchmark targets.
-- Distinct target contexts and sequential execution. A failed target retains other targets' facts
-  and records its unavailable state in `system.rust_target_progress`.
-- Reusable immutable dependency/sysroot blobs shared between provider views. Mutable installed
-  files are copied and verified before reuse; per-edit full sysroot disk copies are avoided.
-- Raw compiler Arrow publication and per-family partial admission. Missing units remain unknown;
-  excess units or substituted source/context pins are rejected. Target `processed` means output
-  returned, not that every compiler family or semantic proposition is complete.
-
-Later committed slices add custom/default/disabled build inputs, Cargo-configured platforms/rustflags,
-library linkage combinations and captured feature/default-feature/profile selections with workspace
-inheritance and package override. Raw compiler source paths and ordinary structured diagnostic
-messages/details retain exact source binding. Fresh readiness and live updates publish source/syntax
-before semantic convergence. Their independent clean/reopen checks are recorded above.
-
-Remaining: registry/git materialization; generated `OUT_DIR`/build-script/proc-macro input closure;
-complete actual per-unit/unified-feature/environment and host-target contexts; retained compatible
-build caches and bounded parallel scheduling; raw compiler argv and external tool-change invalidation;
-full generated/hygiene diagnostic mapping, compatibility-report semantics and canonical/public
-consumers. Existing failed-target, source-stage, cancellation and stale-completion checks cover their
-selected scenarios; broader configuration/dependency races remain.
-
-### 4B — Python contexts and semantic extraction: partial
-
-Contained Pyrefly startup honors selected Python version/platform and uses the pinned embedded
-bundles. Its private input view verifies captured bytes, no-follow regular files and exact source
-bindings before checker mutation. Both direct and contained real-process tests pass.
-
-`1301df5a` removes the old 64-module ceiling with ordered descriptor chunks under one complete
-checker inventory. Sequence/end counts, duplicate/missing members, deadline/cancellation and input
-bounds are checked before run acceptance. The producer and uploader advance together over a bounded
-channel; chunks do not create independent checkers. A real 70-module daemon fixture resolves
-`extra_69.chosen` among 69 distinct same-name function declarations.
-
-`92bb153d` extends the selected Pyrefly Query seam with checker-selected definition coordinates.
-Function metadata resolves through the definition index into the target module's declaration;
-imported aliases and bound methods are tested. The sidecar maps coordinates to captured file/digest
-pins, and the daemon independently validates file, digest and range. Synthesized/unavailable or
-out-of-inventory definitions remain explicit gaps; qualified display names are not identity.
-
-The committed Python configuration slice admits captured project configuration when the effective manifest accounts for
-all checker settings. Version, platform and ordered workspace search paths are installed from that
-manifest; artifact digests remain part of context identity. Unapplied checker settings, unmaterialized
-project dependencies and older configurations without a setting census remain unavailable. No ambient
-interpreter, imports or checker configuration are consulted. The installed live/clean scenario passes Python 3.14-to-3.12 and Linux-to-Windows selections,
-previously missing import creation/deletion, unsupported-setting invalidation and restoration of the
-original source/context identities (165.86 s on 2026-09-09). Both call occurrences survive missing
-imports; unrelated resolved calls remain usable. Unsupported checker configuration qualifies the
-whole selected context. Twelve root discovery/capture tests, all 31 sidecar tests and 194 tooling
-tests pass. Sidecar strict lint, default/featureless root checks, governance, docs navigation and
-changed-file formatting pass. Root library Clippy retains 955 baseline warnings with no added findings.
-`just golden --case python-context-live` selects the installed scenario.
-
-The committed source/stub slice owns retained modules by input/file identity rather than import name.
-A source/stub pair and same-name modules in ordered roots can be checked together. Duplicate file/input
-identities and substituted file/name/path bindings are rejected before checker mutation. Deletion
-reconstructs the checker so a removed stub cannot survive in its private handles. All 32 sidecar tests
-pass, including exact stub target-file selection, deletion/recreation, fully captured ordered roots
-and identity-substitution rejection before mutation. Installed namespace/source/stub live/clean
-acceptance passes (72.87 s on 2026-09-09): same-name declarations remain distinct, calls select the
-stub's exact source owner, removal selects the implementation and recreation restores the original
-identities. `just golden --case python-stubs-live` selects it. Sidecar strict checking/lint, all 196
-tooling tests, tooling lint, governance and changed-file formatting pass. The unchanged root library
-retains the previous 955-warning baseline; integration checking/Clippy completes with no findings on this slice's changed lines. External roots, installed
-stub bundles and broader package/import behavior remain open.
-
-Configured search roots now retain Python scripts and other captured sources outside those roots
-as explicit checker inputs. The fallback input mapping does not add a resolver search path. Installed
-live/clean acceptance verifies all four source declarations, competing same-name imported modules,
-search-order reversal and exact restoration (73.85 s on 2026-09-09). An otherwise shadowing root-level
-module remains queryable without overriding either configured import root. Twelve context tests and
-198 tooling tests pass; default/featureless root checks, tooling lint, governance, docs navigation
-and changed-file formatting pass. Library Clippy retains the same 955 warning baseline.
-`just golden --case python-roots-live` selects the installed case. Full external roots and package
-mapping remain open.
-
-Remaining: additional project configuration settings and ordered external import roots; namespaces/re-exports and
-`.pyi` precedence across dependencies; external distribution/stub materialization and identity;
-complete canonical type/member/import/reference coverage beyond the initial P02 clusters above;
-additional declared/expected/narrowed propositions; full overload/descriptor/decorator semantics;
-retained checker updates and context invalidation. Initial normalization does not close those families.
-
-### 4C — source and syntax: partial
-
-`11a61909` publishes six Rust Tree-sitter source-context relations independently of successful
-compilation, including exact-byte CST recovery for malformed Unicode/CRLF source. Rust schemas do
-not invent Python version fields. Python retains syntax/parse diagnostics while failed Ruff semantic
-families report unknown coverage. `734821db` adds owned Ruff callable, call-site and callable-syntax
-observations: native syntax has 28 relations total, including 22 Ruff relations. Provider-local
-syntax/binding IDs remain observations within their admitted source/context/run.
-
-Python context discovery now keeps raw relative path bytes through input binding, the contained
-provider view and file-URI transport. Root-level `__init__.py` files retain a direct input binding.
-Non-Unicode inputs use reversible checker labels while exact paths and application file IDs remain
-authoritative; this does not establish surrogate-containing import-name resolution. Local modules
-with URL metacharacters, spaces and backslashes are retained. The sidecar consumes escaped local
-file URIs and rejects remote/query/fragment forms. Its selected Query seam now returns exact
-diagnostic module paths beside rendered text, preventing display-path collisions from assigning
-one file's error to another.
-
-Installed live/clean path acceptance passes after the diagnostic-owner refinement (81.85 s on
-2026-09-09):
-raw and replacement-character paths have distinct canonical owners despite colliding lossy display
-strings, with exact local call targets and source spans across deletion/recreation. Root initializer
-functions also remain queryable. Thirteen context tests, all 34 sidecar tests (including a real type
-error under colliding display paths), strict sidecar checking/lint and all 200 tooling tests pass.
-Default/featureless root checks, tooling lint, governance, docs navigation and changed-file formatting
-pass. Root library Clippy retains the same 955 warning baseline. The installed scenario is selected by
-`just golden --case python-paths-live`. Decoded UTF-8/BOM/Latin-1 mappings now pass the separately
-recorded mixed source scenario above. Raw Rust source-manifest/local-file paths also pass the
-separate compiler-path scenario; complete byte-safe compiler argument handling remains open.
-
-Remaining: full source/lexical/CST feature census; retained parsers/query packs and incremental trees;
-complete trivia/index/coordinate handling and further source codecs; reversible compiler paths
-and additional source presentation; rename/case-collision semantics and broader incomplete-edit
-behavior during actual live updates. Exact declaration spans, function definitions/bodies, bounded
-surrounding lines and explicit UTF-8/UTF-16 columns are implemented. Remaining subjects and complete
-syntax/coordinate contexts stay open.
-
-### 4D — canonical normalization: partial
-
-The committed canonical catalog includes:
-
-| Relation | Implemented behavior and limits |
-|---|---|
-| `source.code_file` | Captured input identity, raw path bytes, content/generation and capture disposition |
-| `fact.code_entity`, `fact.code_declaration` | Python bindings and Rust stable compiler keys mapped through application identity recipes; declarations retain separate occurrence identity, exact source range, context and provenance |
-| `fact.code_entity_selector` | Canonical declaration-kind selectors and reusable public entity IDs for Python/Rust |
-| `fact.code_reference` | Python lexical read/write occurrences joined to bindings/declarations through exact source/context/run pins; unresolved targets retained; project-aware semantic and Rust references remain open |
-| `fact.code_relationship_selector` | Public call and lexical-reference witnesses, native subject selection and reusable occurrence/endpoint IDs |
-| `fact.code_source_context`, `source.exact_source_bytes` | Canonical declaration source descriptors and captured bytes selected through exact pins; independent live disclosure checks and bounded native output |
-| `fact.code_call_site` | Python and Rust call occurrences, caller/target identity when established, resolution/dispatch, exact or explicitly unavailable source mapping, raw provider provenance |
-
-Native DataFusion joins/projections construct these relations. Rust uses actual stable crate/definition
-keys and kind; missing stable keys yield identity gaps. Direct calls, repeated same-callee occurrences,
-function-pointer unknowns, captured dependency targets and macro/lowered source-mapping gaps are tested.
-Python uses exact Ruff caller/call syntax and checker-selected target definitions. Repeated calls remain
-distinct; dynamic targets remain unknown. Module/lambda calls retain application-owned source occurrences,
-with unavailable public caller entities explicit. Implicit property/decorator calls are not fully normalized.
-
-`d7487f39` permits a native non-null refinement of a declared nullable field while rejecting the unsafe
-reverse; buffers and schema metadata remain intact. Exact Delta reopen restores logical fixed-width IDs
-and numeric types from storage representations. `068e8fd4` fixes empty metadata-rich IPC schema validation
-to use the admitted allocation bound instead of encoded page length.
-
-Remaining: full module/class/lambda/callable entities; full exports/reference census beyond P02's
-initial Python/Rust cluster; complete structural types and propositions beyond the initial shapes; members/signatures/argument binding; complete
-candidate/dispatch and executable-instance relations; external endpoints and generated/lowered correspondence;
-full per-proposition authority/conflict retention; identity continuity and owner replacement under edits.
-Raw provider coverage is not complete canonical-family coverage.
-
-### 4E — public query forms: partial
-
-| Form | Demonstrated current behavior | Remaining |
+| Slice | Current implementation | Remaining scope |
 |---|---|---|
-| FindEntities | Canonical declarations, modules, call/reference/import occurrences and complete admitted syntax nodes; reusable IDs/priors, literal names, text properties, captured path bounds and source context selection | Remaining kinds, configured context defaults, broader boundaries, ambiguity and directives |
-| RetrieveFacts | Canonical declarations, syntax properties and initial module/import/reference/type/diagnostic families; typed entity priors and literal subjects; native semi joins preserve occurrence identity | Full signatures/members/arguments, point filters, broad family expansion and fact/instance subjects |
-| FollowRelationships | Python/Rust calls through eight steps with named stops and edge filters, semantic references/imports, syntax parent links and Python lexical references; both directions, typed entity priors and scoped unknowns | Further distance/stop/filter meanings, remaining endpoint roles and dependency scope |
-| RetrieveSourceContext | Exact declaration, module, occurrence and syntax-node spans; source-location subjects, function definitions/bodies, surrounding lines, syntax outlines and direct semantic-anchor related occurrences; independent disclosure, original-byte/UTF-8/UTF-16 coordinates, truncation and retained revocation | Fact/instance subjects, broader related-context meanings and full history selection |
+| 4A | Partial; captured contexts/diagnostics and retained immutable toolchain inputs | Full external/generated/effective units, Cargo target/fact reuse, scheduler and complete deployment invalidation |
+| 4B | Partial; captured selected contexts and retained contained checker | Complete effective external Python contexts and semantic output; retain chunking and definition anchors |
+| 4C | Partial; retained parser/Ruff state and selected live/clean source behavior | Full syntax/codec/coordinate/path census, external/generated inputs and remaining incomplete edits |
+| 4D | Partial, committed | Remaining canonical families, authority/unknowns and external/generated/edit-time identity |
+| 4E | P03 initial four-form query boundary delivered | Remaining meanings/subject roles/directives, last-four inputs and full composition with P06/P10 |
 
-Unsupported subject meanings are explicitly rejected; they do not fall back to names. The static
-plan-authored corpus now passes all four forms with independent Python/Rust expectations and exact
-reopen. The broader edit corpus and live first-useful-release acceptance remain open in P04/P05.
+## Outcome 5: processing, incomplete scope and freshness — partial
 
-## Outcome 5: processing, incomplete scope and freshness
+Typed requested/completed/remainder partitions, block-local scope, source-current barriers and retained processing continuation exist. All-family dependency closure, historical selection and efficient authorized status remain open.
 
-### 5A — requested/query scope: partial
-
-`system.provider_run_scope` and `system.provider_family_progress` retain requested inputs, provider/context
-pins and terminal family state. Committed entity processing uses requested Python files and selected Cargo
-targets, independently of emitted fact rows. Public function/declaration queries select language/context
-before limits and summarize corresponding partitions. Failed Rust targets do not make a Python-only query
-incomplete. Missing capture, unsupported work, failure, deadline, cancellation and resource bounds retain
-reason categories; coverage and row truncation are distinct.
-
-The first remainder page is bounded to 64 rows with `next_offset`; raw path bytes, optional display path,
-target/kind and known context survive projection. The summary is retained with the exact result package.
-The validated call-specific extension and lexical-reference scope are described above and conservatively
-include the selected context's potential callers or referring files. Exact outgoing Rust caller
-partitions are implemented; full reverse-dependency and all-family owner scope remain open.
-
-Remaining: all family/owner dimensions; authorization-scoped efficient status
-scans; incoming reference/import and negative dependency/frontier propagation; shared live pending/running
-state; provider precision and actionable retry details; a clean distinction between terminal semantic
-unknowns and runnable pending work for convergence. Empty results alone never establish complete absence.
-
-### 5B — typed delivery and source/semantic barriers: partial
-
-`b865c6b2` adds typed Protobuf processing fields, strict Pydantic projections and retained manifest/reopen
-support. Presence distinguishes unobserved result exhaustion from observed false. Streaming observes one
-authorized lookahead row, seals only N requested rows and reports actual truncation; at a grant ceiling,
-exactly N rows leave exhaustion unknown. `e65bdbeb` fixes released diagnostic enum projection in the adapter.
-
-Current-source barriers and typed snapshot/workspace observations now run against the live update
-owner, as described above. Remaining: target/family-specific current selection, historical selectors,
-full generation/context/family convergence with terminal coverage. Public remainder continuation is
-implemented for the currently supported scopes, as described above.
-Whole-workspace provider completion is the conservative barrier for strict semantic policies;
-source-current uses the separate source publication barrier.
+| Slice | Current implementation | Remaining scope |
+|---|---|---|
+| 5A | Partial; selected canonical/query families and block-local scope demonstrated | Complete query dependency/owner scope, all families and efficient authorized live status |
+| 5B | Partial live source/semantic barriers and typed status | Target/family-specific convergence and historical query selection |
 
 ## Outcome 6: continuous updates — partial
 
-| Slice | Implemented foundation | Remaining delivery |
-|---|---|---|
-| 6A | Watch-before-census, owned native watcher, bounded coalesced queue, retained rescan obligation, periodic secure census and public observation/health | Git inclusion, selected external roots, polling profile, root recreation and ignore/config acceptance |
-| 6B | Whole-context replacement, monotonic generations, stale observation, changed-input fences, mixed clean comparison and delayed-completion rejection | Broader negative-dependency/config/context and owner-identity coverage |
-| 6C | Source/syntax then semantic publication, separate current barriers, exact pending-stage restart and old source-page retention | Retained Tree-sitter/Pyrefly/Cargo state, changed-version reuse and fair scheduling |
-| 6D | Mixed live/clean comparison; Python version/platform/roots/stubs/paths/decoding, Cargo build/platform/feature/profile selections, failed compilation repair, obsolete completion and source-only restart | Full semantic/identity/coverage edit corpus, external/generated dependencies, complete context and rename cases |
+P04 has accepted retained-provider, observation, pin-reuse and selected live/reopen continuations. Complete 6A–6C and P05’s assembled first-release corpus remain required.
 
-The installed live test is distinct from startup-versus-restart validation. The mixed comparison retains canonical
-identity and relationships; the wider edit and rename-continuity corpus remains open.
+| Slice | Current implementation | Remaining scope |
+|---|---|---|
+| 6A | Pruned native/poll watches, selected Git metadata observation and faster compatible Merkle hashing | Git inclusion/conflict stages, external roots, complete topology/recovery and watch-cost qualification |
+| 6B | Whole-context replacement/fences; persisted provider-executable observation passes live/reopen acceptance | Full positive/negative/external/tool dependency closure, owner manifests and finer valid replacement |
+| 6C | Source/semantic stages; retained parser/checker/toolchain owners and scoped version reuse | Cargo unit/target/fact retention, allocated native CPU shares and bounded fair backlog |
+| 6D | Limited mixed clean/live comparison and deterministic publication pause | Broader language/context/edit corpus and all-family comparisons |
 
 ## Outcome 7: full analyses and all eight forms — open
 
-| Slice | Implemented prerequisite | Remaining delivery |
-|---|---|---|
-| 7A Python language semantics | Owned Ruff bindings/references/call syntax and selected Pyrefly call definition anchors | Complete scope/binding/import/type/member/call/decorator/pattern/comprehension and dynamic-semantics rows, canonical consumers and invalidation |
-| 7B Python CFG/dataflow | Substantial native Ruff owner CFG/evaluation builders, typed analysis code and prepared source expectations | Integrate the explicit native graph, remove implicit production ordinal fallthrough, qualify normal/exception/cleanup/suspend edges and complete real dataflow/public/update wiring |
-| 7C Python advanced state | Existing analysis structures | Finite memory/points-to, effects/resources/exceptions, capture/generator/async/concurrency and unknown propagation, built on 7B |
-| 7D Rust source/types/MIR | Real typed compiler publication, stable declaration keys, selected canonical calls and ordinary native diagnostic messages/children/spans/suggestions/edits | Full types/generics/traits/instances/MIR payloads, generated/hygiene/coroutine/CTFE/FFI facts, separate compatibility diagnostics and canonical/public coverage |
-| 7E Rust derived/private borrow | Existing MIR analysis modules and contained compiler seam | Real typed inputs, finite dataflow/state/ownership analyses, exact private loans/regions, drop/unwind/coroutine and changed-body replacement |
-| 7F Common graphs/summaries | Existing petgraph/analysis integration and canonical calls | Demand-rooted projections, correct dominance/SCC/reachability, structural facts and bounded interprocedural fixpoints with precision/frontier scope |
-| 7G Complete forms/composition | Eight-form request/ingress infrastructure; four limited public forms | FindPaths, MatchPattern, CombineResults and SummarizeFacts; finish first four; real typed multi-block DAGs, fan-out/fan-in, repeated forms, references, authorization, negatives, ordering/limits and cancellation |
-| 7H Modern presentation | Installed FastMCP transport/resources, guarded-input scenarios, typed processing and diagnostic correction | All-form presentation, full paging/cursors and source permissions; replay/expiry/reconnect/slow-reader/TTL integration for new workflows; one consistent daemon-authored response |
+The native schemas/algorithms and P02/P03 foundations below do not establish full production analyses or complete query algebra. P06–P11 cover every remaining family and form.
 
-Substantial existing algorithms and fixtures are reusable, but fixture-fed or schema-only families are
-not delivered production analyses. Every row in the detailed plan's full ontology coverage map remains
-required through canonical facts, public retrieval, precision/unknowns and update replacement. Dynamic
-unknowns are legitimate terminal facts; unfinished implementation is a separate remaining task.
+| Slice | Current implementation | Remaining scope |
+|---|---|---|
+| 7A | Selected module/import/reference/type/call normalization delivered; full slice open | Full Python families, member/dispatch/type propositions, external semantics and replacement |
+| 7B | Open; substantial native Ruff CFG and analysis algorithms exist | Integrate explicit native CFG/evaluation events, remove implicit derived fallthrough and qualify production behavior |
+| 7C | Open | Python memory/effects/resources/exceptions/capture/async/concurrency on 7B |
+| 7D | Partial raw foundation and ordinary native diagnostic details | Full typed Rust family census, canonical types/instances/lowering, generated/hygiene mappings and diagnostic consumers |
+| 7E | Open | MIR analyses, exact private borrow facts and advanced state on real bodies |
+| 7F | Open | Demand-rooted graph algorithms, structural facts and interprocedural summaries |
+| 7G | P03 repeated first-four blocks, typed priors and branch isolation delivered; full slice open | Last four forms, remaining first-four meanings and full mixed-form algebra/directives |
+| 7H | Partial foundation; full slice open | All-form modern delivery, cursors/permissions, replay/reconnect/expiry and Rust-owned retention |
 
 ## Outcome 8: sustained operation — open
 
-| Slice | Existing foundation/progress | Remaining delivery |
+P04 supplies selected caching, bounded writes and exact reuse foundations. P12–P14 still own finite state, native maintenance, integrated recovery and representative measurements.
+
+| Slice | Current implementation | Remaining scope |
 |---|---|---|
-| 8A Persistence | Exact Delta publication/reopen, removed proof-only histories, immutable provider-input blob reuse | Consumer-based durable/cache split, unchanged version/owner reuse, fewer redundant history/intermediate writes and measured growth over edits |
-| 8B Maintenance | Native checkpoints and retention-aware vacuum dry runs | Native compaction and destructive vacuum remain unavailable; fix actual commit-properties/transaction/retry seams, replace `AtomicVacuumApprovalBinding` with writer/reader ownership, protect files plus reconstruction logs and test real reclaim/recovery |
-| 8C Retention | Store budgets, headroom and existing leases/handles | Coordinated history/result/source/context/build/cache/diagnostic TTL and eviction; maintenance scheduling; finite retained state through real cycles while protecting readers and uncertain writers |
-| 8D Recovery | Linux containment, joined subprocess/native cleanup, exact restart and focused cancellation/lost-ack tests | Failures/races introduced by updates, retained providers, new forms and native maintenance; pressure/expiry recovery; explicit unsupported behavior for unimplemented deployment profiles |
-| 8E Measurement | RSS/cgroup/headroom signals, benchmark harness and small real scenario timings | Correlated phase metrics, representative small/medium/large and real-repository CPG workloads, distributions, convergence/first-batch/retention/recovery measurements |
-| 8F Performance | Native canonical joins, schema-preserving scan pushdown, streaming lookahead and shared immutable input storage | Qualify structured scan/statistics/physical properties through all consumers, pruning/file-size tuning, workload-based parallelism/caches and measured before/after improvements; overlays/CDF/Rayon/orjson only with a concrete need |
+| 8A | Exact source/empty-Arrow pin reuse and bounded native writes delivered | Consumer-based persistence, nonempty owner replacement and measured finite edit-time growth |
+| 8B | Open; checkpoint/dry-run only | Fix native commit-properties seams and enable owned compaction/destructive vacuum |
+| 8C | Retained provider caches have owned idle/headroom cleanup; full slice open | Coordinated source/result/snapshot/build/log/diagnostic retention and real reclamation cycles |
+| 8D | Partial Linux baseline | New update/provider/query/maintenance failure and recovery behavior |
+| 8E | Open; signals/tooling only | Correlated runtime metrics and representative performance/retention measurements |
+| 8F | Native pushdown and scoped reuse; synthetic Merkle improvement observed | Representative all-consumer/property and workload optimization, preserving correctness and coverage |
 
-`delta_guarded_maintenance.rs` still returns `OptimizeCommitIdentityAndRetryControl` and
-`AtomicVacuumApprovalBinding`. No optimize commit or destructive vacuum/reclamation is claimed.
-No representative benchmark or sustained bounded-storage acceptance has been completed.
+All 25 slices remain selected in the detailed plan, with E01–E26 library-grounded enhancements
+integrated into P01–P14. The table is the current aggregate; earlier per-slice records above preserve
+commands and scoped acceptance at their stated revisions. No preparation, schema-only or selected
+fixture result closes the full product.
 
-## Validation and limits at this checkpoint
+## Validation at the stopping point
 
-These are attributable implementation runs from 2026-09-09. The final diagnostic rows include
-checks run while reaching this stopping point; earlier rows preserve evidence for unchanged scopes.
+**Current package validation at the stopping point (2026-09-10, through `722b57d4`).** These are
+attributable scoped runs, not a summed full-suite result. Native cases used rebuilt installed
+providers, stable root/dated-nightly extractor separation and a delegated Linux user-systemd scope.
+Some static checks overlapped native runs; durations are correctness observations, not isolated
+benchmarks. The preceding sections retain exact selectors, configuration, nextest IDs and failure logs.
+
+| Scope/revision | Check/evidence | Result and limit |
+|---|---|---|
+| P01/P02/P03 initial exits | Captured dependency, canonical family and installed first-four query/reopen cases in the detailed plan §3.3 and this file; P03 corpus `47b0c225` with schema fix `445bcbda` and related contexts `75687368` | Initial vertical/query boundaries delivered; P05 first useful release and full outcomes remain open |
+| Retained syntax/checker/toolchain (`55c69cdd`, `1f590cdc`, `44053b64`) | Installed syntax live/clean + staged restart; eight-state Pyrefly corpus; six retained Rust toolchain cases | Pass at recorded revisions; Pyrefly 1,528.600 s, Rust six-case run 522.443 s; full Cargo output/dependency/CPU scheduling remains open |
+| Watch/Git/Merkle (`2e71be9e`, `20230937`, `7e4ba9d9`) | Native/poll/Git metadata ownership cases; seven inventory cases; installed poll/nested source/external Git metadata/reopen | Pass; final installed poll case 85.998 s; 16,386-leaf hash 521.957 → 27.748 ms is synthetic only |
+| Drain and empty exact reuse (`8a92d019`, `096c6db7`) | 22 exact Arrow/provider cases; installed mixed first-four, comment empty/populated/empty + stale/restart, client-timeout/publication/reopen | 22 pass; final three installed cases pass in 804.945 s; no full retention/maintenance or resolution of the earlier native cleanup cascade |
+| Provider executable invalidation (`722b57d4`) | Ten focused watch/witness cases, two deployment/legacy cases; final installed delayed replacement and changed/unchanged restart | Pass; installed case 443.603 s, `/tmp/codefabric-p04-provider-deployment-installed-v3.log`; final code includes both fixture corrections and boxed future |
+| Final stable checks (`722b57d4`) | `just root-check`; `./scripts/cargo-check-mode.sh cargo clippy --locked --all-targets --message-format=json`; focused rustfmt | Default/featureless pass; no affected changed-line/header Clippy findings; existing root warnings remain, no strict global lint/full-root/doctest claim |
+| Product wrapper and system uv | Focused pytest/Ruff; `just tools-doctor`, `just tool-version-contract-check`, shell/config parsing (`a644b295`) | 50 product-harness cases pass in 0.80 s; earlier uv consumer selection 228 pass; system uv 0.12.13 accepted without CLI pin |
+
+The failed installed native run `/tmp/codefabric-p04-toolchain-cache-native-final.log` remains an
+unresolved cancelled-executor/cleanup case. Later targeted shutdown probes pass without reproducing
+it. Documented fixture fixes and the Drain acknowledgement correction do not establish that native
+failure's cause or resolution. No four-domain aggregate, destructive maintenance, sustained state
+or representative end-to-end performance acceptance is claimed.
+
+## Historical validation before package execution
+
+These are attributable implementation runs from 2026-09-09 through the diagnostic-detail checkpoint.
+They predate the P01–P04 continuations recorded above and do not describe the current final checks.
 Counts overlap and must not be added into a full-suite total.
 
 | Code scope | Command/observation | Result and boundary |
@@ -2373,8 +2269,9 @@ artifacts or a new certification mechanism. Git and named behavioral tests retai
 
 The original four golden scenarios passed during earlier slices (startup, installed Python
 serving, exact reopen and cancellation). Exact reopen was rerun on the call-query slice (16.65 s);
-these scenarios do not exercise full outcomes 4–8. Latest affected Clippy retains 952 library/36 integration warnings (988 total), with no new findings
-in the diagnostic-detail slice. Strict lint remains open; the latest run was not a `-D warnings` pass. The last older aggregate root result at `0cc7242`
+these scenarios do not exercise full outcomes 4–8. The diagnostic-detail checkpoint retained 952
+library/36 integration Clippy warnings (988 total), with no new findings in that slice. Strict lint
+remains open; that historical check was not a `-D warnings` pass. The last older aggregate root result at `0cc7242`
 reported 1,038 passed, 13 failed and two skipped; it is historical, not a current verdict. No new
 four-domain aggregate, full-root green result or universal product completion is claimed here.
 
@@ -2394,9 +2291,9 @@ just root-test-incremental -E 'test(mixed_live_updates_equal_independent_clean_p
 Affected Clippy used `./scripts/cargo-check-mode.sh cargo clippy --locked --lib --test integration
 --message-format=json`; the comparison to the preceding 988-warning candidate found no new findings.
 Changed Rust formatting, new-text spelling, document navigation and `git diff --check` pass.
-All validation processes and fixture daemons launched for this slice have finished; no continuation
-is scheduled. A separate terminal-owned nextest run was observed during handoff; it was left
-untouched and its results are not included here.
+At that diagnostic checkpoint, its validation processes and fixture daemons had finished. A separate
+terminal-owned nextest run was left untouched and its results are not included here. The current
+user-requested stopping point is the P04 checkpoint above.
 
 ## Runtime profile and completed foundations
 
@@ -2411,7 +2308,8 @@ publication, exact activation/readback/reconciliation, removal of the generalize
 allocation-receipt paths, one-pass catalog/schema validation, real execution bounds and joined cleanup.
 Useful exact histories, provider coverage, source identity and operation outcomes remain. Historical
 `proof_receipt` compatibility fields do not reinstate a proof evaluator. Previous source-read/governance
-findings are resolved; uv is aligned to the actual host update, 0.12.11 (`fe5615f`).
+findings are resolved. The earlier exact uv reconciliation (`fe5615f`) is superseded by the system
+uv policy (`a644b295`); uv 0.12.13 is the installed executable at this checkpoint.
 
 The workstation profile is 16 physical cores/32 threads and 192 GB RAM: 64 GiB managed workspace budget,
 32 GiB shared DataFusion pool, 16 data workers/partitions, RSS pause/resume at 112/96 GiB, system-memory
@@ -2426,8 +2324,10 @@ Current source/transport ceilings: 1 GiB mixed captured source set; Pyrefly 16,3
 per chunk, 32 MiB per file, 512 MiB source bytes and 32 MiB aggregate descriptors per run; individual RPC
 frames remain 4 MiB. Context opening remains unary/bounded and external roots remain unfinished. These
 are configured ceilings, not measured optimal workload sizes. Dependency blobs avoid repeated sysroot
-disk copies, and one charged toolchain capture is shared per semantic pass. External tool changes, retained
-build state, cache reclamation and representative cost validation still need work.
+disk copies; one charged immutable toolchain bundle now survives compatible semantic passes with
+owned idle/headroom eviction. The two provider executable selections are observed across live work
+and reopen. Full tool/library/dependency validity, retained Cargo target/fact state, coordinated
+all-owner reclamation and representative cost validation still need work.
 
 Use self-contained `just` recipes; keep stable/sidecar shared `target/` and the extractor's separate
 dated-nightly target. Real root provider tests require current `CODEFABRIC_RUSTC_EXTRACTOR_BIN` and
@@ -2435,25 +2335,48 @@ dated-nightly target. Real root provider tests require current `CODEFABRIC_RUSTC
 golden setup; `just sidecar-check` checks/lints rather than installing a fresh executable. No routine
 `cargo clean`, independent worktrees, source-edit artifacts or new approval cycle is required.
 
-## Active package order
+The final handoff documentation passes `just docs-check STATUS.md
+ docs/plans/codefabric_pragmatic_production_outcomes_4_8_detailed_implementation_plan_2026-09-09.md
+ tooling/product/README.md` (three files, zero navigation errors), focused `typos` and
+`git diff --check`. The plan preserves all 25 slice headings, all 29 ontology requirements and the
+D1–D7/E01–E26/P01–P14 registers. The navigation log is
+`/tmp/codefabric-p04-stopping-point-docs.log`. Only the two handoff documents change after the
+validated implementation commit `722b57d4`.
 
-Implementation resumed under the user's package-order instruction after the 2026-09-09 planning
-revision. The entire outcomes 4–8 scope remains required; none is complete. The detailed plan
-§3.3 defines P01–P14 and §10 records the current entry point. P01's initial vertical is described above.
+## Package handoff at the stopping point
 
-Continue in this order:
+**Work is stopped at the user's request.** The current provider executable invalidation task is
+committed as `722b57d4` and its installed acceptance passes. No next slice is started or scheduled.
+The entire outcomes 4–8 scope remains selected; none is complete. The detailed plan §3.3 defines
+P01–P14 and its fully updated §10 records the exact remaining progression.
 
-1. Preserve P01's captured dependency roots and phase instrumentation, extending its full context,
-   cache and source-fidelity variants in the owning later slices.
-2. P03–P05: completed first-four meanings, remaining query coverage and typed block bindings,
-   target freshness, retained live providers/version reuse and broader clean/incremental comparison.
-3. P06–P11: every remaining language/analysis family, explicit native CFG/MIR/private inputs,
-   common graphs/summaries, all eight forms/full DAG semantics and modern delivery.
-4. Begin P12 native maintenance/finite retention after P04's ownership prerequisites while fact
-   scope grows; finish P13–P14 integrated recovery and representative workload optimization.
+When execution is requested again:
 
-Do not redo per-publication parser reuse, contained Cargo startup, supported captured selections,
-source-first activation, one-step call/reference queries or the completed source-context meanings.
-Cross-edit provider retention and complete context/analysis/query acceptance remain missing.
-No representative performance, native optimize/destructive vacuum or sustained reclamation result
-was produced in this continuation.
+1. Continue **P04**: complete captured source/Git/external inclusion and recovery topology; complete
+   positive/negative/tool/sysroot/linker/runtime dependency validity and owner manifests; establish
+   native Cargo unit/fact census before retaining target outputs; allocate shared native CPU shares
+   and bounded fair context backlog; extend nonempty owner reuse and remaining retention ownership.
+2. Complete **P05**: assemble the first-release external/config/negative/deletion/race corpus with
+   independent clean comparisons, restart and leased old source/facts. P03's initial query boundary
+   is delivered; the first useful release is still open.
+3. Continue **P06–P11**: complete language normalization, Python control/advanced analyses, Rust
+   MIR/private analyses, common graphs/summaries, all eight query forms/full DAG semantics and modern
+   delivery. Each new family must become publicly queryable with actual coverage and update cases.
+4. Start **P12** native maintenance/finite retention after P04's ownership prerequisites and before
+   large full-ontology corpora; finish **P13–P14** integrated recovery and representative optimization.
+   Keep optional overlays/CDF/Rayon/orjson contingent on a demonstrated consumer/cost benefit.
+
+Do not recreate delivered parser/checker/toolchain-input retention, scoped exact pin reuse,
+pruned source/Git metadata watching, first-four typed composition or source-context meanings.
+Retained Cargo outputs are different from retained immutable toolchain inputs: Cargo `Fresh` can
+skip the fact-producing wrapper, so output reuse needs complete unit/fact admission. Existing
+job-count admission is also different from shared native CPU allocation; Pyrefly still uses 16
+checker threads and Rust targets are serialized.
+
+The unresolved native Delta executor/cleanup cascade in
+`/tmp/codefabric-p04-toolchain-cache-native-final.log` (nextest
+`efd361ae-de4d-4363-90c0-898b5c1e50c9`) remains a P04/P13 recovery item. Subsequent targeted
+publication/client-timeout/shutdown/reopen cases pass without reproducing it; they do not prove a
+fix. Full poll-backend thread joining, all-owner reclamation and other-platform deployment recovery
+also remain open. No new full-root/four-domain aggregate, destructive vacuum, sustained-retention or
+representative performance acceptance is claimed at this stopping point.
