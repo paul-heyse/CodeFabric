@@ -2,7 +2,7 @@
 
 Date: 2026-09-11. Reviewed implementation: `a26c00a79f88b97ea9c85f1000d5f25775197c98`
 (`a26c00a7`, clean canonical `master` before the run).
-Status: **implementation in progress, authorized 2026-09-11**. The original review baseline
+Status: **further qualification deferred by the user, 2026-09-11**. The original review baseline
 and unsuccessful-test inventory are retained below; §0 records execution progress.
 
 This is a qualification and repair supplement to the
@@ -21,6 +21,32 @@ qualification remains the separately scoped representative-workload work in pare
 
 ## 0. Implementation progress
 
+**User-directed handoff to P04/P05.** The user considers the current repair progress sufficient to
+resume feature work. This supplement remains open; R06 is deferred and full green is not a
+prerequisite for the parent plan. Preserve implemented repairs and address relevant survivors as
+product boundaries change.
+
+The isolated unfiltered run at clean `50d86d824a4e7cef55a93878829d6215ce372494`, run ID
+`e4ec8cf5-8f74-42df-bd16-8e129ede3bd9`, was stopped by request after 4,691.738 s: 1,181 passed,
+eight failed, one SIGINT interruption, 50 not started (1,240 selected, two intentional ignores).
+There were no nextest timeouts. The Python context/negative-import clean/live corpus passed.
+This is partial diagnostic evidence, not terminal qualification. Logs/context and detailed review
+are under `target/nextest-remediation/2026-09-11/full-3*`.
+
+Seven failures expired fixture setup/query clocks while semantic publication remained active:
+literal queries; Cargo platforms/flags, feature/profile selections, linkage kinds and custom build
+inputs; mixed decoded sources; mixed function definitions/bodies (whose earlier semantic comparisons
+passed). The poll/nested-source case passed its source/update/reopen assertions, then exposed a
+production shutdown issue: a signed control command waits behind owned cleanup long enough to
+expire before authentication. Authenticate promptly while driving cleanup and acknowledge only
+after cleanup succeeds; retain signature, sequence, generation and expiry checks. The namespace/
+stub case was interrupted and is not an additional functional failure.
+
+Unapplied drafts in `target/nextest-remediation/2026-09-11/staged-followup/` have no compiler or
+behavioral acceptance. Integrate the ownership correction when touching P04 lifecycle; fixture
+clock drafts are deferred. Do not copy staged files wholesale over later product changes.
+
+
 | Package | Current implementation and evidence |
 |---|---|
 | R01 | Implemented in `6910ec85`: nextest admits two native workspace/watch fixtures, gives the 10,000-file capture both slots, and preserves default/CI timeout precedence. Watcher failures retain native kinds, stage, backend, path and best-effort Linux limits. Failed-fixture cleanup allows the ordinary drain/join budget. Full aggregate qualification remains pending |
@@ -28,7 +54,7 @@ qualification remains the separately scoped representative-workload work in pare
 | R03 | Implemented in `599db1ad`: the obsolete sealing-time assertion is replaced by `derived_composition_enforces_output_bound_on_read_without_preexecution`; installed composition must fail on its actual read. It and the existing stream-bound/repeated-read test pass |
 | R04 | Implemented in `fc4f0fa4`: execution accepts only freshness carried by its admitted snapshot; service and test backends use the same interface. Direct preparation retains guarded input behavior, then semantic-current admission precedes positive rows. Direct execution passes in 103.849 s; old-epoch lease coverage passes |
 | R05 | Implemented through `00f90066`: typed shutdown cancellation, fresh provider run/resource ownership, joined native reads/writes and background publication independent of request deadlines. Direct semantic admission, mixed first-release queries, all three publication-shutdown variants, signal ordering, activation readback and full retained processing pagination pass. The latest 48-case native/processing selection passes; aggregate survivor review remains part of the terminal run |
-| R06 | Scoped checks, default/CI group inspection and original-identity reconciliation pass. The complete unfiltered workspace run and its final handoff remain pending |
+| R06 | Scoped checks, default/CI group inspection and original-identity reconciliation pass. The complete unfiltered workspace qualification is deferred by user direction; the partial full-3 result above is not closure |
 
 The first focused selection passes **19/19** in 103.855 s (build 2m31s), run
 `a4e0998c-db7f-4c97-8690-6ea2077eea5e`. Logs are under
@@ -40,7 +66,7 @@ default and CI group inspection include all 66 original startup/timeout identiti
 1,238 total cases: 1,236 selected plus the same two intentional ignores; R03 renames one test and
 R05 adds one cancellation regression. This is not yet a green full-suite claim.
 
-### Aggregate follow-up — in progress
+### Aggregate follow-up — historical execution before the P04/P05 handoff
 
 The unfiltered rerun started at clean revision `12d2ee0d`, run
 `3bd06a71-7199-4b82-ad8c-002ceb44189f`, with the qualified default group and the same deployed

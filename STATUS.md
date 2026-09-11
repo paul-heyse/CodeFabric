@@ -1,27 +1,23 @@
 # CodeFabric status
 
 Updated 2026-09-11 from the canonical `/home/paul/CodeFabric` working tree on `master`.
-The user authorized the workspace test remediation plan. R01–R04 are implemented and pass all
-19 focused cases. R05's corrected provider run/resource admission and native publication lifetime
-pass 23 focused checks. Real direct semantic admission, the mixed first-release corpus, mixed/Python
-publication interruption, client-timeout/reopen and ordinary shutdown ordering now pass. The final
-shutdown correction is `c96de52e`; it gives started native writes a finite joined shutdown allowance
-with separate supervisor headroom, preserving startup/query deadlines and failed-join ownership.
-Revised fixture scheduling and sequence limits are checked in; the tooling consumer passes 232
-tests and formatting/lint. All-target Clippy completes with existing warnings and featureless
-checking passes. The complete unfiltered run remains to be qualified using isolated build artifacts.
-The earlier run at `12d2ee0d` was interrupted after a concurrent Cursor run replaced shared daemon
-binaries and is not attributable full-suite evidence. The original failed baseline below remains
-visible until a full run passes. Durations are diagnostic observations; the user's priority is
-sound design and complete functionality, with representative performance work left to parent P14.
-The subsequent ownership audit (`da6c97ef`, `c27be78e`) covers activation writes and bounded retained
-processing reads. `00f90066` removes the independent timer that abandoned valid background
-publication, preserving caller/control deadlines, resource bounds, invalidation and bounded
-shutdown. All 48 focused checks pass, including the full 131-file repair/reopen/retained-page case
-and actual Delta, cancellation and cleanup cases. Activation/readback separately passes 13 cases.
-The final inventory has 1,240 selected tests plus the same two intentional ignores; all 71 original
-unsuccessful identities map to selected cases, with only the documented R03 assertion replacement.
-Broader outcome implementation remains at the `722b57d4` P04 checkpoint.
+The user has paused pursuit of full workspace test remediation and authorized completing the
+remaining P04 scope, then P05, in the detailed outcomes plan. Sound design and feature delivery
+take priority over arbitrary performance thresholds or a 100% suite result. P04 is active.
+
+Remediation through `00f90066` preserves the completed fixture, admission and native lifetime fixes.
+The isolated unfiltered run at clean `50d86d82` was stopped at the user's direction: **1,181 passed,
+eight failed, one SIGINT interruption, 50 not started**, out of 1,240 selected; the same two intentional
+ignores remain. Run `e4ec8cf5-8f74-42df-bd16-8e129ede3bd9` took 4,691.738 s. This is partial evidence,
+not full qualification. Seven survivors exhausted semantic fixture setup/query clocks; one exposes
+shutdown command authentication delayed behind owned cleanup. The complete Python context/negative
+import corpus passed. Logs and context: `target/nextest-remediation/2026-09-11/full-3*`.
+
+The latest 48 focused native/processing checks, including the complete 131-file retained-page case,
+pass. All-target Clippy completes with existing warnings, featureless checking passes, and 232
+tooling tests pass. R06 remains deferred; the supplement records original and subsequent evidence.
+Relevant functional failures will be addressed in the product slices they affect. No broad suite
+rerun is a prerequisite to resuming P04.
 
 P01/P02 initial vertical exits and P03's first-release query boundary are delivered. P04 retained
 continuous operation is partial; P05–P14 remain open. The detailed plan §10 and the package handoff
@@ -54,9 +50,8 @@ of the supplement. These counts describe the original review baseline.
 
 Local logs are in `target/nextest-review/2026-09-11-workspace/`; the durable findings and full test
 inventory are in the new plan. Scheduling, typed fixture/census updates, actual-read resource
-assertions, admitted-snapshot freshness and native lifetime fixes are implemented. Remaining work is
-the terminal full run and resolution of any functional survivors. An unfiltered passing run is required
-before this supplement closes. It supports the current outcomes plan and does not replace its
+assertions, admitted-snapshot freshness and native lifetime fixes are implemented. Full-run qualification is deferred by the user; the supplement remains open.
+The selected product work is P04 followed by P05. It supports the current outcomes plan and does not replace its
 backlog or declare P04/P05 complete. Repair progress and commits are in the supplement’s §0.
 
 Follow the [production backlog](docs/plans/codefabric_pragmatic_production_implementation_plan.md)
@@ -91,7 +86,19 @@ passes `just tools-doctor`, `just tool-version-contract-check`, shell syntax and
 (`/tmp/codefabric-system-uv-consumer.log`); the CLI report is `/tmp/codefabric-system-uv-report.log`.
 Earlier historical uv reconciliation entries below no longer prescribe a CLI version.
 
-## P04 retained inputs and syntax — partial, paused at accepted checkpoints
+## P04 retained inputs and syntax — partial, active
+
+The resumed inclusion slice uses one capture/watch policy. Captured root `pyrefly.toml` and
+`[tool.pyrefly]` search/site-package candidates can select subtrees beneath normally pruned
+`.venv`/build directories, with ancestor observation, sibling pruning, no-follow source capture
+and unconditional `.git` exclusion. Configuration changes invalidate watch topology; changed
+policy during traversal requires reconciliation. Context discovery retains precedence/conflict
+validation. Thirteen focused inventory/native/poll/recovery cases pass in 15.039 s
+(`/tmp/codefabric-p04-inclusion-focused.log`). Installed `.venv` site-package queries through all four public forms and exact reopen pass
+in 113.704 s (run `c363235c-e4e6-45b6-8bcd-e59204aacf18`,
+`/tmp/codefabric-p04-inclusion-installed.log`; isolated target, installed native providers,
+delegated user-systemd scope). Physical roots outside the registered workspace and complete Git classification
+remain in P04; this slice does not imply their completion.
 
 P03's related-context integration is committed in `75687368`. P04's immutable-input pin reuse and
 workspace-owned syntax checkpoint is committed in `55c69cdd`. The retained Pyrefly service is
@@ -2386,14 +2393,14 @@ D1–D7/E01–E26/P01–P14 registers. The navigation log is
 `/tmp/codefabric-p04-stopping-point-docs.log`. Only the two handoff documents change after the
 validated implementation commit `722b57d4`.
 
-## Package handoff at the stopping point
+## Package handoff — P04 active, P05 next
 
-**Work is stopped at the user's request.** The current provider executable invalidation task is
-committed as `722b57d4` and its installed acceptance passes. No next slice is started or scheduled.
-The entire outcomes 4–8 scope remains selected; none is complete. The detailed plan §3.3 defines
-P01–P14 and its fully updated §10 records the exact remaining progression.
+**Execution resumed at the user's request on 2026-09-11.** The provider executable invalidation
+checkpoint `722b57d4` and subsequent native ownership repairs remain implemented. Complete P04's
+remaining inclusion/validity, retained Cargo fact state, scheduling and reuse/ownership boundaries,
+then P05's first-release corpus. The detailed plan §3.3 and §10 retain the full progression.
 
-When execution is requested again:
+Current execution order:
 
 1. Continue **P04**: complete captured source/Git/external inclusion and recovery topology; complete
    positive/negative/tool/sysroot/linker/runtime dependency validity and owner manifests; establish

@@ -1,12 +1,14 @@
 //! Workspace-owned change observation. Events request a census; they never establish facts.
 
 use std::collections::BTreeSet;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use notify_debouncer_full::notify::{Config, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode};
+use notify_debouncer_full::notify::{
+    Config, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode,
+};
 use notify_debouncer_full::{
     DebounceEventResult, Debouncer, NoCache, RecommendedCache, new_debouncer_opt,
 };
@@ -14,6 +16,7 @@ use tokio::sync::mpsc;
 
 use crate::daemon::SourceWatchProfile;
 use crate::freshness::FreshnessBarrier;
+use crate::source_inclusion::SourceInclusionPolicy;
 
 /// Keep native error kinds and affected paths until the startup/control presentation boundary.
 #[derive(Debug, thiserror::Error)]
@@ -354,6 +357,7 @@ impl WorkspaceObservation {
         &self,
         root: &Path,
         git: &crate::git_state::watch_topology::GitWatchTopology,
+        inclusion: &SourceInclusionPolicy,
         profile: SourceWatchProfile,
         events: DebounceEventResult,
     ) {
@@ -362,25 +366,30 @@ impl WorkspaceObservation {
             let relevant = |event: &notify_debouncer_full::DebouncedEvent| {
                 !matches!(event.kind, EventKind::Access(_))
                     && (event.paths.is_empty()
-                        || event
-                            .paths
-                            .iter()
-                            .any(|path| relevant(root, path) || git.relevant(path)))
+                        || event.paths.iter().any(|path| {
+                            relevant_with_policy(root, path, inclusion) || git.relevant(path)
+                        }))
             };
             let topology_changed = rescan
                 || events.iter().any(|event| {
                     relevant(event)
-                        && (event.paths.iter().any(|path| git.topology_relevant(path))
-                            || matches!(
-                                event.kind,
-                                EventKind::Any
-                                    | EventKind::Other
-                                    | EventKind::Create(_)
-                                    | EventKind::Remove(_)
-                                    | EventKind::Modify(
-                                        notify_debouncer_full::notify::event::ModifyKind::Name(_)
-                                    )
-                            ))
+                        && (event.paths.iter().any(|path| {
+                            git.topology_relevant(path)
+                                || path.strip_prefix(root).is_ok_and(|relative| {
+                                    SourceInclusionPolicy::CONFIGURATIONS
+                                        .iter()
+                                        .any(|name| relative == Path::new(name))
+                                })
+                        }) || matches!(
+                            event.kind,
+                            EventKind::Any
+                                | EventKind::Other
+                                | EventKind::Create(_)
+                                | EventKind::Remove(_)
+                                | EventKind::Modify(
+                                    notify_debouncer_full::notify::event::ModifyKind::Name(_)
+                                )
+                        ))
                 });
             if topology_changed {
                 self.topology_revision.fetch_add(1, Ordering::AcqRel);
@@ -408,18 +417,21 @@ impl WorkspaceObservation {
         let observed = self.clone();
         let selected_root = root.to_owned();
         let git = crate::git_state::watch_topology::GitWatchTopology::resolve(root);
+        let inclusion = SourceInclusionPolicy::capture_watch(root);
         let retained = budget
             .try_reserve(
                 crate::resource_budget::ResourceClass::Control,
                 crate::resource_budget::ResourceAmounts {
-                    memory_bytes: git.retained_bytes(),
+                    memory_bytes: git.retained_bytes() + 2 * inclusion.retained_bytes(),
                     ..crate::resource_budget::ResourceAmounts::default()
                 },
             )
             .map_err(|error| error.to_string())?;
         let metadata = git.clone();
-        let handler =
-            move |events| observed.observe_events(&selected_root, &metadata, profile, events);
+        let callback_policy = inclusion.clone();
+        let handler = move |events| {
+            observed.observe_events(&selected_root, &metadata, &callback_policy, profile, events)
+        };
         let config = Config::default().with_follow_symlinks(false);
         let watcher = match profile {
             SourceWatchProfile::Native => WatchBackend::Native(
@@ -454,7 +466,7 @@ impl WorkspaceObservation {
             registered_directories: 0,
             excluded_directories: 0,
         };
-        watch.install(root, cancellation)?;
+        watch.install(root, &inclusion, cancellation)?;
         let metadata_directories = git.directories();
         for directory in &metadata_directories {
             if cancellation.is_cancelled() {
@@ -467,7 +479,9 @@ impl WorkspaceObservation {
         // A .git pointer or info-directory change before its registration must retain a
         // repair obligation even if no backend event covered that installation interval.
         let checked_git = crate::git_state::watch_topology::GitWatchTopology::resolve(root);
-        let coherent = git == checked_git && metadata_directories == checked_git.directories();
+        let coherent = git == checked_git
+            && metadata_directories == checked_git.directories()
+            && inclusion == SourceInclusionPolicy::capture_watch(root);
         if !coherent {
             self.topology_revision.fetch_add(1, Ordering::AcqRel);
         }
@@ -482,21 +496,16 @@ impl WorkspaceObservation {
     }
 }
 
-fn relevant(root: &Path, path: &Path) -> bool {
+fn relevant_with_policy(root: &Path, path: &Path, policy: &SourceInclusionPolicy) -> bool {
     let Ok(relative) = path.strip_prefix(root) else {
         return false;
     };
-    let mut components = relative.components().peekable();
-    while let Some(part) = components.next() {
-        if let Component::Normal(name) = part
-            && (name == ".git"
-                || (components.peek().is_some()
-                    && crate::inventory::excluded_directory(name.as_encoded_bytes())))
-        {
-            return false;
-        }
-    }
-    true
+    policy.includes(relative.as_os_str().as_encoded_bytes(), false)
+}
+
+#[cfg(test)]
+fn relevant(root: &Path, path: &Path) -> bool {
+    relevant_with_policy(root, path, &SourceInclusionPolicy::default())
 }
 
 /// Bounded control channel; the structured blocking owner performs native joins.
@@ -578,6 +587,7 @@ impl WorkspaceWatch {
     fn install(
         &mut self,
         root: &Path,
+        inclusion: &SourceInclusionPolicy,
         cancellation: &crate::cancellation::Cancellation,
     ) -> Result<(), WorkspaceWatchError> {
         let limits = crate::inventory::InventoryLimits::default();
@@ -633,8 +643,9 @@ impl WorkspaceWatch {
                     self.reserve_path(&entry.path())?;
                     continue;
                 }
-                let name = entry.file_name();
-                if name == ".git" || crate::inventory::excluded_directory(name.as_encoded_bytes()) {
+                let path = entry.path();
+                let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
+                if !inclusion.includes(relative.as_os_str().as_encoded_bytes(), true) {
                     self.excluded_directories += 1;
                     continue;
                 }
@@ -646,7 +657,6 @@ impl WorkspaceWatch {
                         .to_owned()
                         .into());
                 }
-                let path = entry.path();
                 self.reserve_path(&path)?;
                 pending.push((path, depth + 1));
             }
@@ -803,6 +813,67 @@ mod tests {
         ));
         assert!(source.paths.contains(&missing));
         watch.stop();
+    }
+
+    #[tokio::test]
+    async fn selected_dependency_topology_observes_edits_and_configuration_reselection() {
+        use std::fs;
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("source");
+        fs::create_dir_all(root.join(".venv/lib/site-packages/pkg")).unwrap();
+        fs::create_dir_all(root.join(".venv/bin")).unwrap();
+        let config = root.join("pyrefly.toml");
+        fs::write(&config, "site-package-path=['.venv/lib/site-packages']\n").unwrap();
+        let (observed, mut receiver) = WorkspaceObservation::new();
+        let budget = crate::provider_types::source_fixture_budget([2; 16]);
+        let watch = observed
+            .watch(
+                &root,
+                &budget,
+                &crate::cancellation::Cancellation::default(),
+                SourceWatchProfile::Native,
+            )
+            .unwrap();
+        assert!(
+            watch
+                .registered_paths
+                .contains(&root.join(".venv/lib/site-packages/pkg"))
+        );
+        assert!(!watch.registered_paths.contains(&root.join(".venv/bin")));
+        receiver.recv().await.unwrap();
+        let revision = observed.event_revision();
+        fs::write(
+            root.join(".venv/lib/site-packages/pkg/__init__.pyi"),
+            "def changed() -> int: ...\n",
+        )
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while observed.event_revision() == revision {
+                receiver.recv().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        let topology = observed.topology_revision.load(Ordering::Acquire);
+        fs::write(&config, "site-package-path=[]\n").unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while observed.topology_revision.load(Ordering::Acquire) == topology {
+                receiver.recv().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        watch.stop();
+        let replacement = observed
+            .watch(
+                &root,
+                &budget,
+                &crate::cancellation::Cancellation::default(),
+                SourceWatchProfile::Native,
+            )
+            .unwrap();
+        assert!(!replacement.registered_paths.contains(&root.join(".venv")));
+        replacement.stop();
     }
 
     #[tokio::test]

@@ -399,6 +399,12 @@ impl InventoryWalker {
         }
         require_source_generation(store, root.workspace_id(), source_generation)?;
         let started = Instant::now();
+        #[cfg(feature = "daemon")]
+        let inclusion = crate::source_inclusion::SourceInclusionPolicy::capture_secure(root);
+        #[cfg(not(feature = "daemon"))]
+        let inclusion = crate::source_inclusion::SourceInclusionPolicy::default();
+        #[cfg(feature = "daemon")]
+        let _policy_charge = reserve_memory(&self.budget, inclusion.retained_bytes())?;
         let mut retained = reserve_memory(&self.budget, 0)?;
         let mut traversal = reserve_memory(&self.budget, 256)?;
         let mut records = Vec::new();
@@ -465,12 +471,10 @@ impl InventoryWalker {
                 })?;
                 let mut child = components.clone();
                 child.push(entry.name.clone());
-                if entry.name == b".git" {
-                    continue;
-                }
-                if excluded_directory(&entry.name)
-                    && entry.kind == SecureDirectoryEntryKind::Directory
-                {
+                if !inclusion.includes(
+                    &join_components(&child),
+                    entry.kind == SecureDirectoryEntryKind::Directory,
+                ) {
                     continue;
                 }
                 match entry.kind {
@@ -497,6 +501,10 @@ impl InventoryWalker {
                     }
                 }
             }
+        }
+        #[cfg(feature = "daemon")]
+        if inclusion != crate::source_inclusion::SourceInclusionPolicy::capture_secure(root) {
+            return Err(InventoryError::SourceChanged);
         }
         records.sort_unstable_by(|left, right| {
             left.path
@@ -1119,13 +1127,6 @@ fn join_components(components: &[Vec<u8>]) -> Vec<u8> {
     components.join(&b'/')
 }
 
-pub(crate) fn excluded_directory(name: &[u8]) -> bool {
-    matches!(
-        name,
-        b"target" | b".venv" | b"node_modules" | b"__pycache__"
-    )
-}
-
 fn classify_language(path: &[u8]) -> Option<&'static str> {
     if path.ends_with(b".rs") {
         Some("rust")
@@ -1236,6 +1237,48 @@ mod tests {
             .unwrap()
             .workspace_id;
         (directory, store, workspace_id, root)
+    }
+
+    #[test]
+    #[cfg(feature = "daemon")]
+    fn captured_configuration_selects_pruned_dependencies_and_removal_retracts_them() {
+        let (_directory, mut store, workspace, path) = fixture();
+        fs::create_dir_all(path.join(".venv/lib/site-packages/pkg")).unwrap();
+        fs::create_dir_all(path.join(".venv/bin")).unwrap();
+        fs::write(path.join(".venv/bin/unselected.py"), "unselected = True\n").unwrap();
+        fs::write(
+            path.join(".venv/lib/site-packages/pkg/__init__.pyi"),
+            "def external() -> int: ...\n",
+        )
+        .unwrap();
+        fs::write(
+            path.join("pyrefly.toml"),
+            "site-package-path=['.venv/lib/site-packages']\n",
+        )
+        .unwrap();
+        let root = open_workspace_root(&mut store, workspace).unwrap();
+        let mut walker = InventoryWalker::new(InventoryLimits::default());
+        let first = walker
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
+            .unwrap();
+        let paths = first
+            .records
+            .iter()
+            .map(|record| record.path.raw_relative_path_bytes.as_slice())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            paths,
+            [
+                b".venv/lib/site-packages/pkg/__init__.pyi".as_slice(),
+                b"pyrefly.toml"
+            ]
+        );
+        fs::write(path.join("pyrefly.toml"), "site-package-path=[]\n").unwrap();
+        let second = walker
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
+            .unwrap();
+        assert_eq!(second.records.len(), 1);
+        assert_ne!(first.digest, second.digest);
     }
 
     #[test]

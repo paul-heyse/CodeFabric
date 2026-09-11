@@ -64,12 +64,11 @@ Runtime actions retain compact input/output references, selected context/snapsho
 
 ### 1.4 Progress checkpoint and how to execute the remaining scope
 
-**Current checkpoint, 2026-09-10.** The later package-order instruction superseded the earlier
-planning-only pause. P01 and P02 initial vertical exits and P03's first-release query boundary are
-delivered. P04 is partial; P05–P14 remain open. The latest user instruction is to conclude the
-current provider-deployment slice, update this plan and STATUS, and stop. That slice passes installed
-acceptance in `722b57d4`; work is now stopped. Resume only when requested,
-from §10 rather than from an obsolete P02/P03 entry point. No outcome from 4 through 8 is complete.
+**Current checkpoint, 2026-09-11.** P01/P02 initial vertical exits and P03's first-release query
+boundary are delivered. The user has authorized completing remaining P04, then P05, and has paused
+pursuit of full workspace test remediation. The `722b57d4` product checkpoint and repairs through
+`00f90066` remain implemented. P04 is active; P05 is next; P06–P14 remain open. Resume from §10.
+No outcome from 4 through 8 is complete.
 
 Preserve the behavior in §1.2 and the attributable execution history in §3.3/STATUS. Partial
 family/query delivery, finite configured ceilings and scoped test passes are not whole-outcome,
@@ -310,7 +309,7 @@ where their interfaces already exist; do not delay telemetry, wire evolution, up
 retention ownership until every semantic family is finished.
 
 Current execution state: P01/P02 initial exits and P03's first-release query boundary are delivered;
-P04 is partial and paused after `722b57d4`; P05–P14 are open. The table defines the full selected
+P04 is partial and active after `722b57d4` and the remediation fixes; P05 is next, P06–P14 open. The table defines the full selected
 scope, and §10 identifies the next unmet work. Dated continuation notes below are attributable
 history; their earlier next-step statements do not supersede this handoff.
 
@@ -1531,6 +1530,17 @@ await the full provider pass. Status distinguishes source freshness and selected
 
 ### 6A. Watcher, repository observations and authoritative reconciliation
 
+**Resumed inclusion slice (2026-09-11).** Inventory and watch registration now consume one policy
+for root captured Python search/site-package selections, including explicitly selected subtrees
+inside `.venv`, ancestor registration and sibling/cache pruning. Configuration edits rebuild the
+owned topology; a changed policy during capture/install retains reconciliation. Git metadata stays
+outside source bytes and ignore patterns do not exclude admitted compiler inputs. Existing context
+discovery owns conflicts and provider admission. Thirteen focused checks pass in 15.039 s; installed `.venv` provider queries through all four
+public forms and exact reopen pass in 113.704 s (run `c363235c-e4e6-45b6-8bcd-e59204aacf18`).
+STATUS records the isolated native configuration and logs. Further physical external roots, Git classification and the
+remaining §6A–§6C boundaries below remain open.
+
+
 **Current status — partial.** The daemon installs a native notify watcher before census, owns its
 blocking lifetime, coalesces callbacks through a bounded queue, retains a rescan watermark and runs
 periodic secure reconciliation. Public status exposes watch health and source observations. Installed
@@ -2611,7 +2621,8 @@ fresh run/resource-owner identity while captured source/context identities remai
 Delta writes remain driven on their native runtime until joined; failed joins retain ownership.
 The same boundary drains retained processing pages. Bounded background publication can finish
 independently of request deadlines, retaining resource limits, invalidation and bounded shutdown.
-The supplement and STATUS record scoped native passes and the still-pending terminal full run.
+The supplement and STATUS record scoped native passes and the user-directed pause of terminal
+qualification. P04 is active, followed by P05; zero failures are not a prerequisite.
 These repairs support P04/P05/P13 and do not complete their broader acceptance boundaries.
 
 The table below preserves historical implementation checks from 2026-09-09 through the diagnostic-detail slice. Current package execution evidence follows it and is detailed in §3.3/§6/§8 and STATUS. Counts overlap and are not a combined full-suite result.
@@ -2762,11 +2773,13 @@ production acceptance above.
 
 ## 10. Package execution handoff
 
-**Broader package delivery remains at the 2026-09-10 checkpoint `722b57d4`.** The provider executable
-invalidation task is concluded and passes installed acceptance. On 2026-09-11 the user authorized
-the workspace test remediation supplement linked in §9.1; those qualification and ownership fixes
-are now being implemented. No next P04 backlog slice is started or scheduled. After the repair
-handoff, the remaining product sequence below still requires a new implementation instruction.
+**P04 execution resumed on 2026-09-11; P05 follows.** The user explicitly deferred further pursuit
+of a 100% test result. Retain the implemented remediation fixes and use affected feature checks.
+The isolated run at `50d86d82` was stopped by request after 1,181 passes, eight failures and one
+interruption; 50 selected cases never started. R06 remains open. Seven failures reached fixture
+setup/query clocks during semantic publication; the remaining shutdown defect delays command
+authentication behind native cleanup. Address applicable ownership defects within P04; do not
+interpret this partial run as complete qualification or require full green before feature work.
 
 | Package boundary | Current implementation and acceptance | Remaining boundary |
 |---|---|---|

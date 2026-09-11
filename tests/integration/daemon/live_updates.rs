@@ -987,16 +987,16 @@ fn captured_python_site_packages_survive_public_queries_and_reopen() {
         b"from external import py_leaf\ndef py_caller() -> int:\n    return py_leaf()\n",
     );
     let root = Path::new(&fixture.workspace.root_path_display);
-    fs::create_dir_all(root.join("vendor/python/external")).unwrap();
+    fs::create_dir_all(root.join(".venv/lib/python3.14/site-packages/external")).unwrap();
     fs::write(
-        root.join("vendor/python/external/__init__.py"),
+        root.join(".venv/lib/python3.14/site-packages/external/__init__.py"),
         b"def py_leaf() -> int:\n    return 42\n",
     )
     .unwrap();
-    fs::write(root.join("vendor/python/external/py.typed"), b"").unwrap();
+    fs::write(root.join(".venv/lib/python3.14/site-packages/external/py.typed"), b"").unwrap();
     fs::write(
         root.join("pyrefly.toml"),
-        "site-package-path=['vendor/python']\n",
+        "site-package-path=['.venv/lib/python3.14/site-packages']\n",
     )
     .unwrap();
     let stack = InstalledProductionStack::build();
