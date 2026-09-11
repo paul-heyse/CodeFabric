@@ -2,14 +2,37 @@
 
 Date: 2026-09-11. Reviewed implementation: `a26c00a79f88b97ea9c85f1000d5f25775197c98`
 (`a26c00a7`, clean canonical `master` before the run).
-Status: **planned; no production or test fixes implemented by this review**.
+Status: **implementation in progress, authorized 2026-09-11**. The original review baseline
+and unsuccessful-test inventory are retained below; §0 records execution progress.
 
 This is a qualification and repair supplement to the
 [remaining outcomes 4–8 implementation plan](codefabric_pragmatic_production_outcomes_4_8_detailed_implementation_plan_2026-09-09.md),
 particularly P04/P05 and its E05/E06/E10/E12/E21/E25/E26 boundaries. It does not replace that
 backlog, reopen delivered P01–P03 boundaries wholesale, or declare any outcome complete.
 The user requested the full workspace run, failure review and this new implementation plan.
-The implementation sequence below is ready for a subsequent execution instruction.
+The user subsequently authorized implementing this sequence. It repairs the workspace baseline;
+broader outcome delivery remains in the parent plan.
+
+## 0. Implementation progress
+
+| Package | Current implementation and evidence |
+|---|---|
+| R01 | Implemented in `6910ec85`: nextest admits two native workspace/watch fixtures, gives the 10,000-file capture both slots, and preserves default/CI timeout precedence. Watcher failures retain native kinds, stage, backend, path and best-effort Linux limits. Failed-fixture cleanup allows the ordinary drain/join budget. Full aggregate qualification remains pending |
+| R02 | Implemented in `599db1ad`: census follows the closed current native relation sets and checks member-observation schema semantics; MIR fixtures supply coherent typed raw/display paths. All four original failures and the exhaustive census pass |
+| R03 | Implemented in `599db1ad`: the obsolete sealing-time assertion is replaced by `derived_composition_enforces_output_bound_on_read_without_preexecution`; installed composition must fail on its actual read. It and the existing stream-bound/repeated-read test pass |
+| R04 | Implemented in `fc4f0fa4`: execution accepts only freshness carried by its admitted snapshot; service and test backends use the same interface. Direct preparation retains guarded input behavior, then semantic-current admission precedes positive rows. Direct execution passes in 103.849 s; old-epoch lease coverage passes |
+| R05 | Shutdown admission race correction is implemented in `96e6d165` and passes all four focused cases. A closed scope rejects new Pyrefly work as cancellation; actual join failures keep their original failure path. Remaining aggregate startup/timeout qualification is pending |
+| R06 | Pending the complete unfiltered workspace run, final configuration/identity reconciliation and handoff |
+
+The first focused selection passes **19/19** in 103.855 s (build 2m31s), run
+`a4e0998c-db7f-4c97-8690-6ea2077eea5e`. Logs are under
+`target/nextest-remediation/2026-09-11/`. `r01-r04-focused.log` covers the initial four packages;
+`clippy.jsonl` and `clippy-stderr.log` record all-target Clippy completion with the existing warning
+backlog and no changed-line diagnostics. The shutdown selection passes **4/4** in 38.152 s,
+including real supervisor readiness (38.146 s) without the prior closed-scope warning. Both
+default and CI group inspection include all 66 original startup/timeout identities. Nextest lists
+1,238 total cases: 1,236 selected plus the same two intentional ignores; R03 renames one test and
+R05 adds one cancellation regression. This is not yet a green full-suite claim.
 
 ## 1. Result and scope
 

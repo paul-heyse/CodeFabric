@@ -1,10 +1,11 @@
 # CodeFabric status
 
-Updated 2026-09-11 from the canonical `/home/paul/CodeFabric` working tree on `master`, reviewed at
-`a26c00a7`, through implementation commit `722b57d4`. The provider executable invalidation task is
-concluded; its installed live/reopen acceptance passes. Implementation remains paused. The latest
-requested full workspace test run and remediation planning are complete; no production, test or
-configuration fix was applied during that review.
+Updated 2026-09-11 from the canonical `/home/paul/CodeFabric` working tree on `master`.
+The user authorized the workspace test remediation plan. R01–R04 are implemented and pass all
+19 focused cases; the R05 shutdown-admission correction passes four focused cases. All-target
+Clippy completes with the existing warning backlog and no changed-line diagnostics. The full
+workspace rerun is next; the original failed baseline below remains visible until it passes.
+Broader outcome implementation remains at the `722b57d4` P04 checkpoint.
 
 P01/P02 initial vertical exits and P03's first-release query boundary are delivered. P04 retained
 continuous operation is partial; P05–P14 remain open. The detailed plan §10 and the package handoff
@@ -39,7 +40,7 @@ inventory are in the new plan. The next repair is bounded native-fixture schedul
 typed fixture/census updates, actual-read resource assertions, admitted-snapshot freshness and
 resolution of any remaining startup/timeout defects. A full unfiltered passing run is required
 before this supplement closes. It supports the current outcomes plan and does not replace its
-backlog or declare P04/P05 complete. No repairs have started.
+backlog or declare P04/P05 complete. Repair progress and commits are in the supplement’s §0.
 
 Follow the [production backlog](docs/plans/codefabric_pragmatic_production_implementation_plan.md)
 and its [detailed outcomes 4–8 execution plan](docs/plans/codefabric_pragmatic_production_outcomes_4_8_detailed_implementation_plan_2026-09-09.md).
