@@ -1108,7 +1108,6 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
     async fn execute(
         &self,
         prepared: PreparedSemanticExecution<Self::ExecutionAuthority>,
-        freshness: FreshnessState,
         cancellation: Cancellation,
         context: SemanticBackendExecutionContext,
         artifacts: QueryExecutionArtifactAccumulator,
@@ -1140,10 +1139,7 @@ impl SemanticQueryBackend for ProgrammaticSemanticQueryBackend {
                 "admission and query authority retain different epoch capabilities",
             );
         }
-        if snapshot.workspace_id != context.workspace_id()
-            || snapshot.freshness_state != freshness
-            || snapshot.snapshot_id.is_empty()
-        {
+        if snapshot.workspace_id != context.workspace_id() || snapshot.snapshot_id.is_empty() {
             return failed(
                 &artifacts,
                 "snapshot_projection",

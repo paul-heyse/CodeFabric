@@ -2802,13 +2802,7 @@ async fn execute_accepted_query<B: SemanticQueryBackend>(task: ExecutionTask<B>)
         }),
         deadline,
     );
-    let execution = backend.execute(
-        prepared,
-        snapshot.freshness_state,
-        cancellation,
-        context,
-        artifacts,
-    );
+    let execution = backend.execute(prepared, cancellation, context, artifacts);
     let outcome = if let Ok(outcome) = tokio::time::timeout_at(execution_deadline, execution).await
     {
         outcome
@@ -4728,7 +4722,6 @@ mod tests {
         async fn execute(
             &self,
             _request: PreparedSemanticExecution<Self::ExecutionAuthority>,
-            _freshness: FreshnessState,
             _cancellation: Cancellation,
             _context: SemanticBackendExecutionContext,
             _artifacts: QueryExecutionArtifactAccumulator,

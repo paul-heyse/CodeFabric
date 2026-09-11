@@ -207,7 +207,6 @@ impl SemanticQueryBackend for InteropSemanticBackend {
     async fn execute(
         &self,
         prepared: PreparedSemanticExecution<Self::ExecutionAuthority>,
-        _freshness: crate::freshness::FreshnessState,
         cancellation: Cancellation,
         context: SemanticBackendExecutionContext,
         artifacts: crate::fabric::QueryExecutionArtifactAccumulator,

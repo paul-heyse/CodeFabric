@@ -21,7 +21,6 @@ use crate::fabric::streamed_result_package::{
 use crate::fabric::{
     QueryExecutionArtifactAccumulator, QueryExecutionArtifactEvidence, QueryExecutionContext,
 };
-use crate::freshness::FreshnessState;
 use crate::semantic_query_contract::{
     ParsedSemanticRequest, SemanticQueryError, SemanticSnapshotResponse,
 };
@@ -316,11 +315,10 @@ pub trait SemanticQueryBackend: Send + Sync + 'static {
         self.admit_execution_request(resolved)
     }
 
-    /// Execute one accepted operation against the exact leased active workspace.
+    /// Execute against the exact leased workspace and freshness in the admitted snapshot.
     async fn execute(
         &self,
         prepared: PreparedSemanticExecution<Self::ExecutionAuthority>,
-        freshness: FreshnessState,
         cancellation: Cancellation,
         context: SemanticBackendExecutionContext,
         artifacts: QueryExecutionArtifactAccumulator,

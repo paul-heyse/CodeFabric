@@ -2053,7 +2053,7 @@ maintenance_schedule = "daily-idle"
                     "version": "2.0",
                     "semantic_request_id": identity,
                     "scope": {"workspace_id": record.public_id()},
-                    "freshness": {"policy": "best_available_snapshot"},
+                    "freshness": {"policy": "require_semantic_current", "deadline_ms": 180_000},
                     "queries": [{
                         "request": "find code entities",
                         "query_id": "q1",
@@ -2176,11 +2176,16 @@ maintenance_schedule = "daily-idle"
                 if requirements.len() == 1
         ));
 
-        let prepared = crate::query_backend::SemanticQueryBackend::admit_execution_request(
+        let prepared = crate::query_backend::SemanticQueryBackend::admit_fresh_execution_request(
             &backend,
             exact_resolved,
         )
-        .expect("fresh production backend atomically admits the exact request");
+        .await
+        .expect("fresh production backend admits the exact request after semantic convergence");
+        assert_eq!(
+            prepared.snapshot().freshness_state,
+            crate::freshness::FreshnessState::Current
+        );
         let principal_id = crate::fabric::command::PrincipalId::from_bytes([0x47; 16]);
         let execution = crate::fabric::QueryExecutionContext {
             execution_id: "query:wp47-direct-exact".to_owned(),
@@ -2208,7 +2213,6 @@ maintenance_schedule = "daily-idle"
         match crate::query_backend::SemanticQueryBackend::execute(
             &backend,
             prepared,
-            crate::registries::FreshnessState::Current,
             crate::cancellation::Cancellation::with_check_interval(1),
             context,
             artifacts,
