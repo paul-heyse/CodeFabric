@@ -119,6 +119,11 @@ mod source_context;
 pub(super) mod syntax_cache;
 mod updates;
 
+// Started Delta writes must finish while their native runtime remains alive. Reserve bounded
+// time for that drain, leaving ten seconds within the supervisor's 30-second control phase
+// for protocol delivery and finalization. A failed join still retains the writer fence.
+pub(crate) const WORKSPACE_OPERATION_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// Joined owner retained by the daemon after one workspace reaches queryable authority.
 pub(crate) struct ProductionWorkspaceStartup {
     command_runtime: Arc<FabricCommandRuntime>,
@@ -155,7 +160,7 @@ impl ProductionWorkspaceStartup {
         // A failed native join must not release the writer lease in-process. In that case
         // FabricCommandRuntime's fail-closed Drop keeps the OS fence until process teardown.
         self.task_scope
-            .cancel_and_join(Duration::from_secs(2))
+            .cancel_and_join(WORKSPACE_OPERATION_DRAIN_TIMEOUT)
             .await
             .map_err(|error| step("workspace-operation-join", error))?;
         self.admission

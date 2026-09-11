@@ -28,7 +28,7 @@ use crate::fabric::production_kernel::{
 };
 use crate::fabric::production_workspace_startup::{
     ProductionWorkspaceStartup, ProductionWorkspaceStartupAssuranceFault,
-    start_production_workspace,
+    WORKSPACE_OPERATION_DRAIN_TIMEOUT, start_production_workspace,
 };
 use crate::fabric::programmatic_query_backend::ProgrammaticSemanticQueryBackend;
 use crate::fabric::query_coordinator::{
@@ -1112,7 +1112,9 @@ async fn serve_writer_fenced_v2(
     {
         Ok(workspace) => workspace,
         Err(error) => {
-            let joined = daemon_task_scope.cancel_and_join(Duration::from_secs(2)).await;
+            let joined = daemon_task_scope
+                .cancel_and_join(WORKSPACE_OPERATION_DRAIN_TIMEOUT)
+                .await;
             let detail = match joined {
                 Ok(()) => error.to_string(),
                 Err(join) => format!("{error}; startup operation join: {join}"),
@@ -1541,7 +1543,7 @@ async fn serve_writer_fenced_v2(
         .and_then(|drained| query_join.map(|()| drained))
         .and_then(|drained| query_retire.map(|()| drained));
     let task_drain = daemon_task_scope
-        .cancel_and_join(Duration::from_secs(2))
+        .cancel_and_join(WORKSPACE_OPERATION_DRAIN_TIMEOUT)
         .await
         .map_err(|error| DaemonError::Serving(format!("daemon task drain: {error}")));
     let primary = primary.and_then(|drained| task_drain.map(|()| drained));
