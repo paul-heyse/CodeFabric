@@ -3,7 +3,8 @@
 //! The five self-observation families retain their append-only histories in
 //! [`super::programmatic_observation_delta`]. Every provider, canonical, derived, input, and
 //! proof relation retained by the sealed session is materialized here with a native DataFusion
-//! plan and `SaveMode::Overwrite`, producing one immutable Delta version per epoch. Recovery opens
+//! plan and `SaveMode::Overwrite`, or reuses an exact selected version when its complete immutable
+//! inputs and descriptor match. Recovery opens
 //! only the root/version pairs selected by activation and restores their executable
 //! [`SchemaContract`] directly from a canonical descriptor stored in Delta metadata.
 
@@ -110,6 +111,12 @@ impl ProgrammaticRelationDeltaLayout {
 pub enum ProgrammaticRelationDeltaPreparation {
     /// First lawful epoch: provision version-zero tables below the explicit layout.
     Genesis(ProgrammaticRelationDeltaLayout),
+    /// Reuse selected versions with equal complete immutable input identities and descriptors.
+    /// Changed or ineligible relations get candidate-owned histories; selected tables are not written.
+    ReuseUnchanged {
+        selected: ProgrammaticRelationDeltaPublication,
+        layout: ProgrammaticRelationDeltaLayout,
+    },
     /// Later epoch: open selected predecessors exactly and provision only newly released relations.
     Advance {
         selected: ProgrammaticRelationDeltaPublication,
@@ -160,6 +167,8 @@ enum StoredDeletionVectorBehavior {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct StoredRelationDescriptor {
     version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    immutable_input_identity: Option<[u8; 32]>,
     relation_id: String,
     catalog: String,
     schema: String,
@@ -202,11 +211,12 @@ impl RelationSnapshotSpec {
             &binding.table_reference,
             &binding.contract,
         )?);
-        let descriptor = StoredRelationDescriptor::from_contract(
+        let mut descriptor = StoredRelationDescriptor::from_contract(
             &relation_id,
             &binding.table_reference,
             &contract,
         )?;
+        descriptor.immutable_input_identity = binding.immutable_input_identity;
         let descriptor_json = canonical_descriptor(&descriptor)?;
         Ok(Self {
             relation_id,
@@ -291,6 +301,7 @@ impl StoredRelationDescriptor {
             .collect();
         Ok(Self {
             version: 1,
+            immutable_input_identity: None,
             relation_id: relation_id.as_str().to_owned(),
             catalog: catalog.to_owned(),
             schema: schema.to_owned(),
@@ -515,39 +526,46 @@ pub async fn persist_programmatic_relation_snapshots(
         .collect::<Result<BTreeMap<_, _>, _>>()?;
     let context = sealed.session().clone();
     let session = Arc::new(context.state());
-    let mut targets = prepare_targets(&specs, preparation, &session).await?;
+    let (reuse, mut targets) = match preparation {
+        ProgrammaticRelationDeltaPreparation::ReuseUnchanged { selected, layout } => (
+            Some((selected, layout)),
+            ProgrammaticRelationDeltaTargets {
+                targets: BTreeMap::new(),
+            },
+        ),
+        other => (None, prepare_targets(&specs, other, &session).await?),
+    };
     let mut pins = BTreeMap::new();
     let mut descriptors = BTreeMap::new();
     for (relation_id, spec) in specs {
-        let target = targets
-            .targets
-            .remove(&relation_id)
-            .ok_or(ProgrammaticRelationDeltaError::RelationSetMismatch)?;
+        let target = if let Some((selected, layout)) = &reuse {
+            if spec.descriptor.immutable_input_identity.is_some()
+                && selected.descriptors.get(&relation_id) == Some(&spec.descriptor)
+            {
+                let pin = selected
+                    .table_versions
+                    .get(&relation_id)
+                    .ok_or(ProgrammaticRelationDeltaError::RelationSetMismatch)?;
+                // Validate the exact selected snapshot before retaining its pin. No latest lookup,
+                // result comparison, or write occurs. Missing/corrupt history fails closed.
+                let table = load_exact(pin, &session).await?;
+                validate_loaded_descriptor(&table, &spec)?;
+                pins.insert(relation_id.clone(), pin.clone());
+                descriptors.insert(relation_id, spec.descriptor);
+                continue;
+            }
+            provision_target(spec.clone(), layout, &session).await?
+        } else {
+            targets
+                .targets
+                .remove(&relation_id)
+                .ok_or(ProgrammaticRelationDeltaError::RelationSetMismatch)?
+        };
         if target.spec.descriptor != spec.descriptor {
             return Err(ProgrammaticRelationDeltaError::DescriptorDrift(relation_id));
         }
-        let dataframe = context.table(spec.table_reference.clone()).await?;
-        let mut expressions = Vec::with_capacity(spec.contract.storage_schema().fields().len());
-        for (storage_index, storage_field) in
-            spec.contract.storage_schema().fields().iter().enumerate()
-        {
-            let logical_index = spec
-                .contract
-                .logical_index_for_storage(storage_index)?
-                .ok_or_else(|| ProgrammaticRelationDeltaError::UnmappedStorageField {
-                    relation_id: relation_id.clone(),
-                    storage_index,
-                })?;
-            let logical_field = spec.contract.logical_schema().field(logical_index);
-            let expression = if logical_field.data_type() == storage_field.data_type() {
-                col(logical_field.name())
-            } else {
-                cast(col(logical_field.name()), storage_field.data_type().clone())
-            };
-            expressions.push(expression.alias(storage_field.name()));
-        }
-        let dataframe = dataframe.select(expressions)?;
-        validate_storage_plan_schema(&relation_id, dataframe.schema().as_arrow(), &spec.contract)?;
+        let dataframe =
+            storage_projection(context.table(spec.table_reference.clone()).await?, &spec)?;
         let delta_schema = target.table.snapshot()?.snapshot().arrow_schema();
         validate_storage_plan_schema(&relation_id, delta_schema.as_ref(), &spec.contract)?;
         let provider = Arc::new(IdentityPreservingViewTable::with_schema(
@@ -596,6 +614,38 @@ pub async fn persist_programmatic_relation_snapshots(
     ProgrammaticRelationDeltaPublication::try_new(epoch_id, pins, descriptors)
 }
 
+#[allow(clippy::result_large_err)] // Preserve the existing public exact-snapshot error type.
+fn storage_projection(
+    dataframe: datafusion::dataframe::DataFrame,
+    spec: &RelationSnapshotSpec,
+) -> Result<datafusion::dataframe::DataFrame, ProgrammaticRelationDeltaError> {
+    let mut expressions = Vec::with_capacity(spec.contract.storage_schema().fields().len());
+    for (storage_index, storage_field) in spec.contract.storage_schema().fields().iter().enumerate()
+    {
+        let logical_index = spec
+            .contract
+            .logical_index_for_storage(storage_index)?
+            .ok_or_else(|| ProgrammaticRelationDeltaError::UnmappedStorageField {
+                relation_id: spec.relation_id.clone(),
+                storage_index,
+            })?;
+        let logical_field = spec.contract.logical_schema().field(logical_index);
+        let expression = if logical_field.data_type() == storage_field.data_type() {
+            col(logical_field.name())
+        } else {
+            cast(col(logical_field.name()), storage_field.data_type().clone())
+        };
+        expressions.push(expression.alias(storage_field.name()));
+    }
+    let dataframe = dataframe.select(expressions)?;
+    validate_storage_plan_schema(
+        &spec.relation_id,
+        dataframe.schema().as_arrow(),
+        &spec.contract,
+    )?;
+    Ok(dataframe)
+}
+
 /// Reopen exact selected relation snapshots as application-contract providers in a fresh session.
 pub async fn reopen_programmatic_relation_snapshots(
     session: Arc<datafusion::execution::SessionState>,
@@ -629,12 +679,16 @@ pub async fn reopen_programmatic_relation_snapshots(
             Arc::clone(&spec.contract),
             read.into_provider(),
         )?) as Arc<dyn datafusion::catalog::TableProvider>;
-        providers.push(super::programmatic_schema::ProviderInput::new(
+        let mut input = super::programmatic_schema::ProviderInput::new(
             spec.relation_id.clone(),
             spec.table_reference,
             Arc::clone(&spec.contract),
             provider,
-        ));
+        );
+        if let Some(identity) = descriptor.immutable_input_identity {
+            input = input.with_immutable_input_identity(identity);
+        }
+        providers.push(input);
         pins.insert(spec.relation_id.clone(), pin);
         descriptors.insert(spec.relation_id, descriptor);
     }
@@ -648,6 +702,9 @@ async fn prepare_targets(
     session: &datafusion::execution::SessionState,
 ) -> Result<ProgrammaticRelationDeltaTargets, ProgrammaticRelationDeltaError> {
     match preparation {
+        ProgrammaticRelationDeltaPreparation::ReuseUnchanged { .. } => {
+            unreachable!("reuse provisions only changed relations after identity selection")
+        }
         ProgrammaticRelationDeltaPreparation::Genesis(layout) => {
             provision_targets(specs, &layout, session).await
         }

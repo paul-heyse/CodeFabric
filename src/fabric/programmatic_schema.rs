@@ -497,6 +497,7 @@ pub struct ProviderInput {
     pub table_reference: TableReference,
     pub contract: Arc<SchemaContract>,
     pub provider: Arc<dyn TableProvider>,
+    immutable_input_identity: Option<[u8; 32]>,
 }
 
 impl std::fmt::Debug for ProviderInput {
@@ -525,7 +526,17 @@ impl ProviderInput {
             table_reference,
             contract,
             provider,
+            immutable_input_identity: None,
         }
+    }
+
+    /// Declare the complete immutable inputs and producer revision of a deterministic provider.
+    /// Equal identities must imply equal rows, including multiplicity, provenance and generations.
+    /// Omit this when dependencies are incomplete or output depends on execution/epoch state.
+    #[must_use]
+    pub fn with_immutable_input_identity(mut self, identity: [u8; 32]) -> Self {
+        self.immutable_input_identity = Some(identity);
+        self
     }
 }
 
@@ -796,6 +807,7 @@ pub struct SealedRelationBinding {
     pub contract: Arc<SchemaContract>,
     pub actual_datafusion_schema: DFSchemaRef,
     pub(super) logical_plan: Option<Arc<LogicalPlan>>,
+    pub(super) immutable_input_identity: Option<[u8; 32]>,
 }
 
 /// Sealed candidate retaining the exact session/catalog authority used for planning.
@@ -894,6 +906,7 @@ impl ProgrammaticSchemaParts {
 enum RegisteredOrigin {
     Provider {
         logical_plan: Option<Arc<LogicalPlan>>,
+        immutable_input_identity: Option<[u8; 32]>,
     },
     #[cfg(test)]
     SystemObservation,
@@ -1630,7 +1643,10 @@ impl ProgrammaticSchemaAssembly {
             RegisteredRelation {
                 table_reference: input.table_reference,
                 contract: input.contract,
-                origin: RegisteredOrigin::Provider { logical_plan },
+                origin: RegisteredOrigin::Provider {
+                    logical_plan,
+                    immutable_input_identity: input.immutable_input_identity,
+                },
             },
         );
         Ok(())
@@ -2395,8 +2411,15 @@ impl ProgrammaticSchemaAssembly {
                     table_reference: registered.table_reference.clone(),
                     contract: Arc::clone(&registered.contract),
                     actual_datafusion_schema,
+                    immutable_input_identity: match &registered.origin {
+                        RegisteredOrigin::Provider {
+                            immutable_input_identity,
+                            ..
+                        } => *immutable_input_identity,
+                        _ => None,
+                    },
                     logical_plan: match &registered.origin {
-                        RegisteredOrigin::Provider { logical_plan } => {
+                        RegisteredOrigin::Provider { logical_plan, .. } => {
                             logical_plan.as_ref().map(Arc::clone)
                         }
                         RegisteredOrigin::Transformation { plan, .. }

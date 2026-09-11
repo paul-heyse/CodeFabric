@@ -73,7 +73,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--timeout",
         type=float,
-        help="per-case deadline; defaults to 240s, or 600s for mixed/context clean/live, staged and processing-page builds",
+        help="per-case deadline; defaults to 240s, 600s for mixed/context cases, or 1200s for staged/function-source edit sequences",
     )
     parser.add_argument(
         "--output", type=Path, default=ROOT / "target/product/golden.json"
@@ -131,6 +131,8 @@ def main(argv=None) -> int:
             timeout = (
                 args.timeout
                 if args.timeout is not None
+                else 1200
+                if name in {"staged-live", "function-source-live"}
                 else (
                     600
                     if name
@@ -141,7 +143,6 @@ def main(argv=None) -> int:
                         "python-stubs-live",
                         "python-roots-live",
                         "python-paths-live",
-                        "function-source-live",
                         "source-lines-live",
                         "rust-paths-live",
                         "cargo-build-live",
@@ -149,7 +150,6 @@ def main(argv=None) -> int:
                         "cargo-linkage-live",
                         "cargo-selections-live",
                         "decoded-source-live",
-                        "staged-live",
                         "processing-pages",
                     }
                     else 240

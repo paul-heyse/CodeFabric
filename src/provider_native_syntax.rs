@@ -392,6 +392,7 @@ pub struct InProcessProviderLifecycleObservation {
     pub ruff_retained_revisions: u16,
     pub tree_sitter_completed_runs: u64,
     pub ruff_completed_runs: u64,
+    pub ruff_reused_parses: u64,
 }
 
 impl ExactPythonSyntaxRunner {
@@ -460,6 +461,43 @@ impl ExactPythonSyntaxRunner {
         finish_run(jobs, source, pins, &tree, &ruff, semantics.as_deref())
     }
 
+    /// Reuse this file/context's native tree across complete authoritative captures.
+    /// All current Arrow facts are reprojected under the newly admitted job/source pins.
+    ///
+    /// # Errors
+    /// Rejects invalid source/context, admission failures, cancellation and parser failures.
+    pub fn run_captured(
+        &mut self,
+        jobs: InProcessProviderJobs<'_>,
+        source: &ProviderNativeSourceImage,
+        module: PythonModuleInput<'_>,
+    ) -> Result<ProviderNativeSyntaxRun, ProviderNativeSyntaxError> {
+        validate_job_source(jobs, source)?;
+        validate_job_module(jobs, source.file_id, module)?;
+        let text = validated_provider_text(source, true)?;
+        let pins = jobs.pins()?;
+        validate_run_pins(pins)?;
+        let tree = self
+            .tree_sitter
+            .parse_captured(jobs.tree_sitter, text.clone())?;
+        let ruff = self
+            .ruff
+            .parse_captured(jobs.ruff, tree.revision, text, &tree)?;
+        let semantics = semantic_result(&self.ruff, jobs.ruff, tree.revision, module)?;
+        finish_run(jobs, source, pins, &tree, &ruff, semantics.as_deref())
+    }
+
+    pub(crate) fn native_reservations(&self) -> crate::resource_budget::ResourceAmounts {
+        let mut cost = self.tree_sitter.native_reservations();
+        let ruff = self.ruff.native_reservations();
+        cost.memory_bytes = cost.memory_bytes.saturating_add(ruff.memory_bytes);
+        cost.retained_bytes = cost.retained_bytes.saturating_add(ruff.retained_bytes);
+        cost.retained_generations = cost
+            .retained_generations
+            .saturating_add(ruff.retained_generations);
+        cost
+    }
+
     #[must_use]
     pub fn lifecycle_observation(&self) -> InProcessProviderLifecycleObservation {
         let tree = self.tree_sitter.metrics();
@@ -469,6 +507,7 @@ impl ExactPythonSyntaxRunner {
             ruff_retained_revisions: ruff.retained_revisions,
             tree_sitter_completed_runs: tree.completed_runs,
             ruff_completed_runs: ruff.completed_runs,
+            ruff_reused_parses: ruff.reused_parses,
         }
     }
 }
@@ -2713,20 +2752,20 @@ pub(crate) mod job_tests {
         SourceIdentity, SuiteIdentity, admit_provider_result,
     };
 
-    struct FixtureJobs {
+    pub(crate) struct FixtureJobs {
         tree_owner: CancellationHandle,
-        ruff_owner: CancellationHandle,
+        pub(crate) ruff_owner: CancellationHandle,
         tree: ProviderJob,
         ruff: ProviderJob,
     }
 
     impl FixtureJobs {
-        fn borrowed(&self) -> InProcessProviderJobs<'_> {
+        pub(crate) fn borrowed(&self) -> InProcessProviderJobs<'_> {
             InProcessProviderJobs::try_new(&self.tree, &self.ruff).unwrap()
         }
     }
 
-    fn source(text: &str, generation: u64) -> ProviderNativeSourceImage {
+    pub(crate) fn source(text: &str, generation: u64) -> ProviderNativeSourceImage {
         source_with_marker(text, generation, 1)
     }
 
@@ -2889,7 +2928,7 @@ pub(crate) mod job_tests {
         (owner, job)
     }
 
-    fn jobs(source: &ProviderNativeSourceImage) -> FixtureJobs {
+    pub(crate) fn jobs(source: &ProviderNativeSourceImage) -> FixtureJobs {
         jobs_with_marker(source, 1)
     }
 
@@ -2909,7 +2948,7 @@ pub(crate) mod job_tests {
         }
     }
 
-    fn module() -> PythonModuleInput<'static> {
+    pub(crate) fn module() -> PythonModuleInput<'static> {
         PythonModuleInput {
             module_name: "fixture.module",
             module_path: Path::new("fixture/module.py"),

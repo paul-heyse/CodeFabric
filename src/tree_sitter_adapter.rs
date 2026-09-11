@@ -95,6 +95,37 @@ pub struct TreeSitterEdit {
     pub new_end_byte: usize,
 }
 
+impl TreeSitterEdit {
+    /// Describe arbitrary captured replacements with one exact UTF-8 boundary-aligned edit.
+    /// The unchanged prefix/suffix come from the two authoritative texts, never watcher ranges.
+    #[must_use]
+    pub fn between(old: &str, new: &str) -> Self {
+        let mut start = old
+            .bytes()
+            .zip(new.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        while !old.is_char_boundary(start) || !new.is_char_boundary(start) {
+            start -= 1;
+        }
+        let mut suffix = old.as_bytes()[start..]
+            .iter()
+            .rev()
+            .zip(new.as_bytes()[start..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        while !old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix)
+        {
+            suffix -= 1;
+        }
+        Self {
+            start_byte: start,
+            old_end_byte: old.len() - suffix,
+            new_end_byte: new.len() - suffix,
+        }
+    }
+}
+
 /// Per-completed-run operational measurements. Durations are observations, not
 /// acceptance thresholds or benchmark claims.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -261,7 +292,7 @@ struct RetainedRevision {
     tree: Tree,
     snapshot: TreeSitterSnapshot,
     // Dropped after its native tree and DTO owners, never on mere result observation.
-    _native_envelope: crate::resource_budget::ResourceReservation,
+    native_envelope: crate::resource_budget::ResourceReservation,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -440,10 +471,47 @@ impl TreeSitterAdapter {
         self.parse_candidate(job, revision, text, Some(&edited_tree), envelope)
     }
 
+    /// Parse captured text using an exact edit against this file's last complete native tree.
+    /// The caller owns one adapter per compatible file/context and drops it after a failed run.
+    ///
+    /// # Errors
+    /// Returns the same admission/cancellation/parser failures as full parsing, or revision overflow.
+    pub fn parse_captured(
+        &mut self,
+        job: &ProviderJob,
+        text: ProviderText,
+    ) -> Result<TreeSitterSnapshot, TreeSitterAdapterError> {
+        if let Some(prior) = self.retained.back() {
+            let revision = prior
+                .revision
+                .checked_add(1)
+                .ok_or(TreeSitterAdapterError::StaleRevision)?;
+            let edit = TreeSitterEdit::between(&prior.text.text, &text.text);
+            self.parse_incremental(job, revision, text, edit)
+        } else {
+            self.parse_full(job, 1, text)
+        }
+    }
+
     /// Last atomically committed complete revision.
     #[must_use]
     pub fn active_snapshot(&self) -> Option<&TreeSitterSnapshot> {
         self.retained.back().map(|revision| &revision.snapshot)
+    }
+
+    /// Declared native reservations retained by this owner, separately from charged DTO backing.
+    pub(crate) fn native_reservations(&self) -> crate::resource_budget::ResourceAmounts {
+        self.retained
+            .iter()
+            .fold(self.native_envelope.amounts(), |mut cost, revision| {
+                let native = revision.native_envelope.amounts();
+                cost.memory_bytes = cost.memory_bytes.saturating_add(native.memory_bytes);
+                cost.retained_bytes = cost.retained_bytes.saturating_add(native.retained_bytes);
+                cost.retained_generations = cost
+                    .retained_generations
+                    .saturating_add(native.retained_generations);
+                cost
+            })
     }
 
     /// Current operational counters.
@@ -637,7 +705,7 @@ impl TreeSitterAdapter {
             text,
             tree,
             snapshot: snapshot.clone(),
-            _native_envelope: native_envelope,
+            native_envelope,
         });
         while exceeds_limit(
             u64::try_from(self.retained.len()).unwrap_or(u64::MAX),
@@ -1140,6 +1208,38 @@ mod job_tests {
             .unwrap();
         assert_eq!(second.revision, 2);
         assert!(adapter.metrics().retained_revisions <= 2);
+    }
+
+    #[test]
+    fn captured_unicode_and_disjoint_edits_match_independent_full_trees() {
+        let (_, selected) = job(limits());
+        let mut retained = TreeSitterAdapter::new(TreeSitterLanguage::Python, &selected).unwrap();
+        for (index, source) in [
+            "def café():\r\n    return 'α'\r\n",
+            "def cafè():\r\n    return 'β'\r\n",
+            "# prefix\nvalue = 3\ndef cafè():\n    return value\n",
+            "# prefix\nvalue = 4\ndef cafè():\n    return value\n",
+            "# prefix\nvalue = 4\ndef cafè():\n    return value\n",
+            "",
+            "def restored():\n    return 1\n",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let incremental = retained
+                .parse_captured(&selected, provider_text(source))
+                .unwrap();
+            let full = TreeSitterAdapter::new(TreeSitterLanguage::Python, &selected)
+                .unwrap()
+                .parse_full(&selected, 1, provider_text(source))
+                .unwrap();
+            assert_eq!(&*incremental.facts, &*full.facts, "captured edit {index}");
+            assert_eq!(
+                incremental.provider_image_fingerprint,
+                full.provider_image_fingerprint
+            );
+            assert_eq!(incremental.revision, index as u64 + 1);
+        }
     }
 
     #[test]

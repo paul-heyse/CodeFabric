@@ -46,7 +46,56 @@ The call-query continuation present at session start was preserved, exercised an
 originally stopped at the diagnostic checkpoint. The subsequent user instruction resumes execution
 of the cross-cutting packages in §3.3 of the detailed plan.
 
-## P03 first-release query boundary delivered; P04 next
+## P04 retained inputs and syntax — implementation in progress
+
+P03's related-context integration and handoff are committed in `75687368`. The current P04
+working tree adds immutable-input pin reuse and workspace-owned parser state. P04 remains open;
+retained Pyrefly/Cargo contexts, complete invalidation/topology and shared update scheduling still
+follow in this package. P05–P14 remain open.
+
+Exact source bytes and line indexes now declare identities over their producer revision, workspace,
+generation, captured inventory and actual admitted image/line-index identities. Matching descriptors
+and identities reuse selected exact Delta pins without executing a comparison scan or writing a new
+table. Changed/ineligible relations retain candidate-owned physical histories, preserving isolation
+from abandoned writes. Missing identities do not qualify; no generation or provenance is relabeled.
+The optional identity lives in the existing canonical Delta descriptor and survives exact reopen.
+
+Before the parser-cache integration, the installed source/semantic edit, obsolete-completion and
+pending-stage restart scenario passes in 792.455 s, alongside three exact Delta tests (four total,
+794.051 s; `/tmp/codefabric-p04-source-pin-final-native.log`). It verifies two reused source pins,
+separate pins for changed generations and exact reuse after restart. The initial run stopped at an
+outdated 60-second checkpoint wait while semantic writes were active; the helper now waits up to
+180 seconds and this multi-stage fixture has a 15-minute nextest bound. The product wrapper allows
+1200 seconds for staged/function-source sequences. Production deadlines are unchanged. The observed
+four-file/219-byte initial semantic pass spent 25.689 s in Cargo/rustc and 104.311 s in relational
+execution/writes; these are small-fixture costs, not representative performance qualification.
+
+The parser continuation uses one native Python or Rust runner per retained file/context. Tree-sitter
+receives a UTF-8-safe bounding edit derived from old/new captured text and parses with the edited
+old tree. All current CST/fact rows are reprojected. Ruff reuses its AST, tokens and native indexes
+only for equal text/decoding, Python version, ceilings and exact CST evidence; semantic projection
+still uses the current admitted module/context. Cache entries are removed during mutation and dropped
+on failure, so an advanced tree cannot remain paired with a failed Ruff update. Candidate-specific
+syntax run IDs distinguish independently executed observations while canonical identities remain
+application-owned.
+
+Workspace cache eviction uses retained native reservations, shared memory/generation headroom and
+last use. The existing joined census worker expires idle entries and capture removes absent files;
+cache eviction never removes published Arrow/Delta facts. Counters distinguish retained entries,
+parser reuse, Ruff parse reuse and evictions. Native reservation bytes remain declared capacity,
+not measured RSS. The existing coarse envelopes still need representative calibration.
+
+The combined parser/cache implementation passes all 21 focused ownership and adapter tests in
+1.086 s (`/tmp/codefabric-p04-retained-syntax-focused.log`), including Unicode/disjoint edits against
+fresh native trees, Ruff cache admission, eviction with held Arrow facts and cancellation recovery.
+Final default/featureless `just root-check` passes in
+`/tmp/codefabric-p04-retained-syntax-root-final.log`; affected Clippy reports zero changed-line
+diagnostics in `/tmp/codefabric-p04-retained-syntax-clippy-final.jsonl`. Existing root warnings remain.
+All 40 product-harness tests pass in 0.74 s with focused Python lint/format clean. Installed combined
+clean/race/restart checks are running in `/tmp/codefabric-p04-retained-syntax-native-v2.log`; their
+acceptance remains pending. No full CI, doctest or outcome-completion claim is made.
+
+## P03 first-release query boundary delivered
 
 The plan corpus is committed in `47b0c225`; the shared native schema-identity correction is
 committed in `445bcbda`. The final mixed installed run passes both cases in 418.109 s
@@ -87,7 +136,7 @@ Global baseline lint/format issues remain separate; no full CI or doctest closur
 
 This delivers P03's first-release query integration boundary. Full first-four meanings/subject roles
 continue with their P06/P10 producers; target/family convergence and explicit historical query
-selection remain in P04/P11. P04 is next: retained source/provider state, exact invalidation and
+selection remain in P04/P11. P04 is in progress: retained source/provider state, exact invalidation and
 unchanged-version reuse under the existing owned coordinator. P05 still owns the assembled edit/
 clean/restart first-useful-release boundary. No outcome from 4 through 8 is complete.
 

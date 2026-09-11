@@ -1384,11 +1384,18 @@ mod tests {
         epoch_id: FabricEpochId,
         values: Vec<i64>,
     ) -> ProgrammaticFabricEpochBuilder {
+        positive_builder_with_input(epoch_id, provider_input_with_values(values))
+    }
+
+    fn positive_builder_with_input(
+        epoch_id: FabricEpochId,
+        input: ProviderInput,
+    ) -> ProgrammaticFabricEpochBuilder {
         let mut builder =
             ProgrammaticFabricEpochBuilder::try_new(epoch_id, FabricEpochRuntimeConfig::default())
                 .expect("programmatic epoch builder");
         builder
-            .register_provider(provider_input_with_values(values))
+            .register_provider(input)
             .expect("register exact provider");
         let input = ProgrammaticRelationId::new("facts.input_values");
         let output = ProgrammaticRelationId::new("facts.positive_values");
@@ -1491,6 +1498,120 @@ mod tests {
             .collect::<Vec<_>>();
         values.sort_unstable();
         values
+    }
+
+    async fn prepare_reuse_candidate(
+        seed: u8,
+        values: Vec<i64>,
+        identity: Option<[u8; 32]>,
+        selected: Option<&ProgrammaticFabricEpoch>,
+    ) -> (TempDir, ProgrammaticFabricEpoch) {
+        let root = TempDir::new().unwrap();
+        let write = write_identity(seed);
+        let mut input = provider_input_with_values(values);
+        if let Some(identity) = identity {
+            input = input.with_immutable_input_identity(identity);
+        }
+        let builder = positive_builder_with_input(write.epoch_id(), input);
+        let observations = builder
+            .provision_observation_histories(observation_roots(&root))
+            .await
+            .unwrap();
+        let layout = relation_layout(&root);
+        let preparation = selected.map_or_else(
+            || ProgrammaticRelationDeltaPreparation::Genesis(layout.clone()),
+            |selected| ProgrammaticRelationDeltaPreparation::ReuseUnchanged {
+                selected: selected.relation_publication().clone(),
+                layout: layout.clone(),
+            },
+        );
+        let epoch = builder
+            .seal(write, observations, preparation)
+            .await
+            .unwrap();
+        (root, epoch)
+    }
+
+    #[tokio::test]
+    async fn immutable_inputs_reuse_exact_versions_across_abandonment_and_reopen() {
+        fn input_pin(epoch: &ProgrammaticFabricEpoch) -> &super::super::delta_exact::ExactDeltaPin {
+            &epoch.relation_publication().table_version_map()
+                [&ProgrammaticRelationId::new("facts.input_values")]
+        }
+        let (_first_root, first) =
+            prepare_reuse_candidate(51, vec![-1, 1, 1, 2], Some([1; 32]), None).await;
+        let (second_root, second) =
+            prepare_reuse_candidate(52, vec![2, 1, -1, 1], Some([1; 32]), Some(&first)).await;
+        assert_eq!(input_pin(&first), input_pin(&second));
+        assert_eq!(
+            positive_rows(&second).await,
+            [1, 1, 2],
+            "multiplicity survives exact reuse"
+        );
+        assert!(
+            !relation_layout(&second_root)
+                .root()
+                .to_file_path()
+                .unwrap()
+                .join(
+                    input_pin(&first)
+                        .canonical_root()
+                        .to_file_path()
+                        .unwrap()
+                        .file_name()
+                        .unwrap()
+                )
+                .exists(),
+            "reused relation has no newly provisioned table"
+        );
+        let derived = ProgrammaticRelationId::new("facts.positive_values");
+        assert_ne!(
+            first.relation_publication().table_version_map()[&derived],
+            second.relation_publication().table_version_map()[&derived],
+            "transformation dependencies have not been declared eligible"
+        );
+
+        // A published but unselected candidate may already have committed changed relation files.
+        // Preparing from the accepted predecessor again must not conflict with that abandoned work.
+        let (_abandoned_root, abandoned) =
+            prepare_reuse_candidate(53, vec![7], Some([2; 32]), Some(&second)).await;
+        let (_retry_root, retry) =
+            prepare_reuse_candidate(54, vec![9], Some([3; 32]), Some(&second)).await;
+        assert_ne!(input_pin(&abandoned), input_pin(&retry));
+        assert_eq!(positive_rows(&retry).await, [9]);
+        assert_eq!(positive_rows(&abandoned).await, [7]);
+        assert_eq!(positive_rows(&first).await, [1, 1, 2]);
+        let (_empty_root, empty) =
+            prepare_reuse_candidate(55, vec![], Some([4; 32]), Some(&retry)).await;
+        assert_ne!(input_pin(&empty), input_pin(&retry));
+        assert!(
+            positive_rows(&empty).await.is_empty(),
+            "empty replacement deletes old facts"
+        );
+        let (_no_key_root, no_key) = prepare_reuse_candidate(56, vec![], None, Some(&empty)).await;
+        assert_ne!(
+            input_pin(&no_key),
+            input_pin(&empty),
+            "unknown inputs do not qualify"
+        );
+
+        let reopened = ProgrammaticFabricEpochBuilder::try_new(
+            *second.identity(),
+            FabricEpochRuntimeConfig::default(),
+        )
+        .unwrap()
+        .reopen(Arc::clone(second.table_version_set()))
+        .await
+        .unwrap();
+        assert_eq!(input_pin(&reopened), input_pin(&first));
+        assert_eq!(positive_rows(&reopened).await, [1, 1, 2]);
+        let (_after_root, after) =
+            prepare_reuse_candidate(57, vec![-1, 1, 1, 2], Some([1; 32]), Some(&reopened)).await;
+        assert_eq!(
+            input_pin(&after),
+            input_pin(&first),
+            "reopen retains immutable input identity"
+        );
     }
 
     #[tokio::test]

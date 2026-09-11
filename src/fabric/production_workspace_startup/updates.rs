@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 
@@ -126,6 +126,7 @@ impl SourceUpdateOwner {
         let budget = self.resources.budget().clone();
         let observed = observation.clone();
         let writer = Arc::clone(self.resources.operational_writer());
+        let syntax_cache = Arc::clone(self.resources.syntax_cache());
         let guard = budget
             .try_reserve(
                 ResourceClass::Control,
@@ -138,6 +139,10 @@ impl SourceUpdateOwner {
             .map_err(|error| step("source-census-admission", error))?;
         scope
             .spawn_blocking_owned("census", guard, move |cancellation| {
+                syntax_cache
+                    .lock()
+                    .map_err(|error| step("syntax-cache-owner", error))?
+                    .evict_idle(Instant::now());
                 let _writer = writer
                     .lock()
                     .map_err(|error| step("source-census-writer", error))?;
@@ -298,6 +303,12 @@ impl SourceUpdateOwner {
         let build_scope = scope
             .child("capture-and-publish")
             .map_err(|error| step("source-build-scope", error))?;
+        // Keep the selected workspace lease throughout preparation. Reused exact tables remain
+        // protected alongside existing readers until the successor's activation fence is checked.
+        let selected = self
+            .slot
+            .lease()
+            .map_err(|error| step("source-reuse-selected", error))?;
         let build = async {
             let fresh = build_fresh_candidate(
                 &self.state_root,
@@ -310,6 +321,15 @@ impl SourceUpdateOwner {
                     scope: &build_scope,
                     stage,
                 },
+                Some(
+                    selected
+                        .workspace()
+                        .runtime()
+                        .query_authority()
+                        .epoch()
+                        .relation_publication()
+                        .clone(),
+                ),
             )
             .await?;
             if stage == PublicationStage::Semantic && self.hold_semantic_publication {

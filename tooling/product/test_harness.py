@@ -211,5 +211,7 @@ def test_clean_live_case_has_a_bounded_default_and_honors_explicit_deadline(
     if override is not None:
         args.extend(["--timeout", str(override)])
     assert golden.main(args) == 0
+    if override is None and case in {"staged-live", "function-source-live"}:
+        expected = 1200
     assert len(observed) == 1 and observed[0][1] == expected
     assert f"test(=integration::daemon::{golden.CASES[case]})" in observed[0][0]

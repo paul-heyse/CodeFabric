@@ -24,6 +24,8 @@ use crate::resource_budget::{
 pub(crate) struct ProductionWorkspaceResources {
     budget: ResourceBudget,
     operational_writer: Arc<std::sync::Mutex<()>>,
+    syntax_cache:
+        Arc<std::sync::Mutex<super::production_workspace_startup::syntax_cache::SyntaxCache>>,
     native: WorkspaceFabricResources,
     scheduler: WorkspaceResourceCoordinator,
     config: ProductionActiveWorkspaceConfig,
@@ -117,6 +119,9 @@ impl ProductionWorkspaceResources {
         .map_err(|error| error.to_string())?;
         Ok(Self {
             operational_writer: Arc::new(std::sync::Mutex::new(())),
+            syntax_cache: Arc::new(std::sync::Mutex::new(
+                super::production_workspace_startup::syntax_cache::SyntaxCache::new(budget.clone()),
+            )),
             budget,
             native,
             scheduler,
@@ -127,6 +132,13 @@ impl ProductionWorkspaceResources {
             local_store,
             local_store_state_root,
         })
+    }
+
+    pub(in crate::fabric) fn syntax_cache(
+        &self,
+    ) -> &Arc<std::sync::Mutex<super::production_workspace_startup::syntax_cache::SyntaxCache>>
+    {
+        &self.syntax_cache
     }
 
     /// Serializes short operational writes; provider computation never retains this gate.

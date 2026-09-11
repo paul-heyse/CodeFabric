@@ -359,6 +359,7 @@ pub struct RuffRunMetrics {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct RuffAdapterMetrics {
     pub completed_runs: u64,
+    pub reused_parses: u64,
     pub rejected_runs: u64,
     pub cancelled_runs: u64,
     pub retained_revisions: u16,
@@ -564,13 +565,16 @@ const fn ruff_python_normalized_kind_code(kind: NodeKind) -> u16 {
 
 struct RetainedRuffRevision {
     revision: u64,
+    target_version: PythonVersion,
+    ceilings: crate::provider_contracts::ProviderResourceCeilings,
+    tree_facts: crate::resource_budget::ChargedSlice<RawSyntaxFact>,
     text: ProviderText,
     parsed: Parsed<ruff_python_ast::ModModule>,
     trivia: TriviaRanges,
     indexer: Indexer,
     line_index: LineIndex,
     snapshot: RuffSnapshot,
-    _native_envelope: crate::resource_budget::ResourceReservation,
+    native_envelope: crate::resource_budget::ResourceReservation,
 }
 
 /// One worker-owned Ruff frontend with exactly one atomically published parse.
@@ -670,13 +674,39 @@ impl RuffAdapter {
     ///
     /// Rejects stale revisions, invalid source mappings, cancellation, deadlines,
     /// and every configured resource limit without changing the active revision.
-    #[allow(clippy::too_many_lines)] // The atomic candidate pipeline keeps every retained Ruff value visibly single-build.
     pub fn parse(
         &mut self,
         job: &ProviderJob,
         revision: u64,
         text: ProviderText,
         tree_sitter: &TreeSitterSnapshot,
+    ) -> Result<RuffSnapshot, RuffAdapterError> {
+        self.parse_with_reuse(job, revision, text, tree_sitter, false)
+    }
+
+    /// Reuse an identical captured parse and its native indexes under a new observation revision.
+    /// Changed text, decoding, Python version, CST evidence or ceilings require a whole-file parse.
+    ///
+    /// # Errors
+    /// Applies the same input, job, ownership, revision and cancellation checks as [`Self::parse`].
+    pub fn parse_captured(
+        &mut self,
+        job: &ProviderJob,
+        revision: u64,
+        text: ProviderText,
+        tree_sitter: &TreeSitterSnapshot,
+    ) -> Result<RuffSnapshot, RuffAdapterError> {
+        self.parse_with_reuse(job, revision, text, tree_sitter, true)
+    }
+
+    #[allow(clippy::too_many_lines)] // The atomic candidate pipeline keeps every retained Ruff value visibly single-build.
+    fn parse_with_reuse(
+        &mut self,
+        job: &ProviderJob,
+        revision: u64,
+        text: ProviderText,
+        tree_sitter: &TreeSitterSnapshot,
+        reuse_unchanged: bool,
     ) -> Result<RuffSnapshot, RuffAdapterError> {
         let limits = RuffLimits::from_job(job)?;
         crate::provider_contracts::allocation::require_native_workspace(
@@ -738,6 +768,26 @@ impl RuffAdapter {
         };
         if cancellation.is_cancelled() {
             return self.reject(RuffAdapterError::Cancelled);
+        }
+
+        if reuse_unchanged
+            && let Some(retained) = &mut self.retained
+            && retained.target_version == target_version
+            && retained.ceilings == job.ceilings()
+            && retained.snapshot.source.provider_image_fingerprint == provider_image_fingerprint
+            && retained.tree_facts == tree_sitter.facts
+        {
+            // The observation revision advances; the actual parser/index work is explicitly zero.
+            retained.revision = revision;
+            retained.snapshot.revision = revision;
+            retained.snapshot.metrics.parse_duration = Duration::ZERO;
+            retained.snapshot.metrics.projection_duration = Duration::ZERO;
+            retained.snapshot.metrics.work_units = 0;
+            retained.snapshot.metrics.visited_nodes = 0;
+            self.metrics.completed_runs = self.metrics.completed_runs.saturating_add(1);
+            self.metrics.reused_parses = self.metrics.reused_parses.saturating_add(1);
+            self.metrics.last_run = Some(retained.snapshot.metrics);
+            return Ok(retained.snapshot.clone());
         }
 
         let started = Instant::now();
@@ -932,13 +982,16 @@ impl RuffAdapter {
         };
         self.retained = Some(RetainedRuffRevision {
             revision,
+            target_version,
+            ceilings: job.ceilings(),
+            tree_facts: tree_sitter.facts.clone(),
             text,
             parsed,
             trivia,
             indexer,
             line_index,
             snapshot: snapshot.clone(),
-            _native_envelope: native_envelope,
+            native_envelope,
         });
         self.metrics.completed_runs = self.metrics.completed_runs.saturating_add(1);
         self.metrics.retained_revisions = 1;
@@ -950,6 +1003,19 @@ impl RuffAdapter {
     #[must_use]
     pub fn active_snapshot(&self) -> Option<&RuffSnapshot> {
         self.retained.as_ref().map(|retained| &retained.snapshot)
+    }
+
+    pub(crate) fn native_reservations(&self) -> crate::resource_budget::ResourceAmounts {
+        let mut cost = self.native_envelope.amounts();
+        if let Some(retained) = &self.retained {
+            let native = retained.native_envelope.amounts();
+            cost.memory_bytes = cost.memory_bytes.saturating_add(native.memory_bytes);
+            cost.retained_bytes = cost.retained_bytes.saturating_add(native.retained_bytes);
+            cost.retained_generations = cost
+                .retained_generations
+                .saturating_add(native.retained_generations);
+        }
+        cost
     }
 
     /// Application-owned proof that the one retained parse and its three indexes
@@ -2148,6 +2214,42 @@ mod job_tests {
         assert_eq!(second.revision, 2);
         assert_eq!(adapter.metrics().retained_revisions, 1);
         assert!(adapter.active_index_summary().unwrap().token_count > 0);
+    }
+
+    #[test]
+    fn captured_ruff_reuses_only_equal_text_and_cst_and_rechecks_cancellation() {
+        let text = "def café():\n    return 7\n";
+        let (_, first_job) = job_for_lane(ProviderLane::Ruff, limits());
+        let mut adapter = RuffAdapter::new(&first_job).unwrap();
+        let first = adapter
+            .parse_captured(&first_job, 1, provider_text(text), &tree(text, 1))
+            .unwrap();
+        let second = adapter
+            .parse_captured(&first_job, 2, provider_text(text), &tree(text, 2))
+            .unwrap();
+        assert_eq!(first.ast, second.ast);
+        assert_eq!(first.tokens, second.tokens);
+        assert_eq!(first.correspondences, second.correspondences);
+        assert_eq!(second.metrics.parse_duration, Duration::ZERO);
+        assert_eq!(adapter.metrics().reused_parses, 1);
+        assert!(adapter.active_index_summary().unwrap().token_count > 0);
+
+        let changed = "def café():\n    return 8\n";
+        adapter
+            .parse_captured(&first_job, 3, provider_text(changed), &tree(changed, 3))
+            .unwrap();
+        assert_eq!(
+            adapter.metrics().reused_parses,
+            1,
+            "text-only structural equality is insufficient"
+        );
+        let (cancel, cancelled) = job_for_lane(ProviderLane::Ruff, limits());
+        cancel.cancel();
+        assert_eq!(
+            adapter.parse_captured(&cancelled, 4, provider_text(changed), &tree(changed, 4)),
+            Err(RuffAdapterError::Cancelled)
+        );
+        assert_eq!(adapter.active_snapshot().unwrap().revision, 3);
     }
 
     #[test]

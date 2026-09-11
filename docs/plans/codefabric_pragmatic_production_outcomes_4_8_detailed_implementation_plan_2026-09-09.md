@@ -1626,6 +1626,31 @@ unchanged-version reuse, selective persistence and update scheduling remain open
 
 **Acceptance:** syntax can become current while compiler facts remain explicitly pending; semantic convergence produces the expected successor; an old query continues to read its exact source/facts during multiple updates.
 
+**P04 parser continuation (2026-09-10; integration under validation).** The workspace resource
+owner now retains Python/Rust runners by file and effective context. Native Tree-sitter edits are
+reconstructed from the exact old/new UTF-8 texts, including disjoint, Unicode and CRLF changes.
+The complete current CST is projected after native incremental parsing; a structurally unchanged
+range never establishes unchanged text or semantic validity (Tree-sitter reference §10, Incremental
+parsing, and §11, Changed ranges, identity, and cache invalidation; resolved 0.26.12 APIs).
+Ruff's existing parsed module, tokens, trivia/indexer and line index are reused only when exact
+text/decoding, language version, resource ceilings and CST correspondence evidence match. Its
+semantic extraction runs with the new job/module inputs. This caches parser state; it does not
+relabel a prior fact batch as a new observation. Syntax run identities include candidate identity
+because retained revisions and changed-range evidence can differ across attempts at one generation.
+
+Each cache entry is removed before mutation and reinserted only after both providers and Arrow
+projection succeed. Failure drops partial native state; eviction/restart uses full parsing. Capture
+removes absent files, the existing joined census worker expires ten-minute idle state, and native
+reservation cost plus global headroom bounds retention. This preserves the existing provider
+ceilings and full fact families; reservation bytes are not allocator/RSS measurements. Current
+coarse native envelopes require representative calibration before claiming scale efficiency.
+All 21 focused adapter/ownership tests pass, including Unicode/disjoint edits against fresh native
+trees, Ruff cache admission, owned Arrow survival through eviction and cancellation recovery.
+Default/featureless root checks and affected Clippy pass. Installed source/semantic
+race/restart and independent live/clean source/CST scenarios must pass with this owner enabled.
+The exact-input Delta branch in §8A passed its installed predecessor scenario; final combined
+parser/Delta integration is not yet accepted. Retained checker/Cargo state and scheduling remain open.
+
 **Remaining implementation progression (E02/E04/E05/E12/E21/E22; P04).**
 
 1. Attach retained parser, checker and Cargo cache owners to the existing workspace resource/lifecycle
@@ -2089,6 +2114,33 @@ Implement unchanged-version reuse per relation/owner partition, native predicate
 Reopen the selected exact version vector; do not reconstruct an epoch by asking each table for latest. If a selected snapshot cannot be read, expose recovery/corruption with a deliberate repair/rebuild path rather than silently combining surviving versions. Migrate retained records only where a current reader requires it.
 
 **Acceptance:** unchanged inputs avoid redundant relation rewrites, changed/deleted owners update correctly, raw and canonical queries reopen identically, and cache eviction does not change answers. Measure actual file/byte/version growth over repeated edits.
+
+**P04 reuse decision (2026-09-10; implementation in progress).** Preserve candidate-owned roots
+for changed relations and carry exact selected pins forward only when the complete immutable input
+identity and executable descriptor match. A deterministic provider may declare an input identity
+that includes producer revision, all input/dependency selections, and every generation/provenance
+field affecting its rows. Missing identities remain ineligible; transformation identities are not
+inferred from names or dependency lists alone. Exact source bytes and line indexes are the initial
+consumers, keyed by captured workspace/inventory/generation, the actual admitted image subset and
+existing image/line-index identities, plus their producer revision. Inventory equality alone cannot
+prove equal source rows when a capture read fails. This
+reuses source tables across source-to-semantic publication without relabeling old generations.
+The optional identity is persisted with the existing canonical Delta descriptor, with absent fields
+omitted so older descriptors remain readable. Reopen restores the identity and exact mixed vector.
+
+Advancing the selected physical histories directly is a viable later option once P12's uncertain
+commit reconciliation is qualified; today an abandoned candidate could advance a history beyond its
+selected predecessor and conflict with a subsequent zero-retry write. Candidate-local changed
+histories preserve the existing cancellation isolation. Input-key reuse avoids an extra full scan or
+result hash solely to discover unchanged data. Native Delta `with_version` and descriptor validation
+remain mandatory; no latest-table lookup is introduced (Delta reference §3.8, Loading a specific
+version, and §3.28, Lazy snapshot replay, cache identity, and same-version checkpoint refresh).
+Focused tests pass for retained duplicate rows, changed/empty replacements, ineligible inputs,
+abandoned candidates and mixed-vector reopen. The installed source/semantic race/restart scenario
+passes in 792.455 s before parser-cache integration, verifying source-pin reuse and generation
+separation; three Delta tests bring that run to four passing cases in 794.051 s. Preparation costs
+count reused pins. The final combined parser/Delta working tree still needs installed acceptance.
+Provider/parser/Cargo retention, broader invalidation and owner-level reuse remain open in P04.
 
 **Remaining implementation progression (E11/E22/E24; P04/P12).**
 

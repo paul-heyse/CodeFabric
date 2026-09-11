@@ -15,7 +15,7 @@ use crate::provider_native_syntax::{
     NativeSyntaxRelation, ProviderNativeSourceImage, ProviderNativeSyntaxError,
     SyntaxProviderRunPin,
 };
-use crate::tree_sitter_adapter::{TreeSitterAdapter, TreeSitterEdit, TreeSitterLanguage};
+use crate::tree_sitter_adapter::{TreeSitterAdapter, TreeSitterLanguage};
 
 pub(crate) const PROVIDER: &str = "tree-sitter-rust";
 pub(crate) const RELEASE: &str = "tree-sitter=0.26.12;tree-sitter-rust=0.24.2";
@@ -132,21 +132,27 @@ impl ExactRustSyntaxRunner {
         })
     }
 
-    pub(crate) fn run(
+    pub(crate) fn run_captured(
         &mut self,
         job: &ProviderJob,
-        revision: u64,
         source: &ProviderNativeSourceImage,
-        edit: Option<TreeSitterEdit>,
     ) -> Result<ProviderRunResult, ProviderNativeSyntaxError> {
         validate_job(job)?;
         crate::provider_native_syntax::validate_single_job_source(job, source)?;
         let text = crate::provider_native_syntax::validated_provider_text(source, false)?;
-        let tree = if let Some(edit) = edit {
-            self.parser.parse_incremental(job, revision, text, edit)?
-        } else {
-            self.parser.parse_full(job, revision, text)?
-        };
+        let tree = self.parser.parse_captured(job, text)?;
+        Self::finish(job, source, &tree)
+    }
+
+    pub(crate) fn native_reservations(&self) -> crate::resource_budget::ResourceAmounts {
+        self.parser.native_reservations()
+    }
+
+    fn finish(
+        job: &ProviderJob,
+        source: &ProviderNativeSourceImage,
+        tree: &crate::tree_sitter_adapter::TreeSitterSnapshot,
+    ) -> Result<ProviderRunResult, ProviderNativeSyntaxError> {
         if tree.catalog_id != "tree-sitter-rust-0-24-2" {
             return Err(ProviderNativeSyntaxError::SnapshotMismatch(
                 "Rust grammar catalog",
@@ -167,7 +173,7 @@ impl ExactRustSyntaxRunner {
         let raw = crate::provider_native_syntax::project_tree_relations(
             source,
             pin,
-            &tree,
+            tree,
             PROVIDER,
             RELEASE,
             GRAMMAR_RELEASE,

@@ -22,7 +22,7 @@ pub(super) fn install(
             .iter()
             .map(|image| Some(image.line_index.offsets.iter().copied().map(Some))),
     ));
-    input_observations::register(
+    input_observations::register_immutable(
         builder,
         FabricSchemaRole::Source,
         "code_line_index",
@@ -58,5 +58,6 @@ pub(super) fn install(
             ),
             ("line_starts", false, offsets),
         ],
+        super::input_identity(capture, b"codefabric.source-line-index.inputs.v1\0"),
     )
 }

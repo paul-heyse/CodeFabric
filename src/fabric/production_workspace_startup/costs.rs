@@ -26,6 +26,8 @@ struct Report {
     source_files: usize,
     source_bytes: u64,
     relation_versions: usize,
+    reused_relation_versions: usize,
+    workspace_syntax_cache: Option<super::syntax_cache::SyntaxCacheObservation>,
     finished: bool,
     phases: Vec<PhaseCost>,
 }
@@ -51,6 +53,8 @@ impl PreparationCosts {
                 source_files: 0,
                 source_bytes: 0,
                 relation_versions: 0,
+                reused_relation_versions: 0,
+                workspace_syntax_cache: None,
                 finished: false,
                 phases: Vec::with_capacity(12),
             },
@@ -61,6 +65,13 @@ impl PreparationCosts {
     pub(super) fn inputs(&mut self, files: usize, bytes: u64) {
         self.report.source_files = files;
         self.report.source_bytes = bytes;
+    }
+
+    pub(super) fn syntax_cache(
+        &mut self,
+        observation: super::syntax_cache::SyntaxCacheObservation,
+    ) {
+        self.report.workspace_syntax_cache = Some(observation);
     }
 
     pub(super) fn start(&mut self, phase: &'static str) {
@@ -78,9 +89,10 @@ impl PreparationCosts {
         }
     }
 
-    pub(super) fn finish(&mut self, relation_versions: usize) {
+    pub(super) fn finish(&mut self, relation_versions: usize, reused_relation_versions: usize) {
         self.end(true);
         self.report.relation_versions = relation_versions;
+        self.report.reused_relation_versions = reused_relation_versions;
         self.report.finished = true;
     }
 

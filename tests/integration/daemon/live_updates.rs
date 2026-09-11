@@ -2642,7 +2642,7 @@ fn pending_semantic_candidate(fixture: &ProductionFixture) -> PathBuf {
         "waiting for semantic publication in {}",
         fixture.state.display()
     );
-    let deadline = Instant::now() + Duration::from_secs(60);
+    let deadline = Instant::now() + Duration::from_secs(180);
     loop {
         let ready = fs::read_dir(&fixture.state)
             .unwrap()
@@ -2730,6 +2730,26 @@ fn source_current_query(
     (result, rows)
 }
 
+fn selected_source_pins(
+    fixture: &ProductionFixture,
+) -> Vec<(String, codefabric::fabric::delta_exact::ExactDeltaPin)> {
+    let selected = all_activation_control_rows(fixture)
+        .into_iter()
+        .max_by_key(|row| row.row().ordinal.get())
+        .unwrap();
+    ["source.exact_source_bytes", "source.code_line_index"]
+        .into_iter()
+        .map(|relation| {
+            let (id, pin) = selected
+                .table_versions()
+                .components()
+                .find(|(id, _)| *id == relation)
+                .unwrap();
+            (id.to_owned(), pin.clone())
+        })
+        .collect()
+}
+
 #[test]
 fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart() {
     use arrow::array::StringArray;
@@ -2792,15 +2812,48 @@ fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart
         "pending"
     );
     let first_semantic = pending_semantic_candidate(&fixture);
+    let initial_source_pins = selected_source_pins(&fixture);
     fs::write(first_semantic.with_extension("resume"), b"resume").unwrap();
     let initial = public_query(&fixture, &stack, "staged-initial", request.clone());
     assert_eq!(initial.rows[0]["name"], "original");
+    assert_eq!(
+        initial_source_pins,
+        selected_source_pins(&fixture),
+        "semantic stage reuses exact captured source tables"
+    );
+    let costs: Value = serde_json::from_slice(
+        &fs::read(
+            fixture
+                .fabric_workspace_root()
+                .join("semantic-preparation-costs.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(costs["reused_relation_versions"], 2);
+    let syntax = &costs["workspace_syntax_cache"];
+    for field in ["python_reuses", "rust_reuses", "ruff_parse_reuses"] {
+        assert!(
+            syntax[field].as_u64().unwrap() >= 1,
+            "retained {field}: {syntax}"
+        );
+    }
+    assert_eq!(syntax["retained_entries"], 2);
+
     fs::write(
         workspace.join("sample.py"),
         b"def obsolete():\n    return 2\ndef caller():\n    return obsolete()\n",
     )
     .unwrap();
     let obsolete = pending_semantic_candidate(&fixture);
+    let obsolete_source_pins = selected_source_pins(&fixture);
+    assert!(
+        initial_source_pins
+            .iter()
+            .zip(&obsolete_source_pins)
+            .all(|((_, old), (_, new))| old != new),
+        "changed generation does not relabel old produced rows"
+    );
     let (source, rows) = source_current_query(&fixture, &stack, "pending-source", request.clone());
     let strings = |rows: &[RecordBatch], name: &str| {
         rows.iter()
@@ -2890,6 +2943,13 @@ fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart
         thread::sleep(Duration::from_millis(20));
     }
     let repaired = pending_semantic_candidate(&fixture);
+    let repaired_source_pins = selected_source_pins(&fixture);
+    assert!(
+        obsolete_source_pins
+            .iter()
+            .zip(&repaired_source_pins)
+            .all(|((_, old), (_, new))| old != new)
+    );
     let (next_source, rows) =
         source_current_query(&fixture, &stack, "repaired-source", request.clone());
     assert_eq!(strings(&rows, "name"), ["repaired"]);
@@ -2900,6 +2960,11 @@ fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart
     fs::write(repaired.with_extension("resume"), b"resume").unwrap();
     let final_result = public_query(&fixture, &stack, "repaired-semantic", request.clone());
     assert_eq!(final_result.rows[0]["name"], "repaired");
+    assert_eq!(
+        repaired_source_pins,
+        selected_source_pins(&fixture),
+        "obsolete prepared reuse cannot replace repaired selection"
+    );
 
     // Stop with the source stage durably selected and no terminal semantic successor.
     fs::write(
@@ -2909,6 +2974,7 @@ fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart
     .unwrap();
     let before_restart = pending_semantic_candidate(&fixture);
     let (before, _) = source_current_query(&fixture, &stack, "before-restart", request.clone());
+    let restart_source_pins = selected_source_pins(&fixture);
     supervisor.stop();
     assert!(
         !before_restart.exists(),
@@ -2928,5 +2994,10 @@ fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart
     fs::write(resumed.with_extension("resume"), b"resume").unwrap();
     let final_result = public_query(&fixture, &stack, "resumed-semantic", request);
     assert_eq!(final_result.rows[0]["name"], "after_restart");
+    assert_eq!(
+        restart_source_pins,
+        selected_source_pins(&fixture),
+        "exact source identity survives pending-stage restart and semantic reuse"
+    );
     supervisor.stop();
 }

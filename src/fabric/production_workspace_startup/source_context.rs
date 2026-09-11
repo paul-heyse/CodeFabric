@@ -21,7 +21,7 @@ pub(super) fn install(
     let images = capture.images();
     // Capture already bounds the total bytes. Arrow owns these copies through publication;
     // subsequent source reads select this exact relation version, never a workspace pathname.
-    input_observations::register(
+    input_observations::register_immutable(
         builder,
         FabricSchemaRole::Source,
         "exact_source_bytes",
@@ -65,6 +65,7 @@ pub(super) fn install(
                 )),
             ),
         ],
+        input_identity(capture, b"codefabric.exact-source-bytes.inputs.v1\0"),
     )?;
     let inventory = capture.inventory().inventory();
     input_observations::register(
@@ -96,4 +97,35 @@ pub(super) fn install(
             ),
         ],
     )
+}
+
+// These producers read only the captured inventory/images. Generation is part of every row;
+// a new generation must not relabel or reuse an older produced fact, even with unchanged bytes.
+fn input_identity(capture: &InventoryCaptureBundle, producer: &[u8]) -> [u8; 32] {
+    let inventory = capture.inventory().inventory();
+    let mut identity = super::digest32(
+        producer,
+        &[
+            &inventory.workspace_id,
+            &inventory.source_generation.to_be_bytes(),
+            &inventory.digest,
+        ],
+    );
+    // Inventory identity alone is insufficient: capture may retain a different admitted subset
+    // after a read failure. Hash the existing immutable image/line-index identities, not the bytes.
+    for image in capture.images() {
+        identity = super::digest32(
+            b"codefabric.captured-source-input.v1\0",
+            &[
+                &identity,
+                &image.file_id,
+                &image.path.raw_relative_path_bytes,
+                &image.digest,
+                &image.byte_length.to_be_bytes(),
+                &image.line_index.digest,
+                &image.line_index.format_version.to_be_bytes(),
+            ],
+        );
+    }
+    identity
 }

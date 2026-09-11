@@ -99,8 +99,7 @@ use crate::provider_contracts::{
     ProviderSourceBinding, SourceIdentity,
 };
 use crate::provider_native_syntax::{
-    ExactPythonSyntaxRunner, InProcessProviderJobs, ProviderNativeSourceImage,
-    ProviderNativeSyntaxRun, PythonModuleInput,
+    InProcessProviderJobs, ProviderNativeSourceImage, ProviderNativeSyntaxRun, PythonModuleInput,
 };
 use crate::relation_ipc::{ContextPin, SourcePin};
 use crate::semantic_release::ProviderJobInput;
@@ -116,6 +115,7 @@ mod pyrefly;
 mod rust_syntax;
 mod rustc;
 mod source_context;
+pub(super) mod syntax_cache;
 mod updates;
 
 /// Joined owner retained by the daemon after one workspace reaches queryable authority.
@@ -611,6 +611,11 @@ fn build_fresh_native_source(
     ));
     let analysis_context = prepared_context.context_fingerprint();
     let semantic_environment = prepared_context.semantic_environment_id();
+    workspace_resources
+        .syntax_cache()
+        .lock()
+        .map_err(|error| step("syntax-cache-owner", error))?
+        .reconcile(prepared_inputs.capture()?);
     costs.start("python-syntax");
     let source_count = prepared_inputs.capture()?.images().len();
     let working_bytes =
@@ -666,33 +671,30 @@ fn build_fresh_native_source(
         workspace_resources.native().clone(),
     )
     .map_err(|error| step("epoch-builder", error))?;
-    let mut runner = None;
     let mut native_runs = Vec::with_capacity(sources.len());
     let mut admitted_runs = Vec::with_capacity(sources.len().saturating_mul(2));
-    for (index, (source, module_path)) in sources.iter().zip(&module_paths).enumerate() {
+    for (source, module_path) in sources.iter().zip(&module_paths) {
         if cancellation.is_cancelled() {
             return Err(step(
                 "native-provider-cancelled",
                 "cancelled before provider run",
             ));
         }
-        let revision =
-            u64::try_from(index + 1).map_err(|error| step("native-provider-revision", error))?;
+        // These identify observations, including retained parser revisions, not canonical entities.
+        // Candidate identity prevents retries/stages from assigning one run ID to different evidence.
         let tree_run = digest16(
-            b"codefabric.tree-sitter-provider-run.v1\0",
+            b"codefabric.tree-sitter-provider-run.v2\0",
             &[
                 &source.file_id,
-                &revision.to_be_bytes(),
-                &inventory_digest,
+                epoch_id.as_bytes(),
                 &prepared_context.effective_input_identity(),
             ],
         );
         let ruff_run = digest16(
-            b"codefabric.ruff-provider-run.v1\0",
+            b"codefabric.ruff-provider-run.v2\0",
             &[
                 &source.file_id,
-                &revision.to_be_bytes(),
-                &inventory_digest,
+                epoch_id.as_bytes(),
                 &prepared_context.effective_input_identity(),
             ],
         );
@@ -796,12 +798,6 @@ fn build_fresh_native_source(
             .map_err(|error| step("ruff-job", error))?;
         let jobs = InProcessProviderJobs::try_new(tree_prepared.job(), ruff_prepared.job())
             .map_err(|error| step("in-process-provider-jobs", error))?;
-        if runner.is_none() {
-            runner = Some(
-                ExactPythonSyntaxRunner::new(jobs)
-                    .map_err(|error| step("native-provider-open", error))?,
-            );
-        }
         let module_name = &prepared_context
             .module_for_file(source.file_id)
             .ok_or_else(|| {
@@ -811,17 +807,19 @@ fn build_fresh_native_source(
                 )
             })?
             .qualified_name;
-        let run = runner
-            .as_mut()
-            .expect("native runner initialized")
-            .run_full(
+        let run = workspace_resources
+            .syntax_cache()
+            .lock()
+            .map_err(|error| step("syntax-cache-owner", error))?
+            .python(
+                prepared_context.context_fingerprint(),
                 jobs,
-                revision,
                 source,
                 PythonModuleInput {
                     module_name,
                     module_path,
                 },
+                operational_ceilings.max_bytes(),
             )
             .map_err(|error| step("native-provider-run", error))?;
         admitted_runs.push(
@@ -910,9 +908,17 @@ fn build_fresh_native_source(
         record,
         release,
         &cancellation,
+        workspace_resources,
     )?;
     let rust_syntax_available = !rust_syntax_runs.is_empty();
     admitted_runs.extend(rust_syntax_runs);
+    costs.syntax_cache(
+        workspace_resources
+            .syntax_cache()
+            .lock()
+            .map_err(|error| step("syntax-cache-owner", error))?
+            .observation(),
+    );
     costs.start("canonical-registration");
     processing::install(
         &mut builder,
@@ -998,6 +1004,7 @@ async fn build_fresh_candidate(
     release: &Arc<CompiledSemanticRelease>,
     fence: super::command::WriterFence,
     work: PublicationWork<'_>,
+    selected: Option<super::programmatic_relation_delta::ProgrammaticRelationDeltaPublication>,
 ) -> Result<FreshCandidate, ProductionWorkspaceStartupError> {
     let PublicationWork {
         resources: workspace_resources,
@@ -1066,6 +1073,7 @@ async fn build_fresh_candidate(
                     &publish_release,
                     fence,
                     &publish_resources,
+                    selected,
                 )
                 .await
             },
@@ -1125,6 +1133,7 @@ async fn publish_fresh_candidate(
     release: &Arc<CompiledSemanticRelease>,
     fence: super::command::WriterFence,
     workspace_resources: &ProductionWorkspaceResources,
+    selected: Option<super::programmatic_relation_delta::ProgrammaticRelationDeltaPublication>,
 ) -> Result<FreshCandidatePublication, ProductionWorkspaceStartupError> {
     let workspace_id = WorkspaceId::from_bytes(record.workspace_id);
     let FreshNativeSource {
@@ -1166,6 +1175,18 @@ async fn publish_fresh_candidate(
         .join(lower_hex(epoch_id.as_bytes()))
         .join("relations");
     private_directory(&relation_root)?;
+    let layout = ProgrammaticRelationDeltaLayout::try_new(
+        Url::from_directory_path(relation_root)
+            .map_err(|()| step("relation-root", "path is not an absolute file URL"))?,
+    )
+    .map_err(|error| step("relation-layout", error))?;
+    let preparation = match &selected {
+        Some(selected) => ProgrammaticRelationDeltaPreparation::ReuseUnchanged {
+            selected: selected.clone(),
+            layout,
+        },
+        None => ProgrammaticRelationDeltaPreparation::Genesis(layout),
+    };
     costs.start("relational-execution-and-delta-write");
     let candidate = Arc::new(
         builder
@@ -1177,14 +1198,7 @@ async fn publish_fresh_candidate(
                     transaction,
                 ),
                 targets,
-                ProgrammaticRelationDeltaPreparation::Genesis(
-                    ProgrammaticRelationDeltaLayout::try_new(
-                        Url::from_directory_path(relation_root).map_err(|()| {
-                            step("relation-root", "path is not an absolute file URL")
-                        })?,
-                    )
-                    .map_err(|error| step("relation-layout", error))?,
-                ),
+                preparation,
             )
             .await
             .map_err(|error| step("epoch-seal", error))?,
@@ -1225,7 +1239,15 @@ async fn publish_fresh_candidate(
     // Compact identity for this published candidate. The wire field retains its
     // historical name, but no proof language or independent histories are executed.
     let table_versions = candidate.table_version_set_ref();
-    costs.finish(candidate.table_version_set().components().count());
+    let reused = selected.as_ref().map_or(0, |selected| {
+        candidate
+            .relation_publication()
+            .table_version_map()
+            .iter()
+            .filter(|(id, pin)| selected.table_version_map().get(*id) == Some(*pin))
+            .count()
+    });
+    costs.finish(candidate.table_version_set().components().count(), reused);
     let proof_receipt = ProofReceiptRef::from_bytes(digest32(
         b"codefabric.published-candidate-record.v1\0",
         &[
@@ -1446,6 +1468,7 @@ async fn compose_production_workspace(
                         // owned update coordinator resumes its pending semantic successor.
                         stage: PublicationStage::Source,
                     },
+                    None,
                 )
                 .await?,
             )

@@ -21,7 +21,7 @@ use crate::provider_contracts::{
     ProviderLane, ProviderRunBinding, ProviderRunIdentity, ProviderScopeIdentity,
     ProviderSourceBinding, SourceIdentity,
 };
-use crate::provider_native_rust_syntax::{ExactRustSyntaxRunner, RELEASE, RustSyntaxRelation};
+use crate::provider_native_rust_syntax::{RELEASE, RustSyntaxRelation};
 use crate::provider_native_syntax::ProviderNativeSourceImage;
 use crate::schema_contract::{FieldIndexMapping, SchemaContract};
 use crate::semantic_release::ProviderJobInput;
@@ -38,6 +38,7 @@ pub(super) fn install(
     record: &WorkspaceRecord,
     release: &CompiledSemanticRelease,
     cancellation: &Cancellation,
+    resources: &crate::fabric::workspace_resources::ProductionWorkspaceResources,
 ) -> Result<Vec<AdmittedProviderResult>, ProductionWorkspaceStartupError> {
     if !inputs
         .capture()?
@@ -49,21 +50,19 @@ pub(super) fn install(
     }
     let (context, context_fingerprint) = source_context(inputs, record)?;
     let mut runs = Vec::new();
-    let mut runner = None;
-    for (index, image) in inputs
+    for image in inputs
         .capture()?
         .images()
         .iter()
         .filter(|image| image.language == SourceLanguage::Rust)
-        .enumerate()
     {
         let source = ProviderNativeSourceImage::try_from(image)
             .map_err(|error| step("rust-syntax-source", error))?;
-        let revision = index as u64 + 1;
         let run_id = digest16(
-            b"codefabric.rust-syntax-run.v1\0",
+            b"codefabric.rust-syntax-run.v2\0",
             &[
                 &record.workspace_id,
+                builder.identity().as_bytes(),
                 &source.file_id,
                 &source.content_digest,
                 &source.source_generation.to_be_bytes(),
@@ -124,16 +123,11 @@ pub(super) fn install(
                 },
             )
             .map_err(|error| step("rust-syntax-job", error))?;
-        if runner.is_none() {
-            runner = Some(
-                ExactRustSyntaxRunner::new(prepared.job())
-                    .map_err(|error| step("rust-syntax-parser", error))?,
-            );
-        }
-        let result = runner
-            .as_mut()
-            .expect("parser initialized")
-            .run(prepared.job(), revision, &source, None)
+        let result = resources
+            .syntax_cache()
+            .lock()
+            .map_err(|error| step("rust-syntax-cache-owner", error))?
+            .rust(prepared.job(), &source)
             .map_err(|error| step("rust-syntax-parse", error))?;
         runs.push(
             release

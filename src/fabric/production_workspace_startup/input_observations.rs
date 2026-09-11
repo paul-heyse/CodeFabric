@@ -363,7 +363,18 @@ pub(super) fn register(
     table: &'static str,
     columns: Vec<Column>,
 ) -> Result<(), ProductionWorkspaceStartupError> {
-    register_batches(builder, role, table, vec![columns])
+    register_batches(builder, role, table, vec![columns], None)
+}
+
+/// Only complete captured inputs with a fixed producer revision qualify for version reuse.
+pub(super) fn register_immutable(
+    builder: &mut ProgrammaticFabricEpochBuilder,
+    role: FabricSchemaRole,
+    table: &'static str,
+    columns: Vec<Column>,
+    identity: [u8; 32],
+) -> Result<(), ProductionWorkspaceStartupError> {
+    register_batches(builder, role, table, vec![columns], Some(identity))
 }
 
 fn register_batches(
@@ -371,6 +382,7 @@ fn register_batches(
     role: FabricSchemaRole,
     table: &'static str,
     batches: Vec<Vec<Column>>,
+    immutable_input_identity: Option<[u8; 32]>,
 ) -> Result<(), ProductionWorkspaceStartupError> {
     let columns = batches
         .first()
@@ -415,13 +427,17 @@ fn register_batches(
         mappings,
     )
     .map_err(|error| step("input-observation-schema-contract", error))?;
+    let mut input = ProviderInput::new(
+        ProgrammaticRelationId::new(relation_id),
+        reference,
+        Arc::new(contract),
+        Arc::new(provider),
+    );
+    if let Some(identity) = immutable_input_identity {
+        input = input.with_immutable_input_identity(identity);
+    }
     builder
-        .register_provider(ProviderInput::new(
-            ProgrammaticRelationId::new(relation_id),
-            reference,
-            Arc::new(contract),
-            Arc::new(provider),
-        ))
+        .register_provider(input)
         .map_err(|error| step("input-observation-registration", error))
 }
 
@@ -457,7 +473,7 @@ fn install_inventory(
         })?;
     }
     for (table, batches) in tables {
-        register_batches(builder, FabricSchemaRole::Source, table, batches)?;
+        register_batches(builder, FabricSchemaRole::Source, table, batches, None)?;
     }
     Ok(())
 }
