@@ -8469,8 +8469,8 @@ pub(crate) enum ProgrammaticDerivedAnalysisError {
 #[cfg(test)]
 mod tests {
     use arrow_array::{
-        ArrayRef, BooleanArray, FixedSizeBinaryArray, RecordBatch, StringArray, UInt8Array,
-        UInt64Array,
+        ArrayRef, BinaryArray, BooleanArray, FixedSizeBinaryArray, RecordBatch, StringArray,
+        UInt8Array, UInt64Array,
     };
     use arrow_schema::SchemaRef;
     use datafusion::common::TableReference;
@@ -9463,6 +9463,7 @@ mod tests {
                             "compilation_unit_id" => Some("unit:rust-control".to_owned()),
                             "owner_id" => Some("owner:rust-control".to_owned()),
                             "source_file_id" => Some("file:rust-control".to_owned()),
+                            "span_file" => Some("control.rs".to_owned()),
                             "terminator_kind" | "raw_terminator_kind" => {
                                 Some("SwitchInt".to_owned())
                             }
@@ -9523,7 +9524,14 @@ mod tests {
                     }
                     Arc::new(builder.finish()) as ArrayRef
                 }
-                data_type => panic!("unexpected control fixture type {data_type:?}"),
+                DataType::Binary if field.name() == "span_file_bytes" => {
+                    Arc::new(BinaryArray::from(vec![b"control.rs".as_slice(); row_count]))
+                        as ArrayRef
+                }
+                data_type => panic!(
+                    "unexpected control fixture field {}: {data_type:?}",
+                    field.name()
+                ),
             })
             .collect::<Vec<_>>();
         RecordBatch::try_new(schema, columns).unwrap()
@@ -9541,6 +9549,7 @@ mod tests {
                         "compilation_unit_id" => format!("unit:rust-structural:{marker}"),
                         "owner_id" => format!("owner:rust-structural:{marker}"),
                         "source_file_id" => format!("file:rust-structural:{marker}"),
+                        "span_file" => "structural.rs".to_owned(),
                         "slot_kind" => "statement".to_owned(),
                         "projection_kind" => "BaseLocal".to_owned(),
                         "occurrence_role" => "fixture-place".to_owned(),
@@ -9592,7 +9601,13 @@ mod tests {
                         .unwrap();
                     Arc::new(builder.finish()) as ArrayRef
                 }
-                data_type => panic!("unexpected structural fixture type {data_type:?}"),
+                DataType::Binary if field.name() == "span_file_bytes" => {
+                    Arc::new(BinaryArray::from(vec![b"structural.rs".as_slice()])) as ArrayRef
+                }
+                data_type => panic!(
+                    "unexpected structural fixture field {}: {data_type:?}",
+                    field.name()
+                ),
             })
             .collect::<Vec<_>>();
         RecordBatch::try_new(schema, columns).unwrap()
@@ -11274,7 +11289,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execution_bound_aborts_seal_without_returning_partial_epoch() {
+    async fn derived_composition_enforces_output_bound_on_read_without_preexecution() {
         let outcome = compose_programmatic_derived_analyses(
             admitted(),
             composition(DerivedPrecisionPolicy::Exact, 1),
@@ -11282,10 +11297,27 @@ mod tests {
         .unwrap();
         let (builder, _, _) = outcome.into_parts();
         let (_, _, _, assembly) = builder.into_assembly_parts();
-        assert!(matches!(
-            assembly.seal(FabricEpochId::from_bytes([90; 16])).await,
-            Err(ProgrammaticSchemaError::TransformationOutputRowsExceeded { .. })
-        ));
+        let sealed = assembly
+            .seal(FabricEpochId::from_bytes([90; 16]))
+            .await
+            .expect("derived installation plans but does not execute transformations");
+        let relation = sealed
+            .relation(&ProgrammaticRelationId::new("derived.python.flow.fixture"))
+            .expect("bounded producer is installed");
+        let error = sealed
+            .session()
+            .table(relation.table_reference.clone())
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("analysis.python.flow.fixture"),
+            "{message}"
+        );
+        assert!(message.contains("beyond its 1 row bound"), "{message}");
     }
 
     #[allow(dead_code)]

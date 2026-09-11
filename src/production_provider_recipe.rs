@@ -2631,10 +2631,38 @@ mod tests {
             current_v23_provider_program_definition().unwrap(),
         )
         .unwrap();
+        let native_relations = NativeSyntaxRelation::ALL.len()
+            + crate::provider_native_rust_syntax::RustSyntaxRelation::ALL.len()
+            + PyreflyRelation::ALL.len()
+            + RustcRelation::ALL.len();
         assert_eq!(release.observation().provider_lanes, 5);
-        assert_eq!(release.observation().provider_relations, 72);
-        assert_eq!(release.observation().transformations, 72);
+        assert_eq!(release.observation().provider_relations, native_relations);
+        assert_eq!(release.observation().transformations, native_relations);
         assert_eq!(release.observation().query_forms, 8);
+        // Member census rows are real input even when a class has no emitted members.
+        let member = release
+            .transformations()
+            .compile(
+                &ReleaseProviderRelationIdentity::try_new(
+                    "released.admitted.provider.pyrefly.member_observation.v1",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            member.output_schema,
+            PyreflyRelation::MemberObservation.schema()
+        );
+        for (name, data_type, nullable) in [
+            ("class_census_complete", DataType::Boolean, false),
+            ("class_expected_members", DataType::UInt64, true),
+            ("class_unknown_reason", DataType::Utf8, true),
+            ("member_name", DataType::Utf8, true),
+        ] {
+            let field = member.output_schema.field_with_name(name).unwrap();
+            assert_eq!(field.data_type(), &data_type);
+            assert_eq!(field.is_nullable(), nullable);
+        }
     }
 
     fn real_native_run() -> ProviderNativeSyntaxRun {
