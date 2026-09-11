@@ -33,6 +33,15 @@ pub(super) struct SourceUpdateOwner {
     pub authorization: AuthorizationRef,
 }
 
+#[derive(Clone, Copy)]
+struct SourceCensus {
+    digest: [u8; 32],
+    deployment: [u8; 32],
+    generation: u64,
+    watermark: u64,
+    events: u64,
+}
+
 impl SourceUpdateOwner {
     pub(super) async fn start(
         self,
@@ -124,7 +133,7 @@ impl SourceUpdateOwner {
         &self,
         observation: &WorkspaceObservation,
         scope: &StructuredCancellationScope,
-    ) -> Result<Option<([u8; 32], u64, u64, u64)>, ProductionWorkspaceStartupError> {
+    ) -> Result<Option<SourceCensus>, ProductionWorkspaceStartupError> {
         let database = self.database.clone();
         let record = self.record.clone();
         let budget = self.resources.budget().clone();
@@ -191,12 +200,15 @@ impl SourceUpdateOwner {
                     Err(crate::inventory::InventoryError::SourceChanged) => return Ok(None),
                     Err(error) => return Err(step("source-census", error)),
                 };
-                Ok(Some((
-                    inventory.inventory().digest,
+                let deployment = crate::fabric::provider_deployment::observation_digest()
+                    .map_err(|error| step("provider-deployment-observation", error))?;
+                Ok(Some(SourceCensus {
+                    digest: inventory.inventory().digest,
+                    deployment,
                     generation,
                     watermark,
                     events,
-                )))
+                }))
             })
             .await
             .map_err(|error| step("source-census-start", error))?
@@ -314,8 +326,7 @@ impl SourceUpdateOwner {
     async fn build_observed_candidate(
         &self,
         stage: PublicationStage,
-        digest: [u8; 32],
-        events: u64,
+        observed: SourceCensus,
         observation: &WorkspaceObservation,
         receiver: &mut mpsc::Receiver<()>,
         scope: &StructuredCancellationScope,
@@ -330,7 +341,7 @@ impl SourceUpdateOwner {
             .lease()
             .map_err(|error| step("source-reuse-selected", error))?;
         let build = async {
-            let fresh = build_fresh_candidate(
+            let fresh = Box::pin(build_fresh_candidate(
                 &self.state_root,
                 &self.database,
                 &self.record,
@@ -350,7 +361,7 @@ impl SourceUpdateOwner {
                         .relation_publication()
                         .clone(),
                 ),
-            )
+            ))
             .await?;
             if stage == PublicationStage::Semantic && self.hold_semantic_publication {
                 self.assurance_pause(fresh.pins.source_generation.get(), &build_scope)
@@ -359,25 +370,32 @@ impl SourceUpdateOwner {
             Ok::<_, ProductionWorkspaceStartupError>(fresh)
         };
         tokio::pin!(build);
+        // Long native work must not suspend periodic input reconciliation. Only its private
+        // build scope is cancelled; the workspace owner still joins all started work.
+        let mut periodic = tokio::time::interval(Duration::from_secs(30));
+        periodic.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        periodic.tick().await;
         loop {
             tokio::select! {
                 result = &mut build => return result.map(Some),
                 () = scope.cancelled() => { build_scope.cancel(); let _ = build.await; return Ok(None); },
+                _ = periodic.tick() => { observation.request(true); },
                 _ = receiver.recv() => {
-                    if observation.event_revision() != events {
+                    if observation.event_revision() != observed.events {
                         build_scope.cancel(); let _ = build.await; return Ok(None);
                     }
                     // A source-current query can request another census during compiler work.
                     // Refresh requests do not cancel or postpone the semantic successor.
                     let census = self.census(observation, scope).await;
                     match census {
-                        Ok(Some((current, current_generation, watermark, checked_events)))
-                            if current == digest && checked_events == events => {
+                        Ok(Some(current))
+                            if current.digest == observed.digest && current.deployment == observed.deployment
+                                && current.events == observed.events => {
                             if let Ok(selected) = self.slot.lease() {
                                 let authority = selected.workspace().runtime().query_authority();
-                                if authority.source_inventory_digest() == Some(current)
-                                    && authority.activation_pins().source_generation.get() == current_generation {
-                                    observation.source_reconciled(watermark, current_generation);
+                                if authority.matches_observed_inputs(current.digest, current.deployment)
+                                    && authority.activation_pins().source_generation.get() == current.generation {
+                                    observation.source_reconciled(current.watermark, current.generation);
                                 }
                             }
                         }
@@ -400,8 +418,7 @@ impl SourceUpdateOwner {
             self.recover_publication().await?;
             *needs_recovery = false;
         }
-        let Some((digest, generation, watermark, events)) = self.census(observation, scope).await?
-        else {
+        let Some(observed) = self.census(observation, scope).await? else {
             return Ok(false);
         };
         let selected = self
@@ -409,12 +426,12 @@ impl SourceUpdateOwner {
             .lease()
             .map_err(|error| step("source-update-selected", error))?;
         let authority = selected.workspace().runtime().query_authority();
-        let unchanged = authority.source_inventory_digest() == Some(digest)
-            && authority.activation_pins().source_generation.get() == generation;
+        let unchanged = authority.matches_observed_inputs(observed.digest, observed.deployment)
+            && authority.activation_pins().source_generation.get() == observed.generation;
         if unchanged {
-            observation.source_reconciled(watermark, generation);
+            observation.source_reconciled(observed.watermark, observed.generation);
             if !authority.semantic_pending() {
-                observation.reconciled(watermark, generation);
+                observation.reconciled(observed.watermark, observed.generation);
                 return Ok(true);
             }
         }
@@ -424,14 +441,13 @@ impl SourceUpdateOwner {
             // Reopen or retry of a durable source-only epoch must resume semantic work.
             &[PublicationStage::Semantic][..]
         } else {
-            self.advance_generation(generation, scope).await?;
+            self.advance_generation(observed.generation, scope).await?;
             &[PublicationStage::Source, PublicationStage::Semantic][..]
         };
         for &stage in stages {
             let Some(fresh) = Box::pin(self.build_observed_candidate(
                 stage,
-                digest,
-                events,
+                observed,
                 observation,
                 receiver,
                 scope,
@@ -440,9 +456,7 @@ impl SourceUpdateOwner {
             else {
                 return Ok(false);
             };
-            let Some((current_digest, current_generation, checked_watermark, checked_events)) =
-                self.census(observation, scope).await?
-            else {
+            let Some(current) = self.census(observation, scope).await? else {
                 return Ok(false);
             };
             let candidate = crate::fabric::workspace_updates::selected_inventory_state(
@@ -452,11 +466,13 @@ impl SourceUpdateOwner {
             )
             .await
             .map_err(|error| step("source-candidate-inventory", error))?;
-            if candidate.is_none_or(|state| state.digest != current_digest)
-                || current_digest != digest
-                || fresh.pins.source_generation.get() != current_generation
-                || checked_events != events
-                || observation.event_revision() != checked_events
+            if candidate
+                .is_none_or(|state| !state.matches_inputs(current.digest, current.deployment))
+                || current.digest != observed.digest
+                || current.deployment != observed.deployment
+                || fresh.pins.source_generation.get() != current.generation
+                || current.events != observed.events
+                || observation.event_revision() != current.events
             {
                 return Ok(false);
             }
@@ -478,10 +494,10 @@ impl SourceUpdateOwner {
             expected_head = ExpectedHead::Epoch(fresh.pins.epoch);
             match stage {
                 PublicationStage::Source => {
-                    observation.source_reconciled(checked_watermark, current_generation);
+                    observation.source_reconciled(current.watermark, current.generation);
                 }
                 PublicationStage::Semantic => {
-                    observation.reconciled(checked_watermark, current_generation);
+                    observation.reconciled(current.watermark, current.generation);
                 }
             }
         }

@@ -845,20 +845,9 @@ fn select_toolchain_inputs(
     let (root, host) = selected_toolchain()?;
     let root =
         std::fs::canonicalize(root).map_err(|error| step("rust-toolchain-location", error))?;
-    let extractor = std::env::var_os("CODEFABRIC_RUSTC_EXTRACTOR_BIN")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::current_exe().ok().and_then(|path| {
-                path.parent()
-                    .map(|parent| parent.join("codefabric-rustc-extractor"))
-            })
-        })
-        .ok_or_else(|| {
-            step(
-                "rust-extractor-location",
-                "extractor executable unavailable",
-            )
-        })?;
+    let extractor = crate::fabric::provider_deployment::ProviderExecutable::RustcExtractor
+        .selected_path()
+        .map_err(|error| step("rust-extractor-location", error))?;
     let mut linker = Vec::new();
     let runtime_artifacts = host_c_compiler_inputs(&mut linker, cancellation)?;
     let linker =

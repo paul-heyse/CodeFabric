@@ -1,7 +1,7 @@
 //! Captured Python inputs to a contained provider and the production catalog boundary.
 
 use std::os::unix::ffi::OsStrExt as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::cancellation::Cancellation;
@@ -124,14 +124,9 @@ pub(super) fn run(
         outcome.gap = ProviderLaneGap::ResourceLimit;
         return Ok(outcome);
     }
-    let executable = std::env::var_os("CODEFABRIC_PYREFLY_SIDECAR_BIN")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::current_exe().ok().and_then(|path| {
-                path.parent()
-                    .map(|parent| parent.join("codefabric-pyrefly-sidecar"))
-            })
-        });
+    let executable = crate::fabric::provider_deployment::ProviderExecutable::Pyrefly
+        .selected_path()
+        .ok();
     let Some(executable) = executable.and_then(|path| std::fs::canonicalize(path).ok()) else {
         outcome.gap = ProviderLaneGap::ProviderFailure;
         tracing::warn!("Pyrefly executable unavailable; Python semantic scope remains incomplete");

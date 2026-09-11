@@ -1,6 +1,8 @@
 //! Real public queries against an incremental daemon and an independent clean state root.
 use super::*;
 
+mod provider_deployment;
+
 #[test]
 fn processing_remainder_pages_keep_exact_scope_across_reopen_and_updates() {
     let fixture = ProductionFixture::with_source(b"def start():\n    return 1\n");

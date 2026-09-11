@@ -19,6 +19,13 @@ use crate::freshness::FreshnessBarrier;
 pub(crate) struct SourceInventoryState {
     pub(crate) digest: [u8; 32],
     pub(crate) semantic_pending: bool,
+    pub(crate) provider_deployment_digest: Option<[u8; 32]>,
+}
+
+impl SourceInventoryState {
+    pub(crate) fn matches_inputs(&self, digest: [u8; 32], deployment: [u8; 32]) -> bool {
+        self.digest == digest && self.provider_deployment_digest == Some(deployment)
+    }
 }
 
 pub(crate) async fn selected_inventory_state(
@@ -85,9 +92,21 @@ pub(crate) async fn selected_inventory_state(
             .ok_or("invalid inventory semantic stage")?
             .value(0),
     };
+    // Older exact epochs have no deployment observation and must be reconciled before
+    // current semantics are established. Their historical facts remain readable.
+    let provider_deployment_digest = batch
+        .column_by_name("provider_deployment_digest")
+        .map(|_| {
+            fixed("provider_deployment_digest")?
+                .value(0)
+                .try_into()
+                .map_err(|_| "invalid provider deployment digest width".to_owned())
+        })
+        .transpose()?;
     Ok(Some(SourceInventoryState {
         digest,
         semantic_pending,
+        provider_deployment_digest,
     }))
 }
 
@@ -574,6 +593,20 @@ impl Drop for WorkspaceWatch {
 mod tests {
     use super::*;
     use crate::freshness::FreshnessState;
+
+    #[test]
+    fn legacy_inventory_requires_deployment_reconciliation_and_changes_invalidate_matches() {
+        let mut state = SourceInventoryState {
+            digest: [1; 32],
+            semantic_pending: false,
+            provider_deployment_digest: None,
+        };
+        assert!(!state.matches_inputs([1; 32], [0; 32]));
+        state.provider_deployment_digest = Some([2; 32]);
+        assert!(state.matches_inputs([1; 32], [2; 32]));
+        assert!(!state.matches_inputs([1; 32], [3; 32]));
+        assert!(!state.matches_inputs([3; 32], [2; 32]));
+    }
 
     #[tokio::test]
     async fn overflowing_hints_retain_census_obligation_and_old_epochs_stay_stale() {

@@ -21,6 +21,7 @@ CASES = {
     "publication-shutdown": "live_updates::shutdown_during_semantic_delta_publication_joins_workspace_owners",
     "mixed-publication-shutdown": "live_updates::mixed_semantic_publication_shutdown_joins_workspace_owners",
     "client-timeout-shutdown": "live_updates::timed_out_client_during_publication_drains_and_reopens_exactly",
+    "provider-deployment-live": "live_updates::provider_deployment::selected_provider_redeployment_fences_delayed_facts_and_reconciles_reopen",
     "rust-failure": "pragmatic_rust_target_failure_retains_other_targets",
     "first-release-queries": (
         "first_release::pragmatic_plan_corpus_first_four_forms_and_independent_expectations_survive_reopen"
@@ -147,6 +148,7 @@ def main(argv=None) -> int:
                         "mixed-clean-live",
                         "mixed-publication-shutdown",
                         "client-timeout-shutdown",
+                        "provider-deployment-live",
                         "python-poll-live",
                         "python-stubs-live",
                         "python-roots-live",

@@ -134,6 +134,8 @@ pub(crate) mod workspace_resources;
 #[cfg(feature = "daemon")]
 pub(crate) mod workspace_updates;
 #[cfg(feature = "daemon")]
+pub(crate) mod provider_deployment;
+#[cfg(feature = "daemon")]
 #[cfg(feature = "daemon")]
 pub mod writer_generation_sqlite;
 #[cfg(feature = "daemon")]

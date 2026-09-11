@@ -16,6 +16,7 @@ pub(super) fn install(
     builder: &mut ProgrammaticFabricEpochBuilder,
     capture: &InventoryCaptureBundle,
     stage: super::PublicationStage,
+    provider_deployment: [u8; 32],
 ) -> Result<(), ProductionWorkspaceStartupError> {
     line_index::install(builder, capture)?;
     let images = capture.images();
@@ -73,6 +74,11 @@ pub(super) fn install(
         FabricSchemaRole::Source,
         "input_inventory_state",
         vec![
+            (
+                "provider_deployment_digest",
+                false,
+                hash32_array([Some(&provider_deployment)]),
+            ),
             (
                 "semantic_pending",
                 false,

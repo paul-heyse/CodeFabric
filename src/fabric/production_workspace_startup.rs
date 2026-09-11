@@ -560,6 +560,8 @@ fn build_fresh_native_source(
     } = work;
     crate::process_memory::admit(crate::resource_budget::ResourceClass::Data)
         .map_err(|error| step("source-memory-headroom", error))?;
+    let provider_deployment = super::provider_deployment::observation_digest()
+        .map_err(|error| step("provider-deployment-observation", error))?;
     let workspace_root = state_root
         .join("fabric")
         .join(lower_hex(&record.workspace_id));
@@ -947,7 +949,12 @@ fn build_fresh_native_source(
         &prepared_inputs.inventory,
         &admitted_runs,
     )?;
-    source_context::install(&mut builder, prepared_inputs.capture()?, stage)?;
+    source_context::install(
+        &mut builder,
+        prepared_inputs.capture()?,
+        stage,
+        provider_deployment,
+    )?;
     canonical::install(
         &mut builder,
         &prepared_inputs.inventory,

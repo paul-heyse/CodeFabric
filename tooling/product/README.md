@@ -55,6 +55,12 @@ The case has the same 600-second default harness deadline and explicit timeout o
 namespace package, removes/restores the stub and verifies exact public call targets against their
 source-file identities and separate clean builds. It has a 600-second default harness deadline.
 
+`just golden --case provider-deployment-live` replaces only private installed provider binaries.
+It compares the first four public forms with independent expected declarations/calls/source,
+rejects a delayed completion from an older deployment, and checks changed/unchanged exact reopen.
+Source bytes and inventory remain unchanged; provider replacement advances the selected generation.
+Its finite harness deadline is 600 seconds.
+
 `just golden --case python-roots-live` reverses/restores ordered import roots while retaining
 all captured Python files. It checks that root-level scripts remain queryable and a root-level
 module cannot shadow the configured roots, with independent expected targets and clean comparisons.

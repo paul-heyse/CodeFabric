@@ -164,3 +164,12 @@ slow-timeout = { period = "60s", terminate-after = 5 }
 [[profile.ci.overrides]]
 filter = 'test(explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly)'
 slow-timeout = { period = "60s", terminate-after = 5 }
+
+# Private provider replacement, delayed completion, changed and unchanged exact reopen.
+[[profile.default.overrides]]
+filter = 'test(selected_provider_redeployment_fences_delayed_facts_and_reconciles_reopen)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
+[[profile.ci.overrides]]
+filter = 'test(selected_provider_redeployment_fences_delayed_facts_and_reconciles_reopen)'
+slow-timeout = { period = "60s", terminate-after = 10 }
