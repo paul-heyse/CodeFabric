@@ -89,6 +89,8 @@ pub struct PythonContextDiscoveryRequest {
     /// Missing external bundle evidence does not prevent the native syntax context.
     pub typeshed_bundle_digest: Option<[u8; 32]>,
     pub pyrefly_bundle_digest: Option<[u8; 32]>,
+    /// Observed native runtime compatibility, not captured content authority.
+    pub runtime_observation: Option<[u8; 32]>,
     pub ruff_bundle_digest: [u8; 32],
     pub provider_bundle_version: String,
     pub search_scope: ContextSearchScope,
@@ -205,6 +207,8 @@ pub struct PythonAnalysisContextManifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unapplied_checker_settings: Option<Vec<String>>,
     pub pyrefly_bundle_digest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_observation: Option<[u8; 32]>,
     pub ruff_bundle_digest: String,
     pub provider_bundle_version: String,
     pub platforms: Vec<String>,
@@ -741,6 +745,7 @@ fn assemble_manifest(
             project_config_artifacts,
             unapplied_checker_settings: None,
             pyrefly_bundle_digest: request.pyrefly_bundle_digest.as_ref().map(digest_string),
+            runtime_observation: request.runtime_observation,
             ruff_bundle_digest: digest_string(&request.ruff_bundle_digest),
             provider_bundle_version: request.provider_bundle_version.clone(),
             platforms: Vec::new(),
@@ -775,6 +780,7 @@ fn validate_request(
     if request.project_root_id.is_empty()
         || request.platform_tag.is_empty()
         || request.provider_bundle_version.is_empty()
+        || request.runtime_observation == Some([0; 32])
         || !valid_relative_path(&request.project_root_path)
     {
         return Err(PythonContextDiscoveryError::terminal(
@@ -1976,6 +1982,34 @@ mod tests {
         }
     }
 
+    #[test]
+    fn runtime_observation_changes_effective_python_context_without_becoming_a_bundle_digest() {
+        let mut request = base_request();
+        let previous = discover_python_context(&request).unwrap();
+        request.runtime_observation = Some([0x51; 32]);
+        let selected = discover_python_context(&request).unwrap();
+        assert_ne!(
+            previous.context.analysis_context_id,
+            selected.context.analysis_context_id
+        );
+        assert_eq!(
+            selected.context,
+            discover_python_context(&request).unwrap().context
+        );
+        request.runtime_observation = Some([0x52; 32]);
+        let changed = discover_python_context(&request).unwrap();
+        assert_ne!(
+            selected.context.analysis_context_id,
+            changed.context.analysis_context_id
+        );
+        assert_eq!(
+            selected.manifest.pyrefly_bundle_digest,
+            changed.manifest.pyrefly_bundle_digest
+        );
+        request.runtime_observation = Some([0; 32]);
+        assert!(discover_python_context(&request).is_err());
+    }
+
     fn base_request() -> PythonContextDiscoveryRequest {
         PythonContextDiscoveryRequest {
             workspace_id: workspace_id(),
@@ -2005,6 +2039,7 @@ mod tests {
             },
             typeshed_bundle_digest: Some([0x31; 32]),
             pyrefly_bundle_digest: Some([0x32; 32]),
+            runtime_observation: None,
             ruff_bundle_digest: [0x33; 32],
             provider_bundle_version: "python-providers-v1".to_owned(),
             search_scope: ContextSearchScope {

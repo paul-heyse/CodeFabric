@@ -151,6 +151,7 @@ async fn contained_cargo_observations(compile_failure: bool) {
     )
     .unwrap();
     let discovered = discover_rust_context(&RustContextDiscoveryRequest {
+        runtime_observation: None,
         workspace_id: encode_public_id(IdentityDomain::Workspace, None, [1; 16]).unwrap(),
         source_generation: 7,
         provider_bundle_version: "rust-contained-fixture".into(),

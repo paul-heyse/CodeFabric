@@ -5,6 +5,8 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "linux")]
+mod runtime;
 mod tool_inputs;
 pub(in crate::fabric) use tool_inputs::{
     COMPILER_INPUT_ROOTS, MAX_COMPILER_INPUT_ENTRIES, command_output,
@@ -40,22 +42,46 @@ impl ProviderExecutable {
 
 /// A cache-independent witness survives in the selected source inventory relation. Only Rust
 /// input sets select the compiler/sysroot; unavailable tools do not prevent source publication.
+pub(crate) struct DeploymentObservation {
+    pub digest: [u8; 32],
+    /// Metadata compatibility witness of the mounted runtime, never a content digest.
+    pub runtime: Option<[u8; 32]>,
+}
+
 pub(crate) fn observation_digest(
     has_rust: bool,
     budget: &crate::resource_budget::ResourceBudget,
     cancellation: &crate::cancellation::Cancellation,
 ) -> io::Result<[u8; 32]> {
+    observe(has_rust, budget, cancellation).map(|observation| observation.digest)
+}
+
+pub(crate) fn observe(
+    has_rust: bool,
+    budget: &crate::resource_budget::ResourceBudget,
+    cancellation: &crate::cancellation::Cancellation,
+) -> io::Result<DeploymentObservation> {
     let providers = observe_paths(&[
         ProviderExecutable::Pyrefly.selected_path()?,
         ProviderExecutable::RustcExtractor.selected_path()?,
     ])?;
     let mut hash = blake3::Hasher::new();
-    hash.update(b"codefabric.selected-native-input-observation.v2\0");
+    hash.update(b"codefabric.selected-native-input-observation.v3\0");
     frame(&mut hash, &providers);
     if has_rust {
         tool_inputs::observe(&mut hash, budget, cancellation)?;
     }
-    Ok(*hash.finalize().as_bytes())
+    #[cfg(target_os = "linux")]
+    let runtime = Some(runtime::observe(budget, cancellation)?);
+    #[cfg(not(target_os = "linux"))]
+    let runtime: Option<[u8; 32]> = None;
+    if let Some(witness) = runtime {
+        frame(&mut hash, &witness);
+    }
+    Ok(DeploymentObservation {
+        digest: *hash.finalize().as_bytes(),
+        runtime,
+    })
 }
 
 fn frame(hash: &mut blake3::Hasher, bytes: &[u8]) {

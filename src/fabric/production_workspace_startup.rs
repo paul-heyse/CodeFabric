@@ -597,7 +597,8 @@ fn build_fresh_native_source(
     )?;
     prepared_inputs.detach_writer(operational_database.to_owned(), Arc::clone(&writer));
     drop(capture_writer);
-    let provider_deployment = super::provider_deployment::observation_digest(
+    costs.start("provider-deployment");
+    let deployment = super::provider_deployment::observe(
         prepared_inputs
             .capture()?
             .inventory()
@@ -609,6 +610,8 @@ fn build_fresh_native_source(
         &cancellation,
     )
     .map_err(|error| step("provider-deployment-observation", error))?;
+    let provider_deployment = deployment.digest;
+    prepared_inputs.runtime_observation = deployment.runtime;
     costs.inputs(
         prepared_inputs.capture()?.images().len(),
         prepared_inputs

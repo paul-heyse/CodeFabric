@@ -68,6 +68,10 @@ struct Manifest {
     unapplied_checker_settings: Option<Vec<String>>,
     #[serde(deserialize_with = "required_nullable_digest")]
     pyrefly_bundle_digest: Option<String>,
+    // The daemon fences this observation around publication and includes it in the exact
+    // context ID. It is not a claim that this process verified an immutable runtime image.
+    #[serde(default)]
+    runtime_observation: Option<[u8; 32]>,
     ruff_bundle_digest: String,
     provider_bundle_version: String,
     platforms: Vec<String>,
@@ -422,6 +426,7 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), PreparationError> {
     if manifest.context_kind != "python"
         || manifest.platform_tag.is_empty()
         || manifest.provider_bundle_version.is_empty()
+        || manifest.runtime_observation == Some([0; 32])
         || manifest.configuration_policy_identity == [0; 32]
         || !valid_path(&manifest.configuration_namespace, true)
         || manifest.configuration_roots.is_empty()
@@ -674,6 +679,32 @@ mod tests {
             matches!(SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap()),
             Err(PreparationError::Unavailable(ref reasons)) if reasons.contains(&PreparationRemainder::TypeshedBundleAuthorityUnavailable) && reasons.contains(&PreparationRemainder::PyreflyBundleAuthorityUnavailable))
         );
+    }
+
+    #[test]
+    fn runtime_observation_is_typed_compatibility_input_and_old_manifests_remain_valid() {
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&test_manifest("3.14", "linux")).unwrap();
+        assert!(
+            SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
+                .is_ok()
+        );
+        manifest["runtime_observation"] = serde_json::json!(vec![81; 32]);
+        let selected =
+            SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
+                .unwrap();
+        assert_eq!(selected.manifest.runtime_observation, Some([81; 32]));
+        for invalid in [
+            serde_json::json!(vec![0; 32]),
+            serde_json::json!(vec![81; 31]),
+            serde_json::json!("claimed-digest"),
+        ] {
+            manifest["runtime_observation"] = invalid;
+            assert!(
+                SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
+                    .is_err()
+            );
+        }
     }
 
     #[test]

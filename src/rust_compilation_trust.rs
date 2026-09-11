@@ -3894,6 +3894,7 @@ mod tests {
             })
             .collect();
         RustContextDiscoveryRequest {
+            runtime_observation: None,
             workspace_id: crate::identity::encode_public_id(
                 crate::identity::IdentityDomain::Workspace,
                 None,

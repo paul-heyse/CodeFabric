@@ -37,6 +37,8 @@ pub struct RustContextDiscoveryRequest {
     pub workspace_id: String,
     pub source_generation: u64,
     pub provider_bundle_version: String,
+    /// Observed native runtime compatibility, not captured content authority.
+    pub runtime_observation: Option<[u8; 32]>,
     pub files: Vec<ContextFileInput>,
     pub search_scope: ContextSearchScope,
     pub selection: RustContextSelection,
@@ -80,6 +82,7 @@ pub struct RustContextDiscoveryProduct {
     pub context: AnalysisContext,
     pub settings: RustCompilationSettings,
     pub canonical_manifest: Vec<u8>,
+    pub runtime_observation: Option<[u8; 32]>,
     pub lookup_evidence: Vec<ContextLookupEvidence>,
     pub remainders: Vec<RustContextRemainder>,
     pub source_generation: u64,
@@ -94,7 +97,8 @@ impl RustContextDiscoveryProduct {
     pub fn validate(&self) -> Result<(), RustContextDiscoveryError> {
         self.context.validate()?;
         self.search_scope.validate()?;
-        let canonical = canonical_manifest(&self.search_scope, &self.settings)?;
+        let canonical =
+            canonical_manifest(&self.search_scope, &self.settings, self.runtime_observation)?;
         if canonical != self.canonical_manifest
             || self.context.fingerprint_bytes()? != crate::integrity::digest_bytes(&canonical)
             || self.context.context_kind != AnalysisContextKind::Rust
@@ -214,7 +218,11 @@ pub fn discover_rust_context(
     }
     remainders.sort();
     remainders.dedup();
-    let canonical_manifest = canonical_manifest(&request.search_scope, &settings)?;
+    let canonical_manifest = canonical_manifest(
+        &request.search_scope,
+        &settings,
+        request.runtime_observation,
+    )?;
     let fingerprint = crate::integrity::digest_bytes(&canonical_manifest);
     let context = AnalysisContext::new_from_manifest_fingerprint(
         &request.workspace_id,
@@ -229,6 +237,7 @@ pub fn discover_rust_context(
             context,
             settings,
             canonical_manifest,
+            runtime_observation: request.runtime_observation,
             lookup_evidence,
             remainders,
             source_generation: request.source_generation,
@@ -650,10 +659,19 @@ fn merge_flags(
 fn canonical_manifest(
     scope: &ContextSearchScope,
     settings: &RustCompilationSettings,
+    runtime_observation: Option<[u8; 32]>,
 ) -> Result<Vec<u8>, RustContextDiscoveryError> {
     // Scope closure and generation belong to support evidence, not semantic environment identity.
-    let value = serde_json::json!({"settings": settings, "namespace": scope.namespace,
+    let mut value = serde_json::json!({"settings": settings, "namespace": scope.namespace,
         "ordered_roots": scope.ordered_roots, "policy_identity": scope.policy_identity});
+    if let Some(witness) = runtime_observation {
+        if witness == [0; 32] {
+            return Err(RustContextDiscoveryError::InvalidInput(
+                "empty runtime observation",
+            ));
+        }
+        value["runtime_observation"] = serde_json::json!(witness);
+    }
     crate::contracts::jcs::canonicalize_value(&value)
         .map_err(|error| RustContextDiscoveryError::Canonical(error.to_string()))
 }
@@ -697,10 +715,45 @@ mod tests {
         }
     }
 
+    #[test]
+    fn runtime_observation_changes_rust_context_and_is_validated_separately_from_settings() {
+        let mut request = request();
+        let RustContextDiscoveryOutcome::Prepared(previous) =
+            discover_rust_context(&request).unwrap()
+        else {
+            panic!("prepared fixture");
+        };
+        request.runtime_observation = Some([0x51; 32]);
+        let RustContextDiscoveryOutcome::Prepared(mut selected) =
+            discover_rust_context(&request).unwrap()
+        else {
+            panic!("prepared fixture");
+        };
+        selected.validate().unwrap();
+        assert_eq!(previous.settings, selected.settings);
+        assert_ne!(
+            previous.context.analysis_context_id,
+            selected.context.analysis_context_id
+        );
+        let RustContextDiscoveryOutcome::Prepared(repeated) =
+            discover_rust_context(&request).unwrap()
+        else {
+            panic!("prepared fixture");
+        };
+        assert_eq!(repeated.context, selected.context);
+        selected.runtime_observation = Some([0x52; 32]);
+        assert!(
+            selected.validate().is_err(),
+            "runtime witness cannot drift under an existing context"
+        );
+        request.runtime_observation = Some([0; 32]);
+        assert!(discover_rust_context(&request).is_err());
+    }
+
     fn request() -> RustContextDiscoveryRequest {
         RustContextDiscoveryRequest {
             workspace_id: encode_public_id(IdentityDomain::Workspace, None, [9; 16]).unwrap(),
-            source_generation: 5, provider_bundle_version: "rust-providers-1".to_owned(),
+            source_generation: 5, runtime_observation: None, provider_bundle_version: "rust-providers-1".to_owned(),
             files: vec![
                 input(b"Cargo.toml", b"[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n[lib]\npath='src/lib.rs'\n"),
                 input(b"src/lib.rs", b"pub fn value() -> u32 { 1 }\n"),

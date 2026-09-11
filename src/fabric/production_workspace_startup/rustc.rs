@@ -428,6 +428,7 @@ fn prepare_and_run(
         .map_err(|error| step("rust-dependency-bundle", error))?;
     let selection = initial_selection(&files, target, toolchain, workers)?;
     let product = discover_rust_context(&RustContextDiscoveryRequest {
+        runtime_observation: inputs.runtime_observation,
         workspace_id: workspace_id.clone(),
         source_generation: inventory.source_generation(),
         provider_bundle_version: "codefabric-rust-compiler-v1".into(),
@@ -1471,6 +1472,7 @@ mod tests {
         let selected = targets::discover(&files).unwrap().remove(0);
         let selection = initial_selection(&files, &selected, toolchain, workers).unwrap();
         let product = discover_rust_context(&RustContextDiscoveryRequest {
+            runtime_observation: None,
             workspace_id: format!("workspace:{:032x}", 1),
             source_generation: generation,
             provider_bundle_version: "codefabric-rust-compiler-v1".into(),

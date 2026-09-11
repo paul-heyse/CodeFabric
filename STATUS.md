@@ -361,6 +361,38 @@ checking passes. This qualifies the compiler/artifact census through edit and re
 corrected status helper above. It does not complete runtime/dependency validity, retained outputs,
 owned replay, full P04/P05, the workspace suite or doctests.
 
+**Mounted runtime validity continuation (2026-09-11; focused/native ingress delivered,
+installed edit/reopen qualification remains open).**
+The deployment census now observes the complete Linux `/usr` runtime mounted by the sandbox using
+no-follow descriptor-relative `rustix` 1.1.4 traversal. It records raw symlink targets and directory
+membership without following links or opening special files. Device/inode, size, mode/ownership,
+mtime/ctime detect ordinary host changes; access time is excluded. Traversal has cancellation,
+shared memory charges, finite entry/depth/time bounds and entry/directory fences. This is a metadata
+witness, not captured content or replay authority. The selected witness is persisted through the
+existing deployment baseline and participates in both native context manifests. Runtime changes
+therefore change Python checker compatibility as well as the publication fence. The sidecar keeps
+closed typed ingress, accepts older manifests and rejects malformed observations.
+
+All **24 focused root cases pass in 0.044 s** (`/tmp/codefabric-p04-runtime-observation-focused.log`),
+including metadata/raw/negative/FIFO boundaries and Python/Rust context changes. The sidecar passes
+all **7 preparation tests in 0.10 s**, strict all-target Clippy and executable rebuild
+(`/tmp/codefabric-p04-runtime-sidecar-*.log`). The initial integrated all-target check passes in
+1m53s. The final four runtime/context tests pass again. The installed mixed case passes all four initial
+public query forms, then its 180-second fixture wait for the edited semantic selection expires
+(**434.075 s** total case; run `99ac3c52-17b6-4393-afbf-20e6cddc193f`, isolated target with both
+installed providers and delegated user-systemd scope). Both native providers and generation-two
+relation preparation finish, including retained checker/toolchain reuse; semantic activation has
+not been selected when the fixture aborts. Teardown subsequently reports `daemon/native-control`
+closed during activation and an in-flight activation/shutdown transition. Log:
+`/tmp/codefabric-p04-runtime-observation-installed.log` (**4 passed, 1 failed**). Keep that failure
+and full edit/clean/reopen qualification open; completed preparation is not activation acceptance.
+No additional timing-remediation cycle or full workspace run was used as a P04 prerequisite.
+Final all-target Clippy completes in 1m52s with existing warnings and a fixed-array iteration
+advisory; featureless checking passes in 0.07s. Document navigation passes for both handoff files.
+The detailed plan §6B records the decision, assumptions and fuller immutable-image alternative.
+Runtime image capture/leased ownership, external-root admission, safe Cargo retention and the
+remaining P04/P05 scope stay open.
+
 **Recursive inclusion continuation (2026-09-11).** The existing capture and watch walks now observe
 configuration in every admitted directory before enumerating its children. Native gix submodule
 declarations and Python search/site-package roots select descendants through recursive pruned

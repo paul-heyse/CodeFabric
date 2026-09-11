@@ -39,6 +39,7 @@ pub(super) struct PreparedSourceInputs {
     image_store: SourceImageStore,
     capture: Option<InventoryCaptureBundle>,
     pub inventory: ChargedValue<ProviderSourceInventory>,
+    pub(super) runtime_observation: Option<[u8; 32]>,
     budget: ResourceBudget,
     cancellation: Cancellation,
 }
@@ -58,6 +59,7 @@ impl PreparedSourceInputs {
         Ok(ProviderInputs {
             capture: self.capture()?,
             inventory: &self.inventory,
+            runtime_observation: self.runtime_observation,
             budget: &self.budget,
         })
     }
@@ -118,6 +120,7 @@ impl PreparedSourceInputs {
 pub(super) struct ProviderInputs<'a> {
     capture: &'a InventoryCaptureBundle,
     pub inventory: &'a ChargedValue<ProviderSourceInventory>,
+    pub(super) runtime_observation: Option<[u8; 32]>,
     budget: &'a ResourceBudget,
 }
 
@@ -259,6 +262,7 @@ pub(super) fn capture_inputs(
         }
     };
     let mut owned = PreparedSourceInputs {
+        runtime_observation: None,
         store: CaptureStore::Capturing(store),
         image_store,
         capture: Some(capture),
@@ -489,6 +493,7 @@ pub(super) fn discover_python_inputs(
             supported_python_versions: (7..=15).map(|minor| format!("3.{minor}")).collect(),
             default_python_version: "3.14".to_owned(),
         },
+        runtime_observation: inputs.runtime_observation,
         typeshed_bundle_digest: None,
         pyrefly_bundle_digest: None,
         ruff_bundle_digest: *blake3::hash(

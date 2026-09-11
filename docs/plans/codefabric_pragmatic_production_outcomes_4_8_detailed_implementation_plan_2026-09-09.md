@@ -1775,6 +1775,48 @@ and logs. Capture/observation share the compiler-root selection and entry bound.
 live read-only `/usr` image is a distinct remaining validity/capture boundary;
 selected compiler observation does not establish complete native runtime closure.
 
+**Mounted runtime observation decision (2026-09-11; focused/native ingress delivered,
+installed edit/reopen qualification remains open).**
+Extend the persisted deployment witness to the complete Linux `/usr` namespace mounted by the
+existing provider sandbox. Use descriptor-relative native `rustix` 1.1.4 `Dir::read_from`,
+`statat(SYMLINK_NOFOLLOW)`, `openat(DIRECTORY | NOFOLLOW)` and bounded `readlinkat_raw`;
+retain raw names/targets, membership, device/inode, mode/ownership, size and mtime/ctime. Do not
+follow symlinks outside the mounted namespace or open special files. Directory and entry fences
+reject a changing walk. The existing owned census worker, cancellation, shared memory budget and
+publication fences govern this work; it adds no watcher service or host-inventory graph domain.
+A separate `provider-deployment` preparation phase exposes its actual cost.
+
+Both Python and Rust canonical context manifests carry the explicit runtime observation. A changed
+witness changes semantic environment identity and therefore retires an incompatible retained Python
+checker. The sidecar's closed typed ingress validates this optional field; older manifests remain
+valid. The persisted deployment domain changes, so old selected baselines reconcile through the
+ordinary update path. This addresses a concrete gap where a changed runtime could leave an already
+loaded checker compatible even after a new census.
+
+The viable fuller alternative is an immutable runtime image selected by captured content. The host's
+mounted `/usr` currently occupies about 41 GiB. Reusing a shared capture across candidates
+requires bounded disk ownership,
+publication and leases that outlive all using processes. That remains a separate P04 implementation
+step. This metadata continuation detects ordinary trusted-host changes but does not claim content
+identity, replay authority or immutable execution during a host update. It does not close the runtime
+capture boundary in GEN AC-G-14, “Analysis-context discovery, identity, and selection,” and AC-G-35,
+“Provider sandbox and Rust compilation trust model.” Retained Cargo fact admission must keep that
+remaining boundary explicit. Check metadata replacement/addition/removal/raw-link behavior, stable
+and changed native contexts, typed sidecar ingress and real installed public/reopen consumers.
+
+Validation: 24 focused root cases and seven sidecar preparation cases pass; strict sidecar Clippy
+and rebuilt executable pass. Final all-target root Clippy completes with warnings; featureless
+checking and document navigation pass. The final selection repeats all four runtime/context tests
+successfully. The installed mixed case passes the initial four public forms, then expires its
+180-second edited-activation fixture wait (**434.075 s**, nextest
+`99ac3c52-17b6-4393-afbf-20e6cddc193f`; `/tmp/codefabric-p04-runtime-observation-installed.log`).
+Both providers and generation-two relation preparation finish, with retained checker/toolchain
+reuse, but the edited semantic activation is not yet selected. Fixture-abort teardown reports a
+closed native-control scope during activation and an in-flight shutdown transition. This is
+**four tests passed and one failed**, not full installed acceptance. STATUS records logs and
+configuration. Keep edited activation/clean/reopen qualification and the cleanup failure visible;
+do not make another timing-remediation cycle a prerequisite to remaining P04 feature work.
+
 1. Capture positive and negative semantic dependencies as inputs to existing owner/context validity:
    resolved imports/exports, ordered search roots, absent module candidates, type/member/call inputs,
    build configuration, proc-macro/generated inputs and selected native tools. An import that was
