@@ -1575,6 +1575,24 @@ census, not isolated notification latency. Final default/featureless checks and 
 all 44 product-harness cases pass. STATUS records commands/logs and the earlier user-confirmed Cargo
 cleanup interruption. No startup/performance or full-outcome qualification is claimed.
 
+**P04 Git metadata-watch continuation (2026-09-10).** The existing blocking watch owner now uses
+isolated gix handles to resolve the selected worktree's Git/common directories, following gix
+reference §6, Repository layout, and §25, Main and linked worktrees. At most six extra metadata/
+recovery directories are selected before deduplication. Non-recursive registration covers index,
+repository/worktree configuration, administrative pointers and `info` policy files; callbacks exclude
+objects, refs, logs and other worktree contents. Editing `.git`/administrative pointers in place
+repairs topology, and a post-installation comparison retains changes missed before registration.
+No Git library handle crosses the blocking owner and no Git command runs in production.
+
+All 11 focused cases pass, including native/poll linked-worktree index/exclude changes, pointer
+retargeting, unrelated object writes and joined ownership. The metadata-only poll profile observes
+whole-second modification times; the test exercises a supported timestamp change and does not claim
+same-second edit detection. Periodic reconciliation remains the fallback. This installs metadata
+observation only: native selected-path classification, complete conflict provenance, captured
+inclusion policy and explicitly selected external policy/dependency roots remain open. In particular,
+do not use the older full-repository gix dirwalk as a substitute for the bounded captured inventory,
+or drop ignored-but-admitted compiler inputs. STATUS records exact checks and initial failures.
+
 **Remaining implementation progression (E06/E10; P01/P04).**
 
 1. Derive source inventory and watch topology from one captured inclusion policy. Watch selected

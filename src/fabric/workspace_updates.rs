@@ -1,5 +1,6 @@
 //! Workspace-owned change observation. Events request a census; they never establish facts.
 
+use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -273,27 +274,36 @@ impl WorkspaceObservation {
         Ok(WorkspaceWatchControl { commands })
     }
 
-    fn observe_events(&self, root: &Path, events: DebounceEventResult) {
+    fn observe_events(
+        &self,
+        root: &Path,
+        git: &crate::git_state::watch_topology::GitWatchTopology,
+        events: DebounceEventResult,
+    ) {
         if let Ok(events) = events {
             let rescan = events.iter().any(|event| event.need_rescan());
             let relevant = |event: &notify_debouncer_full::DebouncedEvent| {
                 !matches!(event.kind, EventKind::Access(_))
                     && (event.paths.is_empty()
-                        || event.paths.iter().any(|path| relevant(root, path)))
+                        || event
+                            .paths
+                            .iter()
+                            .any(|path| relevant(root, path) || git.relevant(path)))
             };
             let topology_changed = rescan
                 || events.iter().any(|event| {
                     relevant(event)
-                        && matches!(
-                            event.kind,
-                            EventKind::Any
-                                | EventKind::Other
-                                | EventKind::Create(_)
-                                | EventKind::Remove(_)
-                                | EventKind::Modify(
-                                    notify_debouncer_full::notify::event::ModifyKind::Name(_)
-                                )
-                        )
+                        && (event.paths.iter().any(|path| git.topology_relevant(path))
+                            || matches!(
+                                event.kind,
+                                EventKind::Any
+                                    | EventKind::Other
+                                    | EventKind::Create(_)
+                                    | EventKind::Remove(_)
+                                    | EventKind::Modify(
+                                        notify_debouncer_full::notify::event::ModifyKind::Name(_)
+                                    )
+                            ))
                 });
             if topology_changed {
                 self.topology_revision.fetch_add(1, Ordering::AcqRel);
@@ -317,13 +327,18 @@ impl WorkspaceObservation {
     ) -> Result<WorkspaceWatch, String> {
         let observed = self.clone();
         let selected_root = root.to_owned();
+        let git = crate::git_state::watch_topology::GitWatchTopology::resolve(root);
         let retained = budget
             .try_reserve(
                 crate::resource_budget::ResourceClass::Control,
-                crate::resource_budget::ResourceAmounts::default(),
+                crate::resource_budget::ResourceAmounts {
+                    memory_bytes: git.retained_bytes(),
+                    ..crate::resource_budget::ResourceAmounts::default()
+                },
             )
             .map_err(|error| error.to_string())?;
-        let handler = move |events| observed.observe_events(&selected_root, events);
+        let metadata = git.clone();
+        let handler = move |events| observed.observe_events(&selected_root, &metadata, events);
         let config = Config::default().with_follow_symlinks(false);
         let watcher = match profile {
             SourceWatchProfile::Native => WatchBackend::Native(
@@ -353,11 +368,26 @@ impl WorkspaceObservation {
         let mut watch = WorkspaceWatch {
             watcher: Some(watcher),
             retained,
+            registered_paths: BTreeSet::new(),
             registered_directories: 0,
             excluded_directories: 0,
         };
         watch.install(root, cancellation)?;
-        self.watch_healthy.store(true, Ordering::Release);
+        let metadata_directories = git.directories();
+        for directory in &metadata_directories {
+            if cancellation.is_cancelled() {
+                return Err("Git metadata watch installation cancelled".to_owned());
+            }
+            watch.register(directory)?;
+        }
+        // A .git pointer or info-directory change before its registration must retain a
+        // repair obligation even if no backend event covered that installation interval.
+        let checked_git = crate::git_state::watch_topology::GitWatchTopology::resolve(root);
+        let coherent = git == checked_git && metadata_directories == checked_git.directories();
+        if !coherent {
+            self.topology_revision.fetch_add(1, Ordering::AcqRel);
+        }
+        self.watch_healthy.store(coherent, Ordering::Release);
         self.request(true);
         tracing::info!(
             registered_directories = watch.registered_directories,
@@ -422,6 +452,7 @@ impl WatchBackend {
 pub(crate) struct WorkspaceWatch {
     watcher: Option<WatchBackend>,
     retained: crate::resource_budget::ResourceReservation,
+    registered_paths: BTreeSet<PathBuf>,
     registered_directories: u64,
     excluded_directories: u64,
 }
@@ -439,12 +470,16 @@ impl WorkspaceWatch {
     }
 
     fn register(&mut self, path: &Path) -> Result<(), String> {
+        if self.registered_paths.contains(path) {
+            return Ok(());
+        }
         self.reserve_path(path)?;
         self.watcher
             .as_mut()
             .ok_or("watcher stopped")?
             .watch(path)
             .map_err(|error| error.to_string())?;
+        self.registered_paths.insert(path.to_owned());
         self.registered_directories += 1;
         Ok(())
     }
@@ -692,6 +727,71 @@ mod tests {
         assert!(observed.event_revision() > event);
         watch.stop();
         assert_eq!(budget.observation().used.memory_bytes, before);
+    }
+
+    #[tokio::test]
+    async fn native_watch_observes_linked_git_metadata_and_retargets_its_owned_topology() {
+        exercise_linked_git_watch(SourceWatchProfile::Native).await;
+    }
+
+    #[tokio::test]
+    async fn poll_watch_observes_linked_git_metadata_and_retargets_its_owned_topology() {
+        exercise_linked_git_watch(SourceWatchProfile::Poll).await;
+    }
+
+    async fn exercise_linked_git_watch(profile: SourceWatchProfile) {
+        use std::{fs, num::NonZeroUsize};
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("selected");
+        let main = fixture.path().join("main");
+        let administrative = crate::git_state::watch_topology::linked_fixture(&root, &main);
+        fs::create_dir_all(main.join(".git/info")).unwrap();
+        // The selected PollWatcher profile uses whole-second metadata hints. Make this
+        // existing-file edit observable; same-second changes rely on periodic secure census.
+        let exclude = main.join(".git/info/exclude");
+        fs::write(&exclude, "initial policy\n").unwrap();
+        fs::File::open(&exclude)
+            .unwrap()
+            .set_times(
+                fs::FileTimes::new()
+                    .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(10)),
+            )
+            .unwrap();
+        let (observed, mut receiver) = WorkspaceObservation::new();
+        let budget = crate::provider_types::source_fixture_budget([2; 16]);
+        let scope =
+            crate::cancellation::StructuredCancellationScope::try_root_with_control_reserve(
+                "git-watch-test",
+                NonZeroUsize::new(8).unwrap(),
+                NonZeroUsize::new(4).unwrap(),
+            )
+            .unwrap();
+        let control = observed
+            .start_watch(root.clone(), &budget, profile, &scope)
+            .await
+            .unwrap();
+        receiver.recv().await.unwrap();
+        await_watched_edit(&observed, &mut receiver, &exclude).await;
+        await_watched_edit(&observed, &mut receiver, &administrative.join("index")).await;
+        let topology = observed.topology_installations.load(Ordering::Acquire);
+        control.reinstall();
+        await_new_watch(&observed, topology).await;
+        while receiver.try_recv().is_ok() {}
+        let before = observed.event_revision();
+        fs::create_dir_all(main.join(".git/objects/pack")).unwrap();
+        fs::write(main.join(".git/objects/pack/unrelated.pack"), "unselected").unwrap();
+        // The poll backend must complete at least one configured two-second cycle too.
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert_eq!(observed.event_revision(), before);
+        let topology = observed.topology_installations.load(Ordering::Acquire);
+        let replacement =
+            crate::git_state::watch_topology::linked_fixture(&root, &fixture.path().join("other"));
+        await_new_watch(&observed, topology).await;
+        await_watched_edit(&observed, &mut receiver, &replacement.join("index")).await;
+        drop(control);
+        scope.cancel_and_join(Duration::from_secs(5)).await.unwrap();
+        assert!(!observed.watch_healthy());
+        assert_eq!(budget.observation().used.memory_bytes, 0);
     }
 
     #[tokio::test]

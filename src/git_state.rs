@@ -25,6 +25,8 @@ use gix::object::tree::diff::ChangeDetached;
 use rusqlite::OptionalExtension as _;
 
 use crate::cancellation::Cancellation;
+#[cfg(feature = "daemon")]
+pub(crate) mod watch_topology;
 use crate::registries::GitAccelerationStatus;
 #[cfg(feature = "daemon")]
 use crate::registries::UpdateCandidateStrategy;

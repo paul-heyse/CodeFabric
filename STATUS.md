@@ -277,6 +277,30 @@ product-harness tests pass in 0.79 s with focused Ruff checks clean
 (`/tmp/codefabric-p04-publication-drain-harness.log`). No full CI or doctest claim is made.
 Continue P04 input topology/invalidation and retained-context scheduling; P04 and P05–P14 remain open.
 
+The next Git observation slice resolves the selected worktree's actual Git/common directories
+with isolated, worker-local gix 0.86 handles. It adds at most six non-recursive metadata/parent
+registrations, deduplicates source/metadata registrations and filters callbacks to the selected
+index, configuration, `.git`/administrative pointers and `info` policy inputs. Objects, refs, logs
+and other worktrees are not recursively observed. In-place pointer changes request topology repair;
+an installation-time topology comparison retains repairs missed before registration. Malformed or
+absent Git metadata retains marker observation and never supplies source authority.
+
+All 11 focused native/poll/topology/ownership cases pass in 15.042 s
+(`/tmp/codefabric-p04-git-watch-focused-final.log`, nextest
+`1f0047eb-38ad-4f7f-b1db-d0d6bffdce30`; `just root-test-incremental -j 2 --no-fail-fast` with
+`test(workspace_updates::tests::) | test(git_state::watch_topology::tests::)`, `--no-tests=fail`).
+The first run exposed missing repair for in-place `.git` edits; the correction passes. The poll
+fixture also initially assumed subsecond metadata detection: notify 8.2 compares whole-second
+modification times in the selected metadata-only profile. Its existing-file case now uses a known
+observable timestamp change. Periodic reconciliation remains necessary for missed hints; this is
+not a complete Git classification/inclusion or installed semantic-update acceptance claim.
+Git-selected path classification, conflict provenance, explicitly configured external policy files
+and selected dependency-root observation still follow. The source inclusion policy is unchanged.
+Default/featureless `just root-check` and affected Clippy pass, including modified function headers
+(`/tmp/codefabric-p04-git-watch-root.log`, `/tmp/codefabric-p04-git-watch-clippy.jsonl`).
+Documentation navigation, focused spelling and diff checks pass. This continuation is based on
+`8a92d019`; no full CI, doctest, semantic Git acceptance or P04 closure is claimed.
+
 ## P03 first-release query boundary delivered
 
 The plan corpus is committed in `47b0c225`; the shared native schema-identity correction is
