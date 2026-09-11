@@ -71,6 +71,18 @@ pub struct SourceInventory {
     pub source_generation: u64,
     pub records: ChargedSlice<SourceInventoryRecord>,
     pub digest: [u8; 32],
+    #[cfg(feature = "daemon")]
+    pub(crate) git_context:
+        Option<ChargedValue<crate::git_state::captured_inputs::CapturedGitInputs>>,
+}
+
+#[cfg(feature = "daemon")]
+impl SourceInventory {
+    pub(crate) fn git_context_digest(&self) -> [u8; 32] {
+        self.git_context
+            .as_ref()
+            .map_or([0; 32], |context| context.digest)
+    }
 }
 
 /// A full authorized walk, never a changed-work subset. Construction is fenced by its owner.
@@ -511,6 +523,58 @@ impl InventoryWalker {
                 .raw_relative_path_bytes
                 .cmp(&right.path.raw_relative_path_bytes)
         });
+        #[cfg(feature = "daemon")]
+        let git_context = crate::git_state::captured_inputs::capture(
+            &root.git_metadata_location(),
+            &records,
+            InventoryLimits {
+                maximum_duration: self
+                    .limits
+                    .maximum_duration
+                    .saturating_sub(started.elapsed()),
+                ..self.limits
+            },
+            &self.budget,
+            cancellation,
+        )?;
+        #[cfg(feature = "daemon")]
+        for context in &git_context.paths {
+            let Some(classification) = context.classification else {
+                continue;
+            };
+            let index = records
+                .binary_search_by(|record| record.path.raw_relative_path_bytes.cmp(&context.path))
+                .expect("Git metadata only describes captured source members");
+            let record = &mut records[index];
+            record.classification = InventoryClassification::try_from(classification)
+                .expect("classification originates in the closed native adapter");
+            let relative = if context.repository_root.is_empty() {
+                context.path.as_slice()
+            } else {
+                &context.path[context.repository_root.len() + 1..]
+            };
+            record.git_repo_path_bytes = Some(ChargedSlice::try_from_fn(
+                &self.budget,
+                ResourceClass::Data,
+                relative.len(),
+                || relative.to_vec(),
+            )?);
+            if let [stage] = context.stages.as_slice()
+                && stage.stage == 0
+            {
+                record.git_blob_oid = Some(ChargedSlice::try_from_fn(
+                    &self.budget,
+                    ResourceClass::Data,
+                    stage.object_id.len() + 1,
+                    || {
+                        let mut encoded = Vec::with_capacity(stage.object_id.len() + 1);
+                        encoded.push(if stage.object_id.len() == 20 { 1 } else { 2 });
+                        encoded.extend_from_slice(&stage.object_id);
+                        encoded
+                    },
+                )?);
+            }
+        }
         let _merkle = reserve_memory(&self.budget, merkle_memory_bound(&records)?)?;
         let digest = merkle_inventory_digest(&records);
         self.metrics.duration_micros =
@@ -525,6 +589,8 @@ impl InventoryWalker {
             source_generation,
             records: retained.into_charged_vec(records)?,
             digest,
+            #[cfg(feature = "daemon")]
+            git_context: Some(git_context),
         })
     }
 
@@ -1237,6 +1303,174 @@ mod tests {
             .unwrap()
             .workspace_id;
         (directory, store, workspace_id, root)
+    }
+
+    #[test]
+    #[cfg(feature = "daemon")]
+    fn nested_linked_repository_classifies_only_its_selected_source_paths() {
+        let (directory, mut store, workspace, path) = fixture();
+        let nested = path.join("nested");
+        let main = directory.path().join("external-main");
+        crate::git_state::watch_topology::linked_fixture(&nested, &main);
+        fs::write(main.join(".git/info/exclude"), "*.rs\n").unwrap();
+        fs::write(path.join("outer.rs"), "fn outer() {}\n").unwrap();
+        fs::write(nested.join("current.rs"), "fn nested() {}\n").unwrap();
+        let root = open_workspace_root(&mut store, workspace).unwrap();
+        let captured = InventoryWalker::new(InventoryLimits::default())
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
+            .unwrap();
+        let context = captured.git_context.as_ref().unwrap();
+        assert_eq!(context.paths.len(), 1);
+        assert_eq!(context.paths[0].path, b"nested/current.rs");
+        assert_eq!(context.paths[0].repository_root, b"nested");
+        assert_eq!(
+            context.paths[0].classification,
+            Some(InventoryClassification::UntrackedIgnored as u16)
+        );
+        let member = captured
+            .records
+            .iter()
+            .find(|record| record.path.raw_relative_path_bytes == b"nested/current.rs")
+            .unwrap();
+        assert_eq!(
+            member.git_repo_path_bytes.as_deref(),
+            Some(b"current.rs".as_slice())
+        );
+        assert!(
+            captured
+                .records
+                .iter()
+                .all(|record| record.content_digest.is_some())
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "daemon")]
+    fn captured_git_context_retains_all_conflict_stages_attributes_and_authoritative_bytes() {
+        use gix::bstr::ByteSlice as _;
+        let (_directory, mut store, workspace, path) = fixture();
+        let repository = gix::init(&path).unwrap();
+        fs::write(path.join(".gitignore"), "*.rs\n").unwrap();
+        fs::write(
+            path.join(".gitattributes"),
+            "*.rs text eol=crlf filter=blocked\n",
+        )
+        .unwrap();
+        fs::write(path.join("current.rs"), "fn captured() {}\r\n").unwrap();
+        fs::write(path.join("untracked.rs"), "fn untracked() {}\n").unwrap();
+        symlink(path.join("current.rs"), path.join("link.rs")).unwrap();
+        let mut index = gix::index::State::new(gix::hash::Kind::Sha1);
+        for (stage, hex) in [
+            (gix::index::entry::Stage::Base, b'1'),
+            (gix::index::entry::Stage::Ours, b'2'),
+            (gix::index::entry::Stage::Theirs, b'3'),
+        ] {
+            index.dangerously_push_entry(
+                Default::default(),
+                gix::hash::ObjectId::from_hex(&[hex; 40]).unwrap(),
+                gix::index::entry::Flags::from_stage(stage),
+                gix::index::entry::Mode::FILE,
+                b"current.rs".as_bstr(),
+            );
+        }
+        index.sort_entries();
+        gix::index::File::from_state(index, repository.index_path())
+            .write(Default::default())
+            .unwrap();
+        let root = open_workspace_root(&mut store, workspace).unwrap();
+        let mut walker = InventoryWalker::new(InventoryLimits::default());
+        let captured = walker
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
+            .unwrap();
+        let context = captured.git_context.as_ref().unwrap();
+        assert_eq!(
+            context
+                .paths
+                .iter()
+                .find(|row| row.path == b"link.rs")
+                .unwrap()
+                .classification,
+            Some(InventoryClassification::SpecialFile as u16)
+        );
+        let current = context
+            .paths
+            .iter()
+            .find(|row| row.path == b"current.rs")
+            .unwrap();
+        assert_eq!(current.status, "observed");
+        assert_eq!(
+            current.classification,
+            Some(InventoryClassification::TrackedButIgnoredPatternMatches as u16)
+        );
+        assert_eq!(
+            current
+                .stages
+                .iter()
+                .map(|stage| stage.stage)
+                .collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+        assert_eq!(
+            current
+                .attributes
+                .iter()
+                .find(|attribute| attribute.name == "eol")
+                .unwrap()
+                .value
+                .as_deref(),
+            Some(b"crlf".as_slice())
+        );
+        assert_eq!(
+            current
+                .attributes
+                .iter()
+                .find(|attribute| attribute.name == "filter")
+                .unwrap()
+                .value
+                .as_deref(),
+            Some(b"blocked".as_slice())
+        );
+        let source = captured
+            .records
+            .iter()
+            .find(|record| record.path.raw_relative_path_bytes == b"current.rs")
+            .unwrap();
+        assert_eq!(
+            source.content_digest,
+            Some(crate::integrity::digest_bytes(b"fn captured() {}\r\n"))
+        );
+        assert!(
+            source.git_blob_oid.is_none(),
+            "a conflicted index has no single authoritative blob"
+        );
+        assert_eq!(
+            context
+                .paths
+                .iter()
+                .find(|row| row.path == b"untracked.rs")
+                .unwrap()
+                .classification,
+            Some(InventoryClassification::UntrackedIgnored as u16)
+        );
+        fs::write(path.join(".git/info/attributes"), "current.rs eol=lf\n").unwrap();
+        let changed = walker
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
+            .unwrap();
+        assert_eq!(
+            captured.digest, changed.digest,
+            "source bytes and classifications are unchanged"
+        );
+        assert_ne!(
+            captured.git_context_digest(),
+            changed.git_context_digest(),
+            "metadata changes must invalidate context selection"
+        );
+        assert!(
+            changed
+                .records
+                .iter()
+                .all(|record| !record.path.raw_relative_path_bytes.starts_with(b".git/"))
+        );
     }
 
     #[test]

@@ -10,6 +10,7 @@ use crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder;
 use crate::fabric::{hash32_array, id16_array};
 use crate::source_image::InventoryCaptureBundle;
 
+mod git_inputs;
 pub(super) mod line_index;
 
 pub(super) fn install(
@@ -19,6 +20,7 @@ pub(super) fn install(
     provider_deployment: [u8; 32],
 ) -> Result<(), ProductionWorkspaceStartupError> {
     line_index::install(builder, capture)?;
+    git_inputs::install(builder, capture.inventory().inventory())?;
     let images = capture.images();
     // Capture already bounds the total bytes. Arrow owns these copies through publication;
     // subsequent source reads select this exact relation version, never a workspace pathname.
@@ -74,6 +76,11 @@ pub(super) fn install(
         FabricSchemaRole::Source,
         "input_inventory_state",
         vec![
+            (
+                "git_context_digest",
+                false,
+                hash32_array([Some(&inventory.git_context_digest())]),
+            ),
             (
                 "provider_deployment_digest",
                 false,

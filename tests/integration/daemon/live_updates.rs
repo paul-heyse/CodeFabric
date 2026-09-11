@@ -2858,6 +2858,29 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
         Some("hold_semantic_update_publication"),
     );
     install_separate_git_metadata(&fixture);
+    let git_attributes = fixture.state.join("observed-git/info/attributes");
+    fs::write(&git_attributes, "*.py codefabric-input=initial\n").unwrap();
+    fs::write(fixture.state.join("observed-git/info/exclude"), "*.py\n").unwrap();
+    {
+        use gix::bstr::ByteSlice as _;
+        let mut index = gix::index::State::new(gix::hash::Kind::Sha1);
+        for stage in [
+            gix::index::entry::Stage::Ours,
+            gix::index::entry::Stage::Theirs,
+        ] {
+            index.dangerously_push_entry(
+                Default::default(),
+                gix::hash::ObjectId::from_hex(&[b'1'; 40]).unwrap(),
+                gix::index::entry::Flags::from_stage(stage),
+                gix::index::entry::Mode::FILE,
+                b"sample.py".as_bstr(),
+            );
+        }
+        index.sort_entries();
+        gix::index::File::from_state(index, fixture.state.join("observed-git/index"))
+            .write(Default::default())
+            .unwrap();
+    }
     let root = Path::new(&fixture.workspace.root_path_display);
     let configuration = fs::read_to_string(&fixture.config_path).unwrap().replace(
         "[static_config]",
@@ -2893,6 +2916,39 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
     };
     let (initial, names) = query("poll-initial");
     assert_eq!(names, BTreeSet::from(["original".to_owned()]));
+    let metadata_pin = |relation: &str| {
+        let selected = all_activation_control_rows(&fixture)
+            .into_iter()
+            .max_by_key(|row| row.row().ordinal.get())
+            .unwrap();
+        let pin = selected
+            .table_versions()
+            .components()
+            .find_map(|(id, pin)| (id == relation).then(|| pin.clone()))
+            .unwrap();
+        pin
+    };
+    let initial_stage_pin = metadata_pin("source.git_index_stage");
+    let selected = all_activation_control_rows(&fixture)
+        .into_iter()
+        .max_by_key(|row| row.row().ordinal.get())
+        .unwrap();
+    let stages = selected_relation_batches(&selected, "source.git_index_stage");
+    let observed_stages = stages
+        .iter()
+        .flat_map(|batch| {
+            batch
+                .column_by_name("stage")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::Int16Array>()
+                .expect("CodeFabric's storage contract widens UInt8 to signed Int16")
+                .values()
+                .iter()
+                .copied()
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(observed_stages, BTreeSet::from([2, 3]));
     fs::create_dir_all(root.join("new/nested")).unwrap();
     fs::write(
         root.join("new/nested/added.py"),
@@ -2936,12 +2992,68 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
     }
     let (updated, names) = query("poll-updated");
     assert_eq!(
+        initial_stage_pin,
+        metadata_pin("source.git_index_stage"),
+        "unchanged nonempty index-stage rows retain their exact version"
+    );
+    let updated_path_pin = metadata_pin("source.git_path_context");
+    assert_eq!(
         names,
         BTreeSet::from(["original".to_owned(), "polled".to_owned()])
     );
     assert!(
         updated["source_generation"].as_u64().unwrap()
             > initial["source_generation"].as_u64().unwrap()
+    );
+    let selected_attribute = || {
+        let selected = all_activation_control_rows(&fixture)
+            .into_iter()
+            .max_by_key(|row| row.row().ordinal.get())
+            .unwrap();
+        let batches = selected_relation_batches(&selected, "source.git_attribute");
+        batches.iter().any(|batch| {
+            let names = batch
+                .column_by_name("name")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            let values = batch
+                .column_by_name("value")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow::array::BinaryArray>()
+                .unwrap();
+            names.iter().zip(values.iter()).any(|(name, value)| {
+                name == Some("codefabric-input") && value == Some(b"revised".as_slice())
+            })
+        })
+    };
+    // Metadata alone must reach the exact snapshot through background observation. Git ignore
+    // rules never remove these explicitly admitted sources, and attributes never rewrite bytes.
+    fs::write(&git_attributes, "*.py codefabric-input=revised\n").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(180);
+    while !selected_attribute() {
+        assert!(
+            Instant::now() < deadline,
+            "external Git attributes did not converge"
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
+    let (metadata_updated, names) = query("poll-git-metadata-updated");
+    assert_eq!(initial_stage_pin, metadata_pin("source.git_index_stage"));
+    assert_eq!(
+        updated_path_pin,
+        metadata_pin("source.git_path_context"),
+        "an attribute-only edit does not rewrite unchanged path classification"
+    );
+    assert_eq!(
+        names,
+        BTreeSet::from(["original".to_owned(), "polled".to_owned()])
+    );
+    assert!(
+        metadata_updated["source_generation"].as_u64().unwrap()
+            > updated["source_generation"].as_u64().unwrap()
     );
     supervisor.stop();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
@@ -2950,7 +3062,12 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
         names,
         BTreeSet::from(["original".to_owned(), "polled".to_owned()])
     );
-    assert_eq!(reopened["source_generation"], updated["source_generation"]);
+    assert_eq!(
+        reopened["source_generation"],
+        metadata_updated["source_generation"]
+    );
+    assert!(selected_attribute());
+    assert_eq!(initial_stage_pin, metadata_pin("source.git_index_stage"));
     supervisor.stop();
 }
 

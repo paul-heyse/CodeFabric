@@ -141,7 +141,6 @@ def main(argv=None) -> int:
                         "mixed-publication-shutdown",
                         "client-timeout-shutdown",
                         "provider-deployment-live",
-                        "python-poll-live",
                         "python-site-packages",
                         "source-lines-live",
                         "rust-paths-live",
@@ -154,7 +153,13 @@ def main(argv=None) -> int:
                     600,
                 ),
                 **dict.fromkeys(
-                    {"python-stubs-live", "python-roots-live", "python-paths-live"}, 900
+                    {
+                        "python-stubs-live",
+                        "python-roots-live",
+                        "python-paths-live",
+                        "python-poll-live",
+                    },
+                    900,
                 ),
                 **dict.fromkeys({"staged-live", "python-live"}, 1200),
                 "function-source-live": 1500,

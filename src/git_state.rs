@@ -27,6 +27,8 @@ use rusqlite::OptionalExtension as _;
 use crate::cancellation::Cancellation;
 #[cfg(feature = "daemon")]
 pub(crate) mod watch_topology;
+#[cfg(feature = "daemon")]
+pub(crate) mod captured_inputs;
 use crate::registries::GitAccelerationStatus;
 #[cfg(feature = "daemon")]
 use crate::registries::UpdateCandidateStrategy;

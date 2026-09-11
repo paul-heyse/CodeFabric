@@ -49,6 +49,7 @@ pub(crate) mod identity_recipes;
 pub mod integrity;
 #[cfg(feature = "daemon")]
 pub mod inventory;
+#[cfg(feature = "daemon")]
 mod source_inclusion;
 #[cfg(feature = "operational-state")]
 pub mod operational_store;

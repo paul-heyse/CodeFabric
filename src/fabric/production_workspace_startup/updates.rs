@@ -37,6 +37,7 @@ pub(super) struct SourceUpdateOwner {
 struct SourceCensus {
     digest: [u8; 32],
     deployment: [u8; 32],
+    git_context: [u8; 32],
     generation: u64,
     watermark: u64,
     events: u64,
@@ -204,6 +205,7 @@ impl SourceUpdateOwner {
                     .map_err(|error| step("provider-deployment-observation", error))?;
                 Ok(Some(SourceCensus {
                     digest: inventory.inventory().digest,
+                    git_context: inventory.inventory().git_context_digest(),
                     deployment,
                     generation,
                     watermark,
@@ -390,10 +392,11 @@ impl SourceUpdateOwner {
                     match census {
                         Ok(Some(current))
                             if current.digest == observed.digest && current.deployment == observed.deployment
+                                && current.git_context == observed.git_context
                                 && current.events == observed.events => {
                             if let Ok(selected) = self.slot.lease() {
                                 let authority = selected.workspace().runtime().query_authority();
-                                if authority.matches_observed_inputs(current.digest, current.deployment)
+                                if authority.matches_observed_inputs(current.digest, current.deployment, current.git_context)
                                     && authority.activation_pins().source_generation.get() == current.generation {
                                     observation.source_reconciled(current.watermark, current.generation);
                                 }
@@ -426,8 +429,12 @@ impl SourceUpdateOwner {
             .lease()
             .map_err(|error| step("source-update-selected", error))?;
         let authority = selected.workspace().runtime().query_authority();
-        let unchanged = authority.matches_observed_inputs(observed.digest, observed.deployment)
-            && authority.activation_pins().source_generation.get() == observed.generation;
+        let unchanged = authority.matches_observed_inputs(
+            observed.digest,
+            observed.deployment,
+            observed.git_context,
+        ) && authority.activation_pins().source_generation.get()
+            == observed.generation;
         if unchanged {
             observation.source_reconciled(observed.watermark, observed.generation);
             if !authority.semantic_pending() {
@@ -466,10 +473,11 @@ impl SourceUpdateOwner {
             )
             .await
             .map_err(|error| step("source-candidate-inventory", error))?;
-            if candidate
-                .is_none_or(|state| !state.matches_inputs(current.digest, current.deployment))
-                || current.digest != observed.digest
+            if candidate.is_none_or(|state| {
+                !state.matches_inputs(current.digest, current.deployment, current.git_context)
+            }) || current.digest != observed.digest
                 || current.deployment != observed.deployment
+                || current.git_context != observed.git_context
                 || fresh.pins.source_generation.get() != current.generation
                 || current.events != observed.events
                 || observation.event_revision() != current.events

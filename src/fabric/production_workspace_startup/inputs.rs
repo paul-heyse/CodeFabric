@@ -256,7 +256,9 @@ pub(super) fn capture_inputs(
             observe,
         )
         .map_err(|error| inventory_failure("source-capture-reconciliation", error))?;
-    if checked.inventory().digest != inventory.inventory().digest {
+    if checked.inventory().digest != inventory.inventory().digest
+        || checked.inventory().git_context_digest() != inventory.inventory().git_context_digest()
+    {
         return Err(super::source_changed(
             "source-capture-reconciliation",
             "source inventory changed during capture",

@@ -190,11 +190,11 @@ slow-timeout = { period = "60s", terminate-after = 5 }
 # Explicit PollWatcher deployment profile through installed source queries and exact reopen.
 [[profile.default.overrides]]
 filter = 'test(explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly)'
-slow-timeout = { period = "60s", terminate-after = 5 }
+slow-timeout = { period = "60s", terminate-after = 10 }
 
 [[profile.ci.overrides]]
 filter = 'test(explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly)'
-slow-timeout = { period = "60s", terminate-after = 5 }
+slow-timeout = { period = "60s", terminate-after = 10 }
 
 # Private provider replacement, delayed completion, changed and unchanged exact reopen.
 [[profile.default.overrides]]

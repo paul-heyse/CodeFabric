@@ -1,6 +1,64 @@
 //! Detached, finite Git input-metadata watches. No source or history is read here.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+
+/// Compiled exact-path callback lookup for all repositories admitted by the source traversal.
+/// Constructed once on the blocking installer; callback reads need no filesystem work or locks.
+#[derive(Default)]
+pub(crate) struct SelectedGitWatchInputs {
+    relevant: BTreeSet<PathBuf>,
+    topology: BTreeSet<PathBuf>,
+    directories: BTreeSet<PathBuf>,
+}
+
+impl SelectedGitWatchInputs {
+    pub(crate) fn from_topologies(topologies: &[GitWatchTopology]) -> Self {
+        let mut selected = Self::default();
+        for git in topologies {
+            selected.relevant.insert(git.marker.clone());
+            selected.topology.insert(git.marker.clone());
+            selected.directories.extend(git.directories());
+            for root in &git.roots {
+                selected.relevant.insert(root.clone());
+                selected.topology.insert(root.clone());
+                for name in [
+                    "index",
+                    "config",
+                    "config.worktree",
+                    "commondir",
+                    "gitdir",
+                    "info",
+                    "info/exclude",
+                    "info/attributes",
+                ] {
+                    selected.relevant.insert(root.join(name));
+                }
+                for name in ["commondir", "gitdir", "config", "config.worktree", "info"] {
+                    selected.topology.insert(root.join(name));
+                }
+            }
+        }
+        selected
+    }
+
+    pub(crate) fn relevant(&self, path: &Path) -> bool {
+        self.relevant.contains(path)
+    }
+    pub(crate) fn topology_relevant(&self, path: &Path) -> bool {
+        self.topology.contains(path)
+    }
+    pub(crate) fn directories(&self) -> &BTreeSet<PathBuf> {
+        &self.directories
+    }
+    pub(crate) fn retained_bytes(&self) -> u64 {
+        1024 + [&self.relevant, &self.topology, &self.directories]
+            .into_iter()
+            .flat_map(|paths| paths.iter())
+            .map(|path| path.capacity() as u64 + 128)
+            .sum::<u64>()
+    }
+}
 
 /// Only the selected worktree's index/policy metadata affects input observation.
 /// Other worktrees, object databases, refs, logs and hooks are not recursively watched.
@@ -30,6 +88,7 @@ impl GitWatchTopology {
         Self { marker, roots }
     }
 
+    #[cfg(test)]
     pub(crate) fn relevant(&self, path: &Path) -> bool {
         path == self.marker
             || self.roots.iter().any(|root| {
@@ -52,16 +111,6 @@ impl GitWatchTopology {
             })
     }
 
-    pub(crate) fn topology_relevant(&self, path: &Path) -> bool {
-        path == self.marker
-            || self.roots.iter().any(|root| {
-                path == root
-                    || ["commondir", "gitdir", "config", "config.worktree", "info"]
-                        .iter()
-                        .any(|name| path == root.join(name))
-            })
-    }
-
     pub(crate) fn directories(&self) -> Vec<PathBuf> {
         let mut directories = Vec::with_capacity(6);
         for root in &self.roots {
@@ -79,13 +128,6 @@ impl GitWatchTopology {
         directories.sort();
         directories.dedup();
         directories
-    }
-
-    pub(crate) fn retained_bytes(&self) -> u64 {
-        // Two detached copies: the registration owner and callback. Root count is at most two.
-        1024 + 2
-            * (self.marker.capacity() + self.roots.iter().map(PathBuf::capacity).sum::<usize>())
-                as u64
     }
 }
 

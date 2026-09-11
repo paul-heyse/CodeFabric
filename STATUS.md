@@ -96,8 +96,28 @@ reopen/shutdown case passes in 149.458 s (run `520afa6c-7eb1-472e-b72a-76d5b450f
 `/tmp/codefabric-p04-shutdown-admission-{focused,installed}.log`. This resolves the distinct full-3
 control-admission ordering defect without extending command validity or changing query deadlines.
 The initial inclusion checkpoint is `d08a1e6c`; default and featureless `just root-check` pass
-(`/tmp/codefabric-p04-inclusion-check.log`). Git classification integration is in progress and
-has not yet been qualified.
+(`/tmp/codefabric-p04-inclusion-check.log`).
+
+The Git input continuation captures detached index stages 0–3, ignore classification and native
+attribute match provenance over the authoritative bounded source census. Nested/linked repositories
+use isolated worker-local gix handles; byte-safe paths and source bytes remain application-owned.
+Ignored source remains admitted, conflicted index entries never select an authoritative source blob,
+and special files retain their classification. Three persisted `source.git_*` metadata relations
+remain outside the CPG graph. A separate persisted Git witness fences census, publication and reopen.
+Immutable watch selections include external administration/attributes without watching object trees;
+callbacks do no repository discovery or filesystem reads. Metadata-only changes request background
+replacement, and unchanged nonempty metadata relations reuse exact pins from their consumed rows.
+
+All 25 focused inventory/inclusion/native/poll/topology tests pass in 15.037 s
+(`/tmp/codefabric-p04-git-final-focused.log`). The installed poll/source/conflict/attribute/reopen
+case passes in 206.149 s, run `28fb55e0-bbe5-48a7-9146-43d841852dd6`
+(`/tmp/codefabric-p04-git-context-installed-v5.log`), using the isolated remediation target,
+installed providers and delegated user-systemd scope. It checks ignored public source, both conflict
+stages, metadata-only publication, unchanged nonempty stage/path pin reuse and exact reopen.
+Tooling tests pass 232/232; featureless checking passes and all-target Clippy completes with existing
+warnings. Flattened Arrow byte columns use native builders that accept unsized iterators; the raw
+Parquet fixture observes CodeFabric's reversible UInt8-to-Int16 storage mapping. Physical external
+roots, explicit submodule boundary metadata and broader validity/retention/scheduling remain in P04.
 
 The resumed inclusion slice uses one capture/watch policy. Captured root `pyrefly.toml` and
 `[tool.pyrefly]` search/site-package candidates can select subtrees beneath normally pruned
@@ -108,8 +128,8 @@ validation. Thirteen focused inventory/native/poll/recovery cases pass in 15.039
 (`/tmp/codefabric-p04-inclusion-focused.log`). Installed `.venv` site-package queries through all four public forms and exact reopen pass
 in 113.704 s (run `c363235c-e4e6-45b6-8bcd-e59204aacf18`,
 `/tmp/codefabric-p04-inclusion-installed.log`; isolated target, installed native providers,
-delegated user-systemd scope). Physical roots outside the registered workspace and complete Git classification
-remain in P04; this slice does not imply their completion.
+delegated user-systemd scope). Physical roots outside the registered workspace remain in P04;
+the Git metadata continuation above does not imply complete external input topology.
 
 P03's related-context integration is committed in `75687368`. P04's immutable-input pin reuse and
 workspace-owned syntax checkpoint is committed in `55c69cdd`. The retained Pyrefly service is

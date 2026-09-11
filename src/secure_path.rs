@@ -500,6 +500,15 @@ pub struct SecureDirectoryEntry {
 }
 
 impl SecureRoot {
+    /// Registered location for advisory Git metadata discovery only. Source reads continue
+    /// through this root's authorized descriptor; this pathname does not grant source access.
+    #[cfg(feature = "daemon")]
+    pub(crate) fn git_metadata_location(&self) -> PathBuf {
+        PathBuf::from(OsString::from_vec(
+            self.authorization.root_path_bytes.clone(),
+        ))
+    }
+
     /// Registered workspace identity for this authorized root.
     #[must_use]
     pub const fn workspace_id(&self) -> [u8; 16] {

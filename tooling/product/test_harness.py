@@ -222,6 +222,7 @@ def test_clean_live_case_has_a_bounded_default_and_honors_explicit_deadline(
     elif override is None and case == "function-source-live":
         expected = 1500
     elif override is None and case in {
+        "python-poll-live",
         "python-stubs-live",
         "python-roots-live",
         "python-paths-live",

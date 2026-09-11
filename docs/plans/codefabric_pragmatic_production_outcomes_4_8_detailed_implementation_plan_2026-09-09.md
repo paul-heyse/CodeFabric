@@ -1537,15 +1537,39 @@ owned topology; a changed policy during capture/install retains reconciliation. 
 outside source bytes and ignore patterns do not exclude admitted compiler inputs. Existing context
 discovery owns conflicts and provider admission. Thirteen focused checks pass in 15.039 s; installed `.venv` provider queries through all four
 public forms and exact reopen pass in 113.704 s (run `c363235c-e4e6-45b6-8bcd-e59204aacf18`).
-STATUS records the isolated native configuration and logs. Further physical external roots, Git classification and the
+STATUS records the isolated native configuration and logs. Further physical external roots and the
 remaining §6A–§6C boundaries below remain open.
+
+**Resumed Git input slice (2026-09-11; accepted installed checkpoint).** Native gix index and
+attribute stacks now observe the authoritative bounded source census, including every conflict
+stage, ignored/tracked classification and byte-safe attribute value/match provenance. Repository
+handles remain worker-local and isolated; no Git helper, source filter or repository mutation runs.
+Nested/linked repository ownership follows the deepest admitted boundary. Failed observations are
+explicitly unavailable; ignored sources remain admitted and special files retain their own kind.
+The persisted `source.git_path_context`, `source.git_index_stage` and `source.git_attribute`
+relations are metadata outside canonical graph domains. Their separate Git context witness fences
+capture, candidate completion, activation and exact reopen. Immutable per-relation identities cover
+only consumed rows and producer/workspace identity, allowing unchanged nonempty stage/path versions
+to survive source additions and attribute-only changes without relabeling any provenance.
+
+Watch installation captures an immutable metadata selection across included nested/linked repos,
+registers external administration/info inputs and verifies topology again after installation.
+Callback classification uses shared immutable sets without filesystem work or repository discovery;
+new `.git` markers trigger replacement. Object/ref/log trees remain outside source/watch traversal.
+All 25 focused inclusion/inventory/native/poll/recovery cases pass in 15.037 s. The installed
+poll/source/conflict/attribute/reopen case passes in 206.149 s (run
+`28fb55e0-bbe5-48a7-9146-43d841852dd6`), observing ignored public source, stages 2 and 3,
+attribute-only background publication, exact nonempty pin reuse and restart. STATUS records logs
+and configuration. Tooling tests pass 232/232; featureless checking passes; all-target Clippy
+completes with warnings. Physical external roots and explicit submodule boundary metadata remain;
+this is not completion of all §6A topology or §6B dependency validity.
 
 
 **Current status — partial.** The daemon installs a native notify watcher before census, owns its
 blocking lifetime, coalesces callbacks through a bounded queue, retains a rescan watermark and runs
 periodic secure reconciliation. Public status exposes watch health and source observations. Installed
 Python replacement/addition/deletion/atomic save and exact reopen pass. Selected external roots,
-Complete Git inclusion/conflict provenance, external input topology and root/config recovery remain open; selected Git metadata observation is delivered below. Pruned native/poll topology is accepted below.
+complete external input topology and selected submodule boundaries remain open; admitted Git classification/conflict/attribute provenance is delivered above. Pruned native/poll topology is accepted below.
 
 **Surfaces:** `src/source_image/`, source/context preparation, supervisor/daemon ownership, `src/fabric/source_wave_command_effect.rs`; add a focused watcher/coordinator module within the existing stable package as needed.
 
@@ -2275,7 +2299,7 @@ slow consumers with independently expected results. This is a behavior matrix, n
 
 ### 8A. Durable/recomputable split and selective persistence
 
-**Current status — partial.** Exact selected-version reopen, proof-only history removal and immutable input-blob reuse exist. P04 delivers source/line identity pin reuse (`55c69cdd`), exact empty Arrow reuse (`096c6db7`) and four bounded candidate-owned Delta writes (`2e71be9e`). Selective persistence by consumer, nonempty unchanged relations/owner replacement, reduced redundant observation writes and measured finite edit-time file/version growth remain. Scoped pin reuse is not a complete retention policy.
+**Current status — partial.** Exact selected-version reopen, proof-only history removal and immutable input-blob reuse exist. P04 delivers source/line identity pin reuse (`55c69cdd`), exact empty Arrow reuse (`096c6db7`), four bounded candidate-owned Delta writes (`2e71be9e`) and exact nonempty Git stage/path metadata reuse (§6A). Selective persistence by consumer, broader provider/canonical owner reuse and replacement, reduced redundant observation writes and measured finite edit-time file/version growth remain. Scoped pin reuse is not a complete retention policy.
 
 **Surfaces:** programmatic publication/observation Delta histories, `src/fabric/programmatic_delta_runtime.rs`, exact reopen, source image storage, result/cursor leases.
 
@@ -2778,8 +2802,9 @@ then acknowledges completed joins. Four signed-control cases pass, including rea
 expiry during cleanup and rejected-control cleanup failure. The former full-3 poll/update/reopen
 failure now passes in 149.458 s, run `520afa6c-7eb1-472e-b72a-76d5b450fa1d`. Together with the R05
 native lifetime repairs, this supersedes the earlier unqualified shutdown diagnosis; broader P13
-failure/owner coverage remains open. Git input classification is being integrated after the accepted
-shared inclusion checkpoint `d08a1e6c`.
+failure/owner coverage remains open. After the accepted shared inclusion checkpoint `d08a1e6c`,
+Git classification/conflict/attribute metadata now passes 25 focused cases and the expanded installed
+poll/metadata-only/reopen scenario (206.149 s; §6A), including exact nonempty metadata pin reuse.
 
 **P04 execution resumed on 2026-09-11; P05 follows.** The user explicitly deferred further pursuit
 of a 100% test result. Retain the implemented remediation fixes and use affected feature checks.
@@ -2803,9 +2828,10 @@ interpret this partial run as complete qualification or require full green befor
 
 The remaining **P04** progression is:
 
-1. Complete one captured inclusion policy for source/config/selected external inputs and Git
-   index/exclude/attributes/conflict stages. Extend the existing pruned watch owner and recovery
-   topology; preserve authoritative bytes and metadata-only observation boundaries (§6A/E06/E10).
+1. Extend the shared capture/watch inclusion policy to physical external roots and explicit selected
+   submodule boundaries. Admitted nested/linked Git index/exclude/attributes/conflict stages now
+   have persisted metadata, live observation and installed acceptance. Preserve authoritative bytes,
+   bounded recovery topology and metadata-only observation boundaries (§6A/E06/E10).
 2. Complete positive/negative dependency and tool validity, including selected sysroot, linker,
    runtime libraries and external roots. Extend persisted input validity beyond the two provider
    executables so cache eviction/reopen cannot hide tool-only changes. Add complete owner manifests

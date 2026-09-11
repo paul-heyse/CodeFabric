@@ -152,9 +152,14 @@ impl WorkspaceEpochQueryAuthority {
         self.source_observation.as_ref()
     }
 
-    pub(crate) fn matches_observed_inputs(&self, digest: [u8; 32], deployment: [u8; 32]) -> bool {
+    pub(crate) fn matches_observed_inputs(
+        &self,
+        digest: [u8; 32],
+        deployment: [u8; 32],
+        git_context: [u8; 32],
+    ) -> bool {
         self.source_inventory
-            .is_some_and(|state| state.matches_inputs(digest, deployment))
+            .is_some_and(|state| state.matches_inputs(digest, deployment, git_context))
     }
 
     pub(crate) fn semantic_pending(&self) -> bool {

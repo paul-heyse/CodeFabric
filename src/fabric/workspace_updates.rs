@@ -2,8 +2,8 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use notify_debouncer_full::notify::{
@@ -16,6 +16,7 @@ use tokio::sync::mpsc;
 
 use crate::daemon::SourceWatchProfile;
 use crate::freshness::FreshnessBarrier;
+use crate::git_state::watch_topology::{GitWatchTopology, SelectedGitWatchInputs};
 use crate::source_inclusion::SourceInclusionPolicy;
 
 /// Keep native error kinds and affected paths until the startup/control presentation boundary.
@@ -79,11 +80,19 @@ pub(crate) struct SourceInventoryState {
     pub(crate) digest: [u8; 32],
     pub(crate) semantic_pending: bool,
     pub(crate) provider_deployment_digest: Option<[u8; 32]>,
+    pub(crate) git_context_digest: Option<[u8; 32]>,
 }
 
 impl SourceInventoryState {
-    pub(crate) fn matches_inputs(&self, digest: [u8; 32], deployment: [u8; 32]) -> bool {
-        self.digest == digest && self.provider_deployment_digest == Some(deployment)
+    pub(crate) fn matches_inputs(
+        &self,
+        digest: [u8; 32],
+        deployment: [u8; 32],
+        git_context: [u8; 32],
+    ) -> bool {
+        self.digest == digest
+            && self.provider_deployment_digest == Some(deployment)
+            && self.git_context_digest == Some(git_context)
     }
 }
 
@@ -162,10 +171,20 @@ pub(crate) async fn selected_inventory_state(
                 .map_err(|_| "invalid provider deployment digest width".to_owned())
         })
         .transpose()?;
+    let git_context_digest = batch
+        .column_by_name("git_context_digest")
+        .map(|_| {
+            fixed("git_context_digest")?
+                .value(0)
+                .try_into()
+                .map_err(|_| "invalid Git context digest width".to_owned())
+        })
+        .transpose()?;
     Ok(Some(SourceInventoryState {
         digest,
         semantic_pending,
         provider_deployment_digest,
+        git_context_digest,
     }))
 }
 
@@ -356,7 +375,7 @@ impl WorkspaceObservation {
     fn observe_events(
         &self,
         root: &Path,
-        git: &crate::git_state::watch_topology::GitWatchTopology,
+        git: &crate::git_state::watch_topology::SelectedGitWatchInputs,
         inclusion: &SourceInclusionPolicy,
         profile: SourceWatchProfile,
         events: DebounceEventResult,
@@ -367,7 +386,9 @@ impl WorkspaceObservation {
                 !matches!(event.kind, EventKind::Access(_))
                     && (event.paths.is_empty()
                         || event.paths.iter().any(|path| {
-                            relevant_with_policy(root, path, inclusion) || git.relevant(path)
+                            relevant_with_policy(root, path, inclusion)
+                                || git.relevant(path)
+                                || git_marker(root, path, inclusion)
                         }))
             };
             let topology_changed = rescan
@@ -375,6 +396,7 @@ impl WorkspaceObservation {
                     relevant(event)
                         && (event.paths.iter().any(|path| {
                             git.topology_relevant(path)
+                                || git_marker(root, path, inclusion)
                                 || path.strip_prefix(root).is_ok_and(|relative| {
                                     SourceInclusionPolicy::CONFIGURATIONS
                                         .iter()
@@ -414,23 +436,32 @@ impl WorkspaceObservation {
         cancellation: &crate::cancellation::Cancellation,
         profile: SourceWatchProfile,
     ) -> Result<WorkspaceWatch, WorkspaceWatchError> {
+        let started = Instant::now();
         let observed = self.clone();
         let selected_root = root.to_owned();
-        let git = crate::git_state::watch_topology::GitWatchTopology::resolve(root);
+        let initial_git =
+            SelectedGitWatchInputs::from_topologies(&[GitWatchTopology::resolve(root)]);
+        let selected_git = Arc::new(OnceLock::<SelectedGitWatchInputs>::new());
         let inclusion = SourceInclusionPolicy::capture_watch(root);
         let retained = budget
             .try_reserve(
                 crate::resource_budget::ResourceClass::Control,
                 crate::resource_budget::ResourceAmounts {
-                    memory_bytes: git.retained_bytes() + 2 * inclusion.retained_bytes(),
+                    memory_bytes: initial_git.retained_bytes() + 2 * inclusion.retained_bytes(),
                     ..crate::resource_budget::ResourceAmounts::default()
                 },
             )
             .map_err(|error| error.to_string())?;
-        let metadata = git.clone();
+        let metadata = Arc::clone(&selected_git);
         let callback_policy = inclusion.clone();
         let handler = move |events| {
-            observed.observe_events(&selected_root, &metadata, &callback_policy, profile, events)
+            observed.observe_events(
+                &selected_root,
+                metadata.get().unwrap_or(&initial_git),
+                &callback_policy,
+                profile,
+                events,
+            );
         };
         let config = Config::default().with_follow_symlinks(false);
         let watcher = match profile {
@@ -463,12 +494,21 @@ impl WorkspaceObservation {
             profile,
             retained,
             registered_paths: BTreeSet::new(),
+            source_repository_roots: BTreeSet::from([root.to_owned()]),
             registered_directories: 0,
             excluded_directories: 0,
         };
         watch.install(root, &inclusion, cancellation)?;
-        let metadata_directories = git.directories();
-        for directory in &metadata_directories {
+        let git = watch.resolve_git_inputs(started, cancellation)?;
+        let selection = SelectedGitWatchInputs::from_topologies(&git);
+        watch
+            .retained
+            .try_grow(crate::resource_budget::ResourceAmounts {
+                memory_bytes: selection.retained_bytes(),
+                ..crate::resource_budget::ResourceAmounts::default()
+            })
+            .map_err(|error| error.to_string())?;
+        for directory in selection.directories() {
             if cancellation.is_cancelled() {
                 return Err("Git metadata watch installation cancelled"
                     .to_owned()
@@ -478,10 +518,14 @@ impl WorkspaceObservation {
         }
         // A .git pointer or info-directory change before its registration must retain a
         // repair obligation even if no backend event covered that installation interval.
-        let checked_git = crate::git_state::watch_topology::GitWatchTopology::resolve(root);
+        let checked_git = watch.resolve_git_inputs(started, cancellation)?;
         let coherent = git == checked_git
-            && metadata_directories == checked_git.directories()
+            && selection.directories()
+                == SelectedGitWatchInputs::from_topologies(&checked_git).directories()
             && inclusion == SourceInclusionPolicy::capture_watch(root);
+        // The installer publishes once. Later changes replace the complete owned watcher;
+        // callbacks neither lock a mutable repository map nor perform discovery.
+        let _ = selected_git.set(selection);
         if !coherent {
             self.topology_revision.fetch_add(1, Ordering::AcqRel);
         }
@@ -501,6 +545,14 @@ fn relevant_with_policy(root: &Path, path: &Path, policy: &SourceInclusionPolicy
         return false;
     };
     policy.includes(relative.as_os_str().as_encoded_bytes(), false)
+}
+
+fn git_marker(root: &Path, path: &Path, policy: &SourceInclusionPolicy) -> bool {
+    path.file_name().is_some_and(|name| name == ".git")
+        && path
+            .parent()
+            .and_then(|parent| parent.strip_prefix(root).ok())
+            .is_some_and(|relative| policy.includes(relative.as_os_str().as_encoded_bytes(), true))
 }
 
 #[cfg(test)]
@@ -547,11 +599,37 @@ pub(crate) struct WorkspaceWatch {
     profile: SourceWatchProfile,
     retained: crate::resource_budget::ResourceReservation,
     registered_paths: BTreeSet<PathBuf>,
+    source_repository_roots: BTreeSet<PathBuf>,
     registered_directories: u64,
     excluded_directories: u64,
 }
 
 impl WorkspaceWatch {
+    fn resolve_git_inputs(
+        &self,
+        started: Instant,
+        cancellation: &crate::cancellation::Cancellation,
+    ) -> Result<Vec<crate::git_state::watch_topology::GitWatchTopology>, WorkspaceWatchError> {
+        self.source_repository_roots
+            .iter()
+            .map(|root| {
+                if cancellation.is_cancelled()
+                    || started.elapsed()
+                        > crate::inventory::InventoryLimits::default().maximum_duration
+                {
+                    return Err(
+                        "selected Git metadata watch resolution cancelled or timed out"
+                            .to_owned()
+                            .into(),
+                    );
+                }
+                Ok(crate::git_state::watch_topology::GitWatchTopology::resolve(
+                    root,
+                ))
+            })
+            .collect()
+    }
+
     fn reserve_path(&mut self, path: &Path) -> Result<(), String> {
         self.retained
             .try_grow(crate::resource_budget::ResourceAmounts {
@@ -566,6 +644,13 @@ impl WorkspaceWatch {
     fn register(&mut self, path: &Path) -> Result<(), WorkspaceWatchError> {
         if self.registered_paths.contains(path) {
             return Ok(());
+        }
+        if self.registered_directories
+            >= crate::inventory::InventoryLimits::default().maximum_directory_count
+        {
+            return Err("source and metadata watch registration bound exceeded"
+                .to_owned()
+                .into());
         }
         self.reserve_path(path)?;
         self.watcher
@@ -629,6 +714,10 @@ impl WorkspaceWatch {
                         .into());
                 }
                 let entry = entry.map_err(|error| error.to_string())?;
+                if entry.file_name() == ".git" {
+                    self.reserve_path(&directory)?;
+                    self.source_repository_roots.insert(directory.clone());
+                }
                 if !entry
                     .file_type()
                     .map_err(|error| error.to_string())?
@@ -690,12 +779,16 @@ mod tests {
             digest: [1; 32],
             semantic_pending: false,
             provider_deployment_digest: None,
+            git_context_digest: None,
         };
-        assert!(!state.matches_inputs([1; 32], [0; 32]));
+        assert!(!state.matches_inputs([1; 32], [0; 32], [4; 32]));
         state.provider_deployment_digest = Some([2; 32]);
-        assert!(state.matches_inputs([1; 32], [2; 32]));
-        assert!(!state.matches_inputs([1; 32], [3; 32]));
-        assert!(!state.matches_inputs([3; 32], [2; 32]));
+        assert!(!state.matches_inputs([1; 32], [2; 32], [4; 32]));
+        state.git_context_digest = Some([4; 32]);
+        assert!(state.matches_inputs([1; 32], [2; 32], [4; 32]));
+        assert!(!state.matches_inputs([1; 32], [3; 32], [4; 32]));
+        assert!(!state.matches_inputs([3; 32], [2; 32], [4; 32]));
+        assert!(!state.matches_inputs([1; 32], [2; 32], [5; 32]));
     }
 
     #[tokio::test]
@@ -812,6 +905,34 @@ mod tests {
             notify_debouncer_full::notify::ErrorKind::PathNotFound
         ));
         assert!(source.paths.contains(&missing));
+        watch.stop();
+    }
+
+    #[tokio::test]
+    async fn selected_nested_linked_repository_observes_external_metadata_without_object_watches() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("source");
+        let nested = root.join("nested");
+        let main = fixture.path().join("external-main");
+        let administrative = crate::git_state::watch_topology::linked_fixture(&nested, &main);
+        let exclude = main.join(".git/info/exclude");
+        std::fs::write(&exclude, "initial\n").unwrap();
+        let (observed, mut receiver) = WorkspaceObservation::new();
+        let budget = crate::provider_types::source_fixture_budget([2; 16]);
+        let watch = observed
+            .watch(
+                &root,
+                &budget,
+                &crate::cancellation::Cancellation::default(),
+                SourceWatchProfile::Native,
+            )
+            .unwrap();
+        assert!(watch.registered_paths.contains(&administrative));
+        assert!(watch.registered_paths.contains(&main.join(".git/info")));
+        assert!(!watch.registered_paths.contains(&main.join(".git/objects")));
+        assert!(watch.source_repository_roots.contains(&nested));
+        receiver.recv().await.unwrap();
+        await_watched_edit(&observed, &mut receiver, &exclude).await;
         watch.stop();
     }
 
