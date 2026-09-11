@@ -2795,6 +2795,109 @@ fn source_current_query(
     (result, rows)
 }
 
+#[test]
+fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
+    use arrow::array::StringArray;
+    let fixture = ProductionFixture::with_source_and_activation_startup_fault(
+        b"def original():\n    return 1\n",
+        Some("hold_semantic_update_publication"),
+    );
+    let configuration = fs::read_to_string(&fixture.config_path).unwrap().replace(
+        "[static_config]",
+        "[static_config]\nsource_watch_profile = \"poll\"",
+    );
+    write_private(&fixture.config_path, configuration.as_bytes());
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let query = |label: &str| {
+        let request = semantic_request(
+            &fixture.workspace.public_id(),
+            "unused",
+            "Python function declarations",
+        );
+        let (result, batches) = source_current_query(&fixture, &stack, label, request);
+        let names = batches
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .column_by_name("name")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+                    .iter()
+                    .flatten()
+                    .map(ToOwned::to_owned)
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(result["processing"][0]["remaining_partitions"], 0);
+        (result, names)
+    };
+    let (initial, names) = query("poll-initial");
+    assert_eq!(names, BTreeSet::from(["original".to_owned()]));
+    let root = Path::new(&fixture.workspace.root_path_display);
+    fs::create_dir_all(root.join("new/nested")).unwrap();
+    fs::write(
+        root.join("new/nested/added.py"),
+        "def polled():\n    return 2\n",
+    )
+    .unwrap();
+    // Read the durable selected snapshot without requesting a query census. This proves
+    // background convergence and avoids using one query's deadline as a publication timer.
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        let selected = all_activation_control_rows(&fixture)
+            .into_iter()
+            .max_by_key(|row| row.row().ordinal.get())
+            .unwrap();
+        let captured = selected_relation_batches(&selected, "source.exact_source_bytes");
+        let added = captured.iter().any(|batch| {
+            let binary = |name| {
+                batch
+                    .column_by_name(name)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<arrow::array::BinaryArray>()
+                    .unwrap()
+            };
+            binary("relative_path")
+                .iter()
+                .zip(binary("source_bytes").iter())
+                .any(|(path, bytes)| {
+                    path == Some(b"new/nested/added.py".as_slice())
+                        && bytes == Some(b"def polled():\n    return 2\n".as_slice())
+                })
+        });
+        if added {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "polling did not publish the nested source"
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
+    let (updated, names) = query("poll-updated");
+    assert_eq!(
+        names,
+        BTreeSet::from(["original".to_owned(), "polled".to_owned()])
+    );
+    assert!(
+        updated["source_generation"].as_u64().unwrap()
+            > initial["source_generation"].as_u64().unwrap()
+    );
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let (reopened, names) = query("poll-reopened");
+    assert_eq!(
+        names,
+        BTreeSet::from(["original".to_owned(), "polled".to_owned()])
+    );
+    assert_eq!(reopened["source_generation"], updated["source_generation"]);
+    supervisor.stop();
+}
+
 fn selected_source_pins(
     fixture: &ProductionFixture,
 ) -> Vec<(String, codefabric::fabric::delta_exact::ExactDeltaPin)> {

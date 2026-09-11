@@ -20,6 +20,8 @@ use deltalake::kernel::engine::arrow_conversion::TryIntoKernel;
 use deltalake::operations::create::CreateBuilder;
 use deltalake::protocol::SaveMode;
 use deltalake::{DeltaTable, DeltaTableError};
+use futures::StreamExt as _;
+use futures::stream::FuturesUnordered;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -535,10 +537,97 @@ pub async fn persist_programmatic_relation_snapshots(
         ),
         other => (None, prepare_targets(&specs, other, &session).await?),
     };
+    let writer = RelationSnapshotWriter {
+        context: &context,
+        session: &session,
+        reuse: reuse.as_ref(),
+        epoch_id,
+        operation_id,
+        writer_generation,
+        transaction,
+    };
+    // Four independent table pipelines fit the production native lane's 16 blocking roots.
+    // They share the selected session and DataFusion memory pool; no runtime or writer owner
+    // is multiplied. The parent native operation still joins the complete library runtime.
+    let work = specs.into_values().map(|spec| {
+        let prepared = targets.targets.remove(&spec.relation_id);
+        writer.persist(spec, prepared)
+    });
+    let completed = collect_bounded_writes(work, 4).await?;
+    if !targets.targets.is_empty() {
+        return Err(ProgrammaticRelationDeltaError::RelationSetMismatch);
+    }
     let mut pins = BTreeMap::new();
     let mut descriptors = BTreeMap::new();
-    for (relation_id, spec) in specs {
-        let target = if let Some((selected, layout)) = &reuse {
+    for (relation, pin, descriptor) in completed {
+        pins.insert(relation.clone(), pin);
+        descriptors.insert(relation, descriptor);
+    }
+    ProgrammaticRelationDeltaPublication::try_new(epoch_id, pins, descriptors)
+}
+
+// Futures remain children of this operation, without detached Tokio tasks. After the first
+// failure stop admitting work and observe every already-started write before returning it.
+async fn collect_bounded_writes<F, T, E>(
+    mut work: impl Iterator<Item = F>,
+    concurrency: usize,
+) -> Result<Vec<T>, E>
+where
+    F: std::future::Future<Output = Result<T, E>>,
+{
+    assert!(concurrency > 0, "write concurrency must admit work");
+    let mut pending = FuturesUnordered::new();
+    let mut results = Vec::new();
+    let mut failure = None;
+    loop {
+        while failure.is_none() && pending.len() < concurrency {
+            let Some(next) = work.next() else {
+                break;
+            };
+            pending.push(Box::pin(next));
+        }
+        let Some(result) = pending.next().await else {
+            break;
+        };
+        match result {
+            Ok(result) => results.push(result),
+            Err(error) => {
+                failure.get_or_insert(error);
+            }
+        }
+    }
+    failure.map_or(Ok(results), Err)
+}
+
+struct RelationSnapshotWriter<'a> {
+    context: &'a datafusion::prelude::SessionContext,
+    session: &'a Arc<datafusion::execution::SessionState>,
+    reuse: Option<&'a (
+        ProgrammaticRelationDeltaPublication,
+        ProgrammaticRelationDeltaLayout,
+    )>,
+    epoch_id: EpochId,
+    operation_id: OperationId,
+    writer_generation: WriterGeneration,
+    transaction: TransactionRef,
+}
+
+impl RelationSnapshotWriter<'_> {
+    #[allow(clippy::result_large_err)] // Preserve the existing public exact-snapshot error type.
+    async fn persist(
+        &self,
+        spec: RelationSnapshotSpec,
+        prepared: Option<ProgrammaticRelationDeltaTarget>,
+    ) -> Result<
+        (
+            ProgrammaticRelationId,
+            ExactDeltaPin,
+            StoredRelationDescriptor,
+        ),
+        ProgrammaticRelationDeltaError,
+    > {
+        let relation_id = spec.relation_id.clone();
+        let target = if let Some((selected, layout)) = self.reuse {
             if spec.descriptor.immutable_input_identity.is_some()
                 && selected.descriptors.get(&relation_id) == Some(&spec.descriptor)
             {
@@ -548,32 +637,30 @@ pub async fn persist_programmatic_relation_snapshots(
                     .ok_or(ProgrammaticRelationDeltaError::RelationSetMismatch)?;
                 // Validate the exact selected snapshot before retaining its pin. No latest lookup,
                 // result comparison, or write occurs. Missing/corrupt history fails closed.
-                let table = load_exact(pin, &session).await?;
+                let table = load_exact(pin, self.session).await?;
                 validate_loaded_descriptor(&table, &spec)?;
-                pins.insert(relation_id.clone(), pin.clone());
-                descriptors.insert(relation_id, spec.descriptor);
-                continue;
+                return Ok((relation_id, pin.clone(), spec.descriptor));
             }
-            provision_target(spec.clone(), layout, &session).await?
+            provision_target(spec.clone(), layout, self.session).await?
         } else {
-            targets
-                .targets
-                .remove(&relation_id)
-                .ok_or(ProgrammaticRelationDeltaError::RelationSetMismatch)?
+            prepared.ok_or(ProgrammaticRelationDeltaError::RelationSetMismatch)?
         };
         if target.spec.descriptor != spec.descriptor {
             return Err(ProgrammaticRelationDeltaError::DescriptorDrift(relation_id));
         }
-        let dataframe =
-            storage_projection(context.table(spec.table_reference.clone()).await?, &spec)?;
+        let dataframe = storage_projection(
+            self.context.table(spec.table_reference.clone()).await?,
+            &spec,
+        )?;
         let delta_schema = target.table.snapshot()?.snapshot().arrow_schema();
         validate_storage_plan_schema(&relation_id, delta_schema.as_ref(), &spec.contract)?;
         let provider = Arc::new(IdentityPreservingViewTable::with_schema(
             dataframe.into_unoptimized_plan(),
             Arc::clone(&delta_schema),
         )?);
-        let dataframe = context.read_table(provider)?;
-        let plan = SessionBoundLogicalPlan::try_from_dataframe(Arc::clone(&session), dataframe)?;
+        let dataframe = self.context.read_table(provider)?;
+        let plan =
+            SessionBoundLogicalPlan::try_from_dataframe(Arc::clone(self.session), dataframe)?;
         let commit_metadata = BTreeMap::from([
             (
                 META_DESCRIPTOR.to_owned(),
@@ -581,7 +668,7 @@ pub async fn persist_programmatic_relation_snapshots(
             ),
             (
                 META_EPOCH.to_owned(),
-                Value::String(hex(epoch_id.as_bytes())),
+                Value::String(hex(self.epoch_id.as_bytes())),
             ),
             (
                 META_RELATION.to_owned(),
@@ -590,9 +677,9 @@ pub async fn persist_programmatic_relation_snapshots(
         ]);
         let write = ControlledDeltaWriteSpec::new(
             target.predecessor,
-            operation_id,
-            writer_generation,
-            ApplicationTransactionMarker::from_transaction_ref(transaction),
+            self.operation_id,
+            self.writer_generation,
+            ApplicationTransactionMarker::from_transaction_ref(self.transaction),
             ControlledDeltaWriteMode::ReplaceAll,
         )
         .with_commit_metadata(commit_metadata)?;
@@ -605,13 +692,8 @@ pub async fn persist_programmatic_relation_snapshots(
                 });
             }
         };
-        pins.insert(spec.relation_id.clone(), committed.committed().clone());
-        descriptors.insert(spec.relation_id.clone(), spec.descriptor);
+        Ok((relation_id, committed.committed().clone(), spec.descriptor))
     }
-    if !targets.targets.is_empty() {
-        return Err(ProgrammaticRelationDeltaError::RelationSetMismatch);
-    }
-    ProgrammaticRelationDeltaPublication::try_new(epoch_id, pins, descriptors)
 }
 
 #[allow(clippy::result_large_err)] // Preserve the existing public exact-snapshot error type.
@@ -978,6 +1060,51 @@ mod tests {
     use datafusion::common::TableReference;
 
     use crate::schema_contract::{FieldIndexMapping, SchemaContract, delta_storage_field};
+
+    #[tokio::test]
+    async fn bounded_snapshot_failure_drains_started_writes_without_admitting_more() {
+        use std::time::Duration;
+
+        let (started, mut observed) = tokio::sync::mpsc::unbounded_channel();
+        let (finish_first, first) = tokio::sync::oneshot::channel();
+        let (finish_second, second) = tokio::sync::oneshot::channel();
+        let (finish_third, third) = tokio::sync::oneshot::channel();
+        let work = [first, second, third]
+            .into_iter()
+            .enumerate()
+            .map(move |(index, finish)| {
+                let started = started.clone();
+                async move {
+                    started.send(index).unwrap();
+                    finish.await.unwrap()
+                }
+            });
+        let mut operation = tokio::spawn(super::collect_bounded_writes(work, 2));
+        let started = [
+            observed.recv().await.unwrap(),
+            observed.recv().await.unwrap(),
+        ];
+        assert_eq!(
+            std::collections::BTreeSet::from(started),
+            std::collections::BTreeSet::from([0, 1])
+        );
+        assert!(observed.try_recv().is_err());
+
+        finish_first.send(Err("first write failed")).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut operation)
+                .await
+                .is_err(),
+            "a failed sibling cannot abandon an already-started write"
+        );
+        assert!(observed.try_recv().is_err(), "failure closes new admission");
+        finish_second.send(Ok(1)).unwrap();
+        assert_eq!(operation.await.unwrap(), Err("first write failed"));
+        assert!(
+            finish_third.send(Ok(2)).is_err(),
+            "unstarted work is discarded"
+        );
+    }
 
     #[test]
     fn delta_list_storage_matches_kernel_and_restores_logical_values() {

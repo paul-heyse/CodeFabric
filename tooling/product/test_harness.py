@@ -176,6 +176,8 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
     "case",
     [
         "first-release-queries",
+        "python-live",
+        "python-poll-live",
         "mixed-clean-live",
         "python-context-live",
         "python-stubs-live",
@@ -213,7 +215,11 @@ def test_clean_live_case_has_a_bounded_default_and_honors_explicit_deadline(
     assert golden.main(args) == 0
     if override is None and case == "python-context-live":
         expected = 2100
-    elif override is None and case in {"staged-live", "function-source-live"}:
+    elif override is None and case in {
+        "staged-live",
+        "function-source-live",
+        "python-live",
+    }:
         expected = 1200
     assert len(observed) == 1 and observed[0][1] == expected
     assert f"test(=integration::daemon::{golden.CASES[case]})" in observed[0][0]

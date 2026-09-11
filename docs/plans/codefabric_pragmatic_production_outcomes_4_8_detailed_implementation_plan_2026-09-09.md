@@ -92,7 +92,7 @@ source/type/instance/lowering target and external/generated source closure in 4A
 | 4E | Four limited forms demonstrated | Extend calls and SourceContext, broaden first-four meanings and composition |
 | 5A | Partial; call and lexical-reference scopes demonstrated | Query dependency/owner scope, all families and efficient authorized live status |
 | 5B | Partial live source/semantic barriers and typed status | Target/family-specific convergence and historical query selection |
-| 6A | Partial native watch/census/rescan loop | Git inclusion, external roots, polling profile and root/config recovery |
+| 6A | Pruned native/poll watch and census/rescan loop | Git inclusion/metadata, external roots and full root/config recovery |
 | 6B | Partial live replacement and generation fences | Negative/configuration dependencies, complete identity rules and broader races |
 | 6C | Partial shared orchestration and source/semantic stages | Retained Tree-sitter/Pyrefly/Cargo state, selective persistence and scheduling |
 | 6D | Limited mixed clean/live comparison and deterministic publication pause | Broader language/context/edit corpus and all-family comparisons |
@@ -1530,12 +1530,12 @@ await the full provider pass. Status distinguishes source freshness and selected
 blocking lifetime, coalesces callbacks through a bounded queue, retains a rescan watermark and runs
 periodic secure reconciliation. Public status exposes watch health and source observations. Installed
 Python replacement/addition/deletion/atomic save and exact reopen pass. Selected external roots,
-Git inclusion, excluded native watch topology, explicit polling and root/config recovery remain open.
+Git inclusion/metadata and complete root/config recovery remain open. Pruned native/poll topology is accepted below.
 
 **Surfaces:** `src/source_image/`, source/context preparation, supervisor/daemon ownership, `src/fabric/source_wave_command_effect.rs`; add a focused watcher/coordinator module within the existing stable package as needed.
 
 1. Own one `notify-debouncer-full` watcher per workspace input topology. Install watches before initial census, buffer changes during capture, then reconcile changes observed across the capture fence. Include source/config roots and selected external input roots; exclude generated caches, Delta tables and build outputs by explicit policy.
-2. Use `new_debouncer`/`new_debouncer_opt`, recursive root registration, normalized rename events and the debouncer's file-ID cache as hints. In its callback only classify/enqueue lightweight events; never parse, read large files, run Git status or block on a full queue.
+2. Use `new_debouncer`/`new_debouncer_opt`, pruned non-recursive directory registration, normalized rename events and the debouncer's file-ID cache as hints. In its callback only classify/enqueue lightweight events; never parse, read large files, run Git status or block on a full queue.
 3. Bridge with bounded Tokio `mpsc` and `try_send`. On queue overflow, watcher error or `need_rescan()`, set a retained reconciliation-required flag and wake the coordinator. Clearing a queue must not clear the obligation to rescan. Coalesce dirty paths and promote directory/root changes to a bounded subtree/root census.
 4. Handle atomic save, rename-over-target, paired/unpaired rename, deletion/recreation, root disappearance, case collisions, ignore-boundary transitions and watcher reinstallation. A rename is continuity evidence, not permission to invent canonical identity continuity.
 5. Use gix read-only discovery/index/status/ignore/attributes/directory walking to accelerate present-state inventory and inclusion. Use worker-local `Repository` handles or a `ThreadSafeRepository` converted locally; do not share `Arc<Repository>` as if it were `Sync`. Account linked-worktree git/common dirs, unborn repositories, conflict stages, nested repositories and selected submodule boundaries.
@@ -1543,6 +1543,37 @@ Git inclusion, excluded native watch topology, explicit polling and root/config 
 7. Expose watcher health and rescan state; use an explicit `PollWatcher` profile for unsuitable filesystems. Add periodic lightweight reconciliation so a lost event cannot leave the graph permanently stale.
 
 **Acceptance:** a real running daemon observes edits without restart; forced queue loss/rescan, atomic save, root recreation and ignore/config changes reach correct source state. Tests wait on state, not an assumed debounce delay.
+
+**P04 watch-topology continuation (2026-09-10; accepted installed checkpoint).** Native notify
+registrations now use the inventory walker's build/cache exclusions. Register each included
+directory non-recursively before enumerating its children; skip symlink subtrees and `.git` source
+content. A retained topology revision coalesces directory/rename/loss events. The existing blocking
+owner installs replacement registrations before stopping the old debouncer, preserves forced
+repairs inside the retry interval and retries failed topology while retaining the parent watch.
+Periodic source reconciliation also requests topology repair. Declared path bookkeeping competes
+with workspace resources; inventory-derived count/depth/time bounds limit enumeration.
+
+This uses notify reference §8, Watch roots and lifecycle, §13, Custom construction, §19, Filtering,
+and §30, Shutdown, with resolved `notify` 8.2.0 and `notify-debouncer-full` 0.7.0 APIs. An explicit
+restart-required `static_config.source_watch_profile = "poll"` selects metadata-only `PollWatcher`
+with a two-second interval and separate 150 ms debounce/50 ms tick. Content comparison would
+hash unrelated sibling files through the recovery-parent registration, so authoritative byte
+verification remains with secure source reconciliation. Omission retains native
+watching. Both profiles use the same callback-only hint path and secure capture authority. Native
+watch recovery does not authorize a different workspace-root inode. Git inclusion/metadata and
+selected external-root topology remain open.
+
+The final nine focused cases pass, including native/poll nested registration and root observation
+recovery, excluded-tree/symlink silence, atomic save, retained forced repairs, configuration
+compatibility and Delta failure draining. The installed native Python update/reopen sequence passes
+in 605.277 s and the mixed obsolete-completion/pending-stage restart sequence in 796.409 s. The
+installed polling case initially reaches its 30-second query deadline while writing a captured
+nested-source update. Its corrected fixture independently observes durable source publication
+before querying and explicitly holds semantic publication; background nested-file convergence and
+exact pending-stage reopen pass in 86.014 s. This proves background convergence without a query
+census, not isolated notification latency. Final default/featureless checks and affected Clippy pass;
+all 44 product-harness cases pass. STATUS records commands/logs and the earlier user-confirmed Cargo
+cleanup interruption. No startup/performance or full-outcome qualification is claimed.
 
 **Remaining implementation progression (E06/E10; P01/P04).**
 
@@ -2170,8 +2201,23 @@ passes in 792.455 s before parser-cache integration, verifying source-pin reuse 
 separation; three Delta tests bring that run to four passing cases in 794.051 s. Preparation costs
 count reused pins. The combined syntax/Delta checkpoint passes both installed live/clean and
 race/restart cases (899.664/814.946 s); STATUS records the exact commands, overlap and limits.
-Retained Pyrefly integration is under validation. Cargo retention, broader invalidation and
+Retained Pyrefly passes the installed eight-state clean/update corpus. Cargo retention, broader invalidation and
 owner-level reuse remain open in P04.
+
+**P04 bounded relation-write continuation (2026-09-10; accepted installed checkpoint).** Four
+independent exact table pipelines share the caller's native operation, DataFusion session and
+memory pool. `FuturesUnordered` bounds admission without detached application tasks. After an
+observed error, no new table is admitted and every started write is observed before return.
+Native Delta `WriteBuilder` still executes the caller-session logical plan, zero-retry commit and
+exact readback (Delta reference §5, WriteBuilder and session-bound plans). Candidate histories and
+immutable-input reuse rules are unchanged; the selected vector is assembled only after success.
+
+Four focused Delta/storage cases and the installed mixed first-four-form/reopen corpus pass.
+The extended update comparison lost its provider/test binaries during user-confirmed cache
+cleanup, so those partial samples are excluded from acceptance and comparative performance claims.
+The subsequent native Python updates and mixed stale-completion/restart scenarios pass with the
+rebuilt providers, as recorded in §6A and STATUS. This bounded overlap
+does not replace selective persistence, native owner replacement or shared scheduling.
 
 **Remaining implementation progression (E11/E22/E24; P04/P12).**
 

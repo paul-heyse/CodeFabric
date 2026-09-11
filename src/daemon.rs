@@ -73,6 +73,25 @@ pub enum ActivationStartupAssuranceFault {
     HoldSemanticUpdatePublication,
 }
 
+/// Explicit filesystem observation backend. Polling is a deployment choice, never a fallback.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceWatchProfile {
+    /// Native filesystem notifications with pruned directory registration.
+    #[default]
+    Native,
+    /// Two-second metadata polling with independent 150 ms debouncing.
+    Poll,
+}
+
+impl SourceWatchProfile {
+    // Serde's skip_serializing_if callback receives a reference.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    const fn is_native(&self) -> bool {
+        matches!(self, Self::Native)
+    }
+}
+
 /// Closed restart-required daemon configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -93,6 +112,9 @@ pub struct StaticConfig {
     pub hard_limit_profile: String,
     /// Exact supported deployment profile.
     pub supported_platform_profile: String,
+    /// Selected filesystem observer; omission preserves the native deployment default.
+    #[serde(default, skip_serializing_if = "SourceWatchProfile::is_native")]
+    pub source_watch_profile: SourceWatchProfile,
     /// Optional debug-build-only real-process activation interruption.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activation_startup_assurance_fault: Option<ActivationStartupAssuranceFault>,
@@ -1083,6 +1105,7 @@ async fn serve_writer_fenced_v2(
                 ActivationStartupAssuranceFault::HoldSemanticUpdatePublication => Some(ProductionWorkspaceStartupAssuranceFault::HoldSemanticUpdatePublication),
             }),
         workspace_resources,
+        startup.config.static_config.source_watch_profile,
         daemon_task_scope.clone(),
     )
     .await
@@ -1743,6 +1766,28 @@ mod tests {
         assert_eq!(completed, ["stop-admission", "drain-queries"]);
     }
 
+    #[test]
+    fn source_watch_configuration_preserves_native_default_and_requires_explicit_polling() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut selected = config(directory.path());
+        let native = serde_json::to_string(&selected).unwrap();
+        assert!(!native.contains("source_watch_profile"));
+        assert_eq!(
+            serde_json::from_str::<DaemonConfig>(&native).unwrap(),
+            selected
+        );
+        selected.static_config.source_watch_profile = SourceWatchProfile::Poll;
+        let poll = serde_json::to_string(&selected).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DaemonConfig>(&poll).unwrap(),
+            selected
+        );
+        assert!(
+            serde_json::from_str::<DaemonConfig>(&poll.replace("\"poll\"", "\"automatic\""))
+                .is_err()
+        );
+    }
+
     fn config(root: &Path) -> DaemonConfig {
         private_directory(&root.join("config")).unwrap();
         DaemonConfig {
@@ -1755,6 +1800,7 @@ mod tests {
                 sandbox_policy: "required-for-untrusted".to_owned(),
                 hard_limit_profile: "daemon-default-v1".to_owned(),
                 supported_platform_profile: "local-workstation-v1".to_owned(),
+                source_watch_profile: SourceWatchProfile::Native,
                 activation_startup_assurance_fault: None,
             },
             reloadable: ReloadableConfig {
@@ -1973,6 +2019,7 @@ maintenance_schedule = "daily-idle"
                 &config.static_config.state_root,
             )
             .unwrap(),
+            SourceWatchProfile::Native,
             StructuredCancellationScope::try_root_with_control_reserve(
                 "daemon",
                 std::num::NonZeroUsize::new(64).unwrap(),

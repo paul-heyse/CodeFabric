@@ -2216,6 +2216,13 @@ fn pragmatic_live_python_edits_converge_without_restart() {
     let fixture = ProductionFixture::new();
     let stack = InstalledProductionStack::build();
     fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let workspace = Path::new(&fixture.workspace.root_path_display);
+    fs::create_dir_all(workspace.join("target/cache/deep")).unwrap();
+    fs::write(
+        workspace.join("target/cache/deep/ignored.py"),
+        "def ignored(): pass",
+    )
+    .unwrap();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
     let query = |phase: &str, policy: &str, expected: &[&str]| -> u64 {
         eprintln!("live update phase: {phase}");
@@ -2224,7 +2231,7 @@ fn pragmatic_live_python_edits_converge_without_restart() {
             &format!("request:live-{phase}"),
             "Python function declarations",
         );
-        request["freshness"] = json!({"policy": policy, "deadline_ms": 60_000});
+        request["freshness"] = json!({"policy": policy, "deadline_ms": 120_000});
         let scenario = modern_client_scenario(
             &fixture,
             &stack,
@@ -2278,7 +2285,6 @@ fn pragmatic_live_python_edits_converge_without_restart() {
         result["source_generation"].as_u64().unwrap()
     };
     let initial = query("initial", "require_current_for_targets", &["answer"]);
-    let workspace = Path::new(&fixture.workspace.root_path_display);
     fs::write(
         workspace.join("sample.py"),
         b"def replacement():\n    return 2\n",
@@ -2286,8 +2292,9 @@ fn pragmatic_live_python_edits_converge_without_restart() {
     .unwrap();
     let replaced = query("replaced", "await_latest", &["replacement"]);
     assert!(replaced > initial);
+    fs::create_dir_all(workspace.join("new/nested")).unwrap();
     fs::write(
-        workspace.join("extra.py"),
+        workspace.join("new/nested/extra.py"),
         b"def additional():\n    return 3\n",
     )
     .unwrap();
@@ -2307,12 +2314,12 @@ fn pragmatic_live_python_edits_converge_without_restart() {
     .unwrap();
     fs::rename(
         workspace.join("replacement.tmp"),
-        workspace.join("extra.py"),
+        workspace.join("new/nested/extra.py"),
     )
     .unwrap();
     let atomic = query("atomic", "require_current_for_targets", &["atomic_save"]);
     assert!(atomic > removed);
-    fs::remove_file(workspace.join("extra.py")).unwrap();
+    fs::remove_file(workspace.join("new/nested/extra.py")).unwrap();
     let empty = query("empty", "require_current_for_targets", &[]);
     assert!(empty > atomic);
     fs::write(

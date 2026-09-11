@@ -3,12 +3,15 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use notify_debouncer_full::notify::{EventKind, RecommendedWatcher, RecursiveMode};
-use notify_debouncer_full::{DebounceEventResult, Debouncer, RecommendedCache, new_debouncer};
+use notify_debouncer_full::notify::{Config, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode};
+use notify_debouncer_full::{
+    DebounceEventResult, Debouncer, NoCache, RecommendedCache, new_debouncer_opt,
+};
 use tokio::sync::mpsc;
 
+use crate::daemon::SourceWatchProfile;
 use crate::freshness::FreshnessBarrier;
 
 #[derive(Clone, Copy, Debug)]
@@ -97,6 +100,8 @@ pub(crate) struct WorkspaceObservation {
     watch_healthy: Arc<AtomicBool>,
     events: Arc<AtomicU64>,
     published_generation: Arc<AtomicU64>,
+    topology_revision: Arc<AtomicU64>,
+    topology_installations: Arc<AtomicU64>,
 }
 
 impl WorkspaceObservation {
@@ -111,6 +116,8 @@ impl WorkspaceObservation {
                 watch_healthy: Arc::new(AtomicBool::new(false)),
                 events: Arc::new(AtomicU64::new(0)),
                 published_generation: Arc::new(AtomicU64::new(0)),
+                topology_revision: Arc::new(AtomicU64::new(0)),
+                topology_installations: Arc::new(AtomicU64::new(0)),
             },
             receiver,
         )
@@ -183,6 +190,7 @@ impl WorkspaceObservation {
         &self,
         root: PathBuf,
         budget: &crate::resource_budget::ResourceBudget,
+        profile: SourceWatchProfile,
         parent: &crate::cancellation::StructuredCancellationScope,
     ) -> Result<WorkspaceWatchControl, String> {
         use crate::resource_budget::{ResourceAmounts, ResourceClass};
@@ -202,28 +210,56 @@ impl WorkspaceObservation {
         let (ready, installed) = tokio::sync::oneshot::channel();
         let (commands, receiver) = std::sync::mpsc::sync_channel(1);
         let observed = self.clone();
+        let budget = budget.clone();
         scope
             .spawn_blocking_owned("native-owner", resources, move |cancellation| {
-                let mut watch = match observed.watch(&root) {
+                let mut revision = observed.topology_revision.load(Ordering::Acquire);
+                let mut watch = match observed.watch(&root, &budget, &cancellation, profile) {
                     Ok(watch) => watch,
                     Err(error) => {
                         let _ = ready.send(Err(error));
                         return;
                     }
                 };
+                observed
+                    .topology_installations
+                    .fetch_add(1, Ordering::AcqRel);
                 if ready.send(Ok(())).is_err() {
                     watch.stop();
                     return;
                 }
+                let mut retry_at = Instant::now();
                 while !cancellation.is_cancelled() {
                     match receiver.recv_timeout(Duration::from_millis(20)) {
                         Ok(()) => {
-                            let healthy = watch.reinstall().is_ok();
-                            observed.watch_healthy.store(healthy, Ordering::Release);
-                            observed.request(true);
+                            observed.topology_revision.fetch_add(1, Ordering::AcqRel);
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                    let requested = observed.topology_revision.load(Ordering::Acquire);
+                    if (requested != revision || !observed.watch_healthy())
+                        && Instant::now() >= retry_at
+                    {
+                        // Keep old registrations (especially the parent) until their replacement
+                        // is installed. Events arriving during the walk remain a pending revision.
+                        match observed.watch(&root, &budget, &cancellation, profile) {
+                            Ok(replacement) => {
+                                let old = std::mem::replace(&mut watch, replacement);
+                                old.stop();
+                                revision = requested;
+                                observed
+                                    .topology_installations
+                                    .fetch_add(1, Ordering::AcqRel);
+                            }
+                            Err(error) => {
+                                if observed.watch_healthy.swap(false, Ordering::AcqRel) {
+                                    tracing::warn!(%error, "source watch topology unavailable");
+                                }
+                            }
+                        }
+                        observed.request(true);
+                        retry_at = Instant::now() + Duration::from_millis(250);
                     }
                 }
                 watch.stop();
@@ -237,49 +273,98 @@ impl WorkspaceObservation {
         Ok(WorkspaceWatchControl { commands })
     }
 
-    pub(crate) fn watch(&self, root: &Path) -> Result<WorkspaceWatch, String> {
+    fn observe_events(&self, root: &Path, events: DebounceEventResult) {
+        if let Ok(events) = events {
+            let rescan = events.iter().any(|event| event.need_rescan());
+            let relevant = |event: &notify_debouncer_full::DebouncedEvent| {
+                !matches!(event.kind, EventKind::Access(_))
+                    && (event.paths.is_empty()
+                        || event.paths.iter().any(|path| relevant(root, path)))
+            };
+            let topology_changed = rescan
+                || events.iter().any(|event| {
+                    relevant(event)
+                        && matches!(
+                            event.kind,
+                            EventKind::Any
+                                | EventKind::Other
+                                | EventKind::Create(_)
+                                | EventKind::Remove(_)
+                                | EventKind::Modify(
+                                    notify_debouncer_full::notify::event::ModifyKind::Name(_)
+                                )
+                        )
+                });
+            if topology_changed {
+                self.topology_revision.fetch_add(1, Ordering::AcqRel);
+            }
+            if rescan || events.iter().any(relevant) {
+                self.event(rescan || topology_changed);
+            }
+        } else {
+            self.watch_healthy.store(false, Ordering::Release);
+            self.topology_revision.fetch_add(1, Ordering::AcqRel);
+            self.event(true);
+        }
+    }
+
+    fn watch(
+        &self,
+        root: &Path,
+        budget: &crate::resource_budget::ResourceBudget,
+        cancellation: &crate::cancellation::Cancellation,
+        profile: SourceWatchProfile,
+    ) -> Result<WorkspaceWatch, String> {
         let observed = self.clone();
         let selected_root = root.to_owned();
-        let mut watcher = new_debouncer(
-            Duration::from_millis(75),
-            Some(Duration::from_millis(20)),
-            move |events: DebounceEventResult| {
-                if let Ok(events) = events {
-                    let rescan = events.iter().any(|event| event.need_rescan());
-                    if rescan
-                        || events.iter().any(|event| {
-                            !matches!(event.kind, EventKind::Access(_))
-                                && (event.paths.is_empty()
-                                    || event
-                                        .paths
-                                        .iter()
-                                        .any(|path| relevant(&selected_root, path)))
-                        })
-                    {
-                        observed.event(rescan);
-                    }
-                } else {
-                    observed.watch_healthy.store(false, Ordering::Release);
-                    observed.event(true);
-                }
-            },
-        )
-        .map_err(|error| error.to_string())?;
-        watcher
-            .watch(root, RecursiveMode::Recursive)
+        let retained = budget
+            .try_reserve(
+                crate::resource_budget::ResourceClass::Control,
+                crate::resource_budget::ResourceAmounts::default(),
+            )
             .map_err(|error| error.to_string())?;
-        // Parent observation catches removal/recreation of the registered root itself.
-        if let Some(parent) = root.parent() {
-            watcher
-                .watch(parent, RecursiveMode::NonRecursive)
-                .map_err(|error| error.to_string())?;
-        }
+        let handler = move |events| observed.observe_events(&selected_root, events);
+        let config = Config::default().with_follow_symlinks(false);
+        let watcher = match profile {
+            SourceWatchProfile::Native => WatchBackend::Native(
+                new_debouncer_opt(
+                    Duration::from_millis(75),
+                    Some(Duration::from_millis(20)),
+                    handler,
+                    RecommendedCache::default(),
+                    config,
+                )
+                .map_err(|error| error.to_string())?,
+            ),
+            SourceWatchProfile::Poll => WatchBackend::Poll(
+                new_debouncer_opt(
+                    Duration::from_millis(150),
+                    Some(Duration::from_millis(50)),
+                    handler,
+                    NoCache,
+                    config
+                        .with_poll_interval(Duration::from_secs(2))
+                        .with_compare_contents(false),
+                )
+                .map_err(|error| error.to_string())?,
+            ),
+        };
+        // Wrap immediately: even a failed traversal must join the native debouncer thread.
+        let mut watch = WorkspaceWatch {
+            watcher: Some(watcher),
+            retained,
+            registered_directories: 0,
+            excluded_directories: 0,
+        };
+        watch.install(root, cancellation)?;
         self.watch_healthy.store(true, Ordering::Release);
         self.request(true);
-        Ok(WorkspaceWatch {
-            watcher: Some(watcher),
-            root: root.to_owned(),
-        })
+        tracing::info!(
+            registered_directories = watch.registered_directories,
+            excluded_directories = watch.excluded_directories,
+            "source watch topology installed"
+        );
+        Ok(watch)
     }
 }
 
@@ -287,8 +372,17 @@ fn relevant(root: &Path, path: &Path) -> bool {
     let Ok(relative) = path.strip_prefix(root) else {
         return false;
     };
-    !relative.components().any(|part| matches!(part, Component::Normal(name) if
-        matches!(name.as_encoded_bytes(), b"target" | b".venv" | b"node_modules" | b"__pycache__" | b".git")))
+    let mut components = relative.components().peekable();
+    while let Some(part) = components.next() {
+        if let Component::Normal(name) = part
+            && (name == ".git"
+                || (components.peek().is_some()
+                    && crate::inventory::excluded_directory(name.as_encoded_bytes())))
+        {
+            return false;
+        }
+    }
+    true
 }
 
 /// Bounded control channel; the structured blocking owner performs native joins.
@@ -302,19 +396,128 @@ impl WorkspaceWatchControl {
     }
 }
 
-/// The owning blocking operation stops and joins native watcher threads on shutdown.
+/// The owning blocking operation calls native stop and joins the debouncer thread.
+enum WatchBackend {
+    Native(Debouncer<RecommendedWatcher, RecommendedCache>),
+    Poll(Debouncer<PollWatcher, NoCache>),
+}
+
+impl WatchBackend {
+    fn watch(&mut self, path: &Path) -> notify_debouncer_full::notify::Result<()> {
+        match self {
+            Self::Native(watch) => watch.watch(path, RecursiveMode::NonRecursive),
+            Self::Poll(watch) => watch.watch(path, RecursiveMode::NonRecursive),
+        }
+    }
+
+    fn stop(self) {
+        match self {
+            Self::Native(watch) => watch.stop(),
+            Self::Poll(watch) => watch.stop(),
+        }
+    }
+}
+
+/// Native registrations and declared bookkeeping share this owned blocking lifetime.
 pub(crate) struct WorkspaceWatch {
-    watcher: Option<Debouncer<RecommendedWatcher, RecommendedCache>>,
-    root: PathBuf,
+    watcher: Option<WatchBackend>,
+    retained: crate::resource_budget::ResourceReservation,
+    registered_directories: u64,
+    excluded_directories: u64,
 }
 
 impl WorkspaceWatch {
-    pub(crate) fn reinstall(&mut self) -> Result<(), String> {
-        let watcher = self.watcher.as_mut().ok_or("watcher stopped")?;
-        let _ = watcher.unwatch(&self.root);
-        watcher
-            .watch(&self.root, RecursiveMode::Recursive)
+    fn reserve_path(&mut self, path: &Path) -> Result<(), String> {
+        self.retained
+            .try_grow(crate::resource_budget::ResourceAmounts {
+                // Declared bookkeeping capacity for native/application paths and the walk stack.
+                // This does not claim to measure kernel inotify memory or every native allocation.
+                memory_bytes: 512 + 4 * path.as_os_str().len() as u64,
+                ..crate::resource_budget::ResourceAmounts::default()
+            })
             .map_err(|error| error.to_string())
+    }
+
+    fn register(&mut self, path: &Path) -> Result<(), String> {
+        self.reserve_path(path)?;
+        self.watcher
+            .as_mut()
+            .ok_or("watcher stopped")?
+            .watch(path)
+            .map_err(|error| error.to_string())?;
+        self.registered_directories += 1;
+        Ok(())
+    }
+
+    fn install(
+        &mut self,
+        root: &Path,
+        cancellation: &crate::cancellation::Cancellation,
+    ) -> Result<(), String> {
+        let limits = crate::inventory::InventoryLimits::default();
+        let started = Instant::now();
+        // The parent remains observed while a registered root disappears or is recreated.
+        if let Some(parent) = root.parent() {
+            self.register(parent)?;
+        }
+        self.reserve_path(root)?;
+        let mut pending = vec![(root.to_owned(), 0)];
+        let mut discovered = 1_u64;
+        let mut files = 0_u64;
+        while let Some((directory, depth)) = pending.pop() {
+            if cancellation.is_cancelled() || started.elapsed() > limits.maximum_duration {
+                return Err("source watch traversal cancelled or timed out".to_owned());
+            }
+            let metadata =
+                std::fs::symlink_metadata(&directory).map_err(|error| error.to_string())?;
+            if !metadata.is_dir() {
+                return Err("source watch directory changed during traversal".to_owned());
+            }
+            // Registration precedes child enumeration. Events only request secure recapture;
+            // lexical watch paths never authorize source reads or establish content identity.
+            self.register(&directory)?;
+            for (index, entry) in std::fs::read_dir(&directory)
+                .map_err(|error| error.to_string())?
+                .enumerate()
+            {
+                if cancellation.is_cancelled()
+                    || started.elapsed() > limits.maximum_duration
+                    || index >= limits.maximum_entries_per_directory
+                {
+                    return Err("source watch traversal cancelled or exceeded its bound".to_owned());
+                }
+                let entry = entry.map_err(|error| error.to_string())?;
+                if !entry
+                    .file_type()
+                    .map_err(|error| error.to_string())?
+                    .is_dir()
+                {
+                    files += 1;
+                    if files > limits.maximum_file_count {
+                        return Err("source watch file bound exceeded".to_owned());
+                    }
+                    // PollWatcher retains metadata for immediate child files. Native platforms
+                    // may retain IDs too. Keep a broad declared path budget for either backend.
+                    self.reserve_path(&entry.path())?;
+                    continue;
+                }
+                let name = entry.file_name();
+                if name == ".git" || crate::inventory::excluded_directory(name.as_encoded_bytes()) {
+                    self.excluded_directories += 1;
+                    continue;
+                }
+                discovered += 1;
+                if discovered > limits.maximum_directory_count
+                    || depth >= limits.maximum_directory_depth
+                {
+                    return Err("source watch directory/depth bound exceeded".to_owned());
+                }
+                let path = entry.path();
+                self.reserve_path(&path)?;
+                pending.push((path, depth + 1));
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn stop(mut self) {
@@ -395,6 +598,7 @@ mod tests {
             "/workspace/src/a.py",
             "/workspace/.cargo/config.toml",
             "/workspace/pyproject.toml",
+            "/workspace/target",
         ] {
             assert!(relevant(root, Path::new(path)), "{path}");
         }
@@ -417,7 +621,15 @@ mod tests {
         let source = root.join("a.py");
         std::fs::write(&source, b"old").unwrap();
         let (observed, mut receiver) = WorkspaceObservation::new();
-        let watch = observed.watch(&root).unwrap();
+        let budget = crate::provider_types::source_fixture_budget([2; 16]);
+        let watch = observed
+            .watch(
+                &root,
+                &budget,
+                &crate::cancellation::Cancellation::default(),
+                SourceWatchProfile::Native,
+            )
+            .unwrap();
         receiver.recv().await.unwrap();
         let before = observed.event_revision();
         let temporary = root.join("save.tmp");
@@ -432,5 +644,140 @@ mod tests {
         .unwrap();
         assert_eq!(observed.freshness.state(), FreshnessState::PotentiallyStale);
         watch.stop();
+    }
+
+    #[tokio::test]
+    async fn native_watch_prunes_cache_trees_and_symlinks_before_registration() {
+        use std::fs;
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("source");
+        fs::create_dir_all(root.join("src/nested")).unwrap();
+        let excluded = ["target", ".venv", "node_modules", "__pycache__", ".git"];
+        for name in excluded {
+            for index in 0..20 {
+                fs::create_dir_all(root.join(name).join(format!("cache-{index}/nested"))).unwrap();
+            }
+        }
+        let outside = fixture.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+        let (observed, mut receiver) = WorkspaceObservation::new();
+        let budget = crate::provider_types::source_fixture_budget([2; 16]);
+        let before = budget.observation().used.memory_bytes;
+        let watch = observed
+            .watch(
+                &root,
+                &budget,
+                &crate::cancellation::Cancellation::default(),
+                SourceWatchProfile::Native,
+            )
+            .unwrap();
+        assert_eq!(watch.registered_directories, 4); // parent, root, src, nested
+        assert_eq!(watch.excluded_directories, 5);
+        receiver.recv().await.unwrap();
+        let event = observed.event_revision();
+        fs::write(root.join("target/cache-0/nested/generated.rs"), "ignored").unwrap();
+        fs::write(outside.join("outside.py"), "unselected").unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(250), receiver.recv())
+                .await
+                .is_err()
+        );
+        assert_eq!(observed.event_revision(), event);
+        fs::write(root.join("src/nested/current.py"), "selected").unwrap();
+        tokio::time::timeout(Duration::from_secs(5), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(observed.event_revision() > event);
+        watch.stop();
+        assert_eq!(budget.observation().used.memory_bytes, before);
+    }
+
+    #[tokio::test]
+    async fn owned_watch_recovers_new_directories_and_recreated_roots_then_joins() {
+        exercise_owned_watch(SourceWatchProfile::Native).await;
+    }
+
+    #[tokio::test]
+    async fn explicit_poll_watch_recovers_topology_and_joins() {
+        exercise_owned_watch(SourceWatchProfile::Poll).await;
+    }
+
+    async fn exercise_owned_watch(profile: SourceWatchProfile) {
+        use std::{fs, num::NonZeroUsize};
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("source");
+        fs::create_dir(&root).unwrap();
+        let (observed, mut receiver) = WorkspaceObservation::new();
+        let budget = crate::provider_types::source_fixture_budget([2; 16]);
+        let scope =
+            crate::cancellation::StructuredCancellationScope::try_root_with_control_reserve(
+                "watch-test",
+                NonZeroUsize::new(8).unwrap(),
+                NonZeroUsize::new(4).unwrap(),
+            )
+            .unwrap();
+        let control = observed
+            .start_watch(root.clone(), &budget, profile, &scope)
+            .await
+            .unwrap();
+        receiver.recv().await.unwrap();
+        let topology = observed.topology_installations.load(Ordering::Acquire);
+        fs::create_dir_all(root.join("new/nested")).unwrap();
+        await_new_watch(&observed, topology).await;
+        let file = root.join("new/nested/a.py");
+        await_watched_edit(&observed, &mut receiver, &file).await;
+        let topology = observed.topology_installations.load(Ordering::Acquire);
+        // A forced repair arriving inside the coalescing interval must remain pending.
+        control.reinstall();
+        await_new_watch(&observed, topology).await;
+
+        fs::remove_dir_all(&root).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while observed.watch_healthy() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let topology = observed.topology_installations.load(Ordering::Acquire);
+        fs::create_dir_all(root.join("replacement")).unwrap();
+        await_new_watch(&observed, topology).await;
+        await_watched_edit(&observed, &mut receiver, &root.join("replacement/b.py")).await;
+        drop(control);
+        scope.cancel_and_join(Duration::from_secs(5)).await.unwrap();
+        assert!(!observed.watch_healthy());
+        assert_eq!(budget.observation().used.memory_bytes, 0);
+    }
+
+    async fn await_new_watch(observed: &WorkspaceObservation, previous: u64) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !observed.watch_healthy()
+                || observed.topology_installations.load(Ordering::Acquire) <= previous
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    async fn await_watched_edit(
+        observed: &WorkspaceObservation,
+        receiver: &mut mpsc::Receiver<()>,
+        file: &Path,
+    ) {
+        while receiver.try_recv().is_ok() {}
+        let before = observed.event_revision();
+        std::fs::write(file, "selected").unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while observed.event_revision() == before {
+                receiver.recv().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        assert!(observed.watch_healthy());
     }
 }

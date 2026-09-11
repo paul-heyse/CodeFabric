@@ -84,7 +84,11 @@ impl SourceUpdateOwner {
             tokio::select! {
                 () = scope.cancelled() => break,
                 hint = receiver.recv() => if hint.is_none() { break; },
-                _ = periodic.tick() => { observation.request(true); }
+                _ = periodic.tick() => {
+                    // Rebuild directory registrations as well as source state after lost hints.
+                    watch.reinstall();
+                    observation.request(true);
+                }
             }
             match Box::pin(self.reconcile(&observation, &mut receiver, &scope, &mut needs_recovery))
                 .await

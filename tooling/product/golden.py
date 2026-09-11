@@ -39,6 +39,7 @@ CASES = {
     "query-branches": "branch_queries::pragmatic_failed_query_branches_preserve_independent_results_and_exact_reopen",
     "source-location-metadata": "location_queries::pragmatic_source_location_facts_do_not_require_source_disclosure",
     "python-live": "pragmatic_live_python_edits_converge_without_restart",
+    "python-poll-live": "live_updates::explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly",
     "mixed-clean-live": "live_updates::mixed_live_updates_equal_independent_clean_public_queries",
     "staged-live": "live_updates::source_current_publication_fences_delayed_semantics_and_resumes_after_restart",
     "python-context-live": "live_updates::live_python_context_and_negative_imports_equal_independent_clean_queries",
@@ -73,7 +74,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--timeout",
         type=float,
-        help="per-case deadline; defaults to 240s, 600s for mixed cases, 1200s for staged/function-source sequences, or 2100s for Python context/retention sequences",
+        help="per-case deadline; defaults to 240s, 600s for mixed cases, 1200s for staged/function-source/Python edit sequences, or 2100s for Python context/retention sequences",
     )
     parser.add_argument(
         "--output", type=Path, default=ROOT / "target/product/golden.json"
@@ -134,13 +135,14 @@ def main(argv=None) -> int:
                 else 2100
                 if name == "python-context-live"
                 else 1200
-                if name in {"staged-live", "function-source-live"}
+                if name in {"staged-live", "function-source-live", "python-live"}
                 else (
                     600
                     if name
                     in {
                         "first-release-queries",
                         "mixed-clean-live",
+                        "python-poll-live",
                         "python-stubs-live",
                         "python-roots-live",
                         "python-paths-live",

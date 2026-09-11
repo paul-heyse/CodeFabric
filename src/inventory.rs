@@ -1125,7 +1125,7 @@ fn join_components(components: &[Vec<u8>]) -> Vec<u8> {
     components.join(&b'/')
 }
 
-fn excluded_directory(name: &[u8]) -> bool {
+pub(crate) fn excluded_directory(name: &[u8]) -> bool {
     matches!(
         name,
         b"target" | b".venv" | b"node_modules" | b"__pycache__"

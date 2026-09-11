@@ -1308,6 +1308,7 @@ pub(crate) async fn start_production_workspace(
     writer_lease: WorkspaceWriterLease,
     assurance_fault: Option<ProductionWorkspaceStartupAssuranceFault>,
     workspace_resources: ProductionWorkspaceResources,
+    watch_profile: crate::daemon::SourceWatchProfile,
     task_scope: StructuredCancellationScope,
 ) -> Result<ProductionWorkspaceStartup, ProductionWorkspaceStartupError> {
     let guard = workspace_resources
@@ -1349,6 +1350,7 @@ pub(crate) async fn start_production_workspace(
                     writer_lease,
                     assurance_fault,
                     workspace_resources,
+                    watch_profile,
                     task_scope,
                 )
                 .await
@@ -1373,6 +1375,7 @@ async fn compose_production_workspace(
     writer_lease: WorkspaceWriterLease,
     assurance_fault: Option<ProductionWorkspaceStartupAssuranceFault>,
     workspace_resources: ProductionWorkspaceResources,
+    watch_profile: crate::daemon::SourceWatchProfile,
     task_scope: StructuredCancellationScope,
 ) -> Result<ProductionWorkspaceStartup, ProductionWorkspaceStartupError> {
     let workspace_id = WorkspaceId::from_bytes(record.workspace_id);
@@ -1392,7 +1395,12 @@ async fn compose_production_workspace(
     let observation = Arc::new(observation);
     let source_root = PathBuf::from(OsString::from_vec(record.root_path_bytes.clone()));
     let watch = observation
-        .start_watch(source_root, workspace_resources.budget(), &task_scope)
+        .start_watch(
+            source_root,
+            workspace_resources.budget(),
+            watch_profile,
+            &task_scope,
+        )
         .await
         .map_err(|error| step("source-watch-install", error))?;
     // Physical directory ownership is established before any Delta engine or

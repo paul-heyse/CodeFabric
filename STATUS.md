@@ -138,6 +138,68 @@ initial failed invocation had a 900-second bound. These are observed
 small-fixture costs, not representative performance results. The final 40-case harness run passes in 0.70 s with the revised timeout expectations,
 and focused Python lint/format and documentation navigation pass.
 
+
+The current storage continuation admits four exact Delta table writes at a time through
+`FuturesUnordered`, within the existing native operation and shared session/memory pool. It stops
+new admission after an observed failure and drains started writes before returning. Exact pins,
+zero-retry native commits, descriptor restoration and candidate-local isolation are preserved.
+The four focused Delta/storage cases pass in 1.607 s, and the installed first-four-form mixed
+query/reopen corpus passes in 189.160 s. Default/featureless checks and affected Clippy pass for
+that slice. Logs: `/tmp/codefabric-p04-bounded-delta-{focused,check,native-corpus}.log` and
+`/tmp/codefabric-p04-bounded-delta-clippy-final.jsonl`.
+
+The longer storage update comparison was interrupted by a user-confirmed `cargo clean` across
+active codebases: Pyrefly disappeared during the platform transition and nextest could not launch
+its now-missing restart binary (`/tmp/codefabric-p04-bounded-delta-updates.log`, 965.842 s).
+That run is not acceptance or a valid before/after performance comparison. The selected extractor
+and sidecar were rebuilt without dependency changes; `just extractor-identity` passes
+(`/tmp/codefabric-p04-extractor-rebuild.log`, 13.24 s), and the sidecar binary build passes
+(`/tmp/codefabric-p04-sidecar-rebuild.log`, 52.54 s). The subsequent update/restart selection passes as recorded below.
+
+The next P04 slice prunes native watch registration using the inventory walker's directory
+exclusions. Each selected directory receives a non-recursive watch before child enumeration;
+symlink subtrees and build/cache trees are excluded. Directory/rename/loss hints rebuild the
+bounded topology under the existing blocking owner, with old registrations held until replacement
+and native `Debouncer::stop` on all owned exit paths. Forced repairs survive the coalescing window;
+periodic reconciliation also requests topology repair. Registered/excluded directory counts are
+traced. These are observation hints: secure capture still enforces source/root authorization.
+Recreating a watched directory does not automatically authorize a substituted workspace root.
+
+Six native watcher/ownership cases pass in 1.559 s before the polling addition
+(`/tmp/codefabric-p04-pruned-watch-focused-final.log`), including silence for excluded generated
+writes, symlinks, nested directory creation, root recreation and held repair requests. The installed
+Python sequence initially reaches its old 60-second freshness deadline during initial preparation
+(`/tmp/codefabric-p04-pruned-watch-live.log`, 101.527 s). Its saved source/semantic write phases are
+32.682/56.826 s. The fixture now uses the existing 120-second freshness allowance and a 900-second
+nextest bound; `python-live` has a 1200-second product-wrapper bound. Production defaults are
+unchanged; startup latency remains unqualified. Its immediate retry was stopped before execution
+because the provider binaries had been removed.
+
+A restart-required `static_config.source_watch_profile` now explicitly selects `native` (the
+compatible default) or `poll`. Polling uses native `PollWatcher` with a two-second interval
+and independent 150 ms debounce/50 ms tick. Content comparison is disabled: the recovery-parent
+registration must not hash unrelated sibling files, and secure census already verifies source bytes. It shares the pruned topology and
+owned recovery path; it is not a silent fallback. Polling metadata IO and detection latency remain to be measured. Git inclusion/metadata topology, external-root selection, retained Cargo
+contexts, dependency-aware owner reuse and shared scheduling remain open in P04.
+
+The assembled storage/watch code passes the native Python edit/delete/atomic-save/empty/reopen
+sequence in 605.277 s and the mixed source/semantic obsolete-completion/restart sequence in
+796.409 s (`/tmp/codefabric-p04-watch-storage-installed.log`, nextest
+`61720db4-5daa-488f-879e-ed49237f163e`, two concurrent tests). The initial polling case in that
+selection fails at its 30-second query deadline while a newly captured nested source snapshot is
+still being written. The corrected fixture observes durable source publication independently
+before querying, holds semantic publication explicitly, and passes nested-file background convergence
+and exact pending-stage reopen in 86.014 s (`/tmp/codefabric-p04-poll-installed-final.log`, nextest
+`b942f219-90c9-482c-b21d-5accc7aa616f`). This distinguishes background publication from a query-forced
+census; it does not isolate polling from periodic reconciliation or certify detection latency.
+
+All nine focused watcher/configuration/failure-drain cases pass in 10.142 s
+(`/tmp/codefabric-p04-watch-profile-focused-v2.log`). The final default/featureless root check passes
+(`/tmp/codefabric-p04-watch-profile-root-final.log`), and affected Clippy has zero diagnostics
+(`/tmp/codefabric-p04-watch-profile-clippy-accepted.jsonl`). Existing root warnings remain. All 44
+product-harness cases pass in 0.76 s (`/tmp/codefabric-p04-watch-harness-final.log`); focused Python
+lint/format and documentation checks pass. No full CI/doctest or performance claim is made.
+
 ## P03 first-release query boundary delivered
 
 The plan corpus is committed in `47b0c225`; the shared native schema-identity correction is
