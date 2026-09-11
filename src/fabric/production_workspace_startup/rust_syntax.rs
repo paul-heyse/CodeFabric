@@ -3,7 +3,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use datafusion::catalog::MemTable;
 use datafusion::common::TableReference;
 
 use super::inputs::PreparedSourceInputs;
@@ -219,14 +218,14 @@ fn register(
             .collect(),
     )
     .map_err(|error| step("rust-syntax-schema", error))?;
-    let provider = MemTable::try_new(schema, vec![batches])
-        .map_err(|error| step("rust-syntax-table", error))?;
+    let input = ProviderInput::try_from_arrow(
+        ProgrammaticRelationId::new(relation.name()),
+        reference,
+        Arc::new(contract),
+        vec![batches],
+    )
+    .map_err(|error| step("rust-syntax-table", error))?;
     builder
-        .register_provider(ProviderInput::new(
-            ProgrammaticRelationId::new(relation.name()),
-            reference,
-            Arc::new(contract),
-            Arc::new(provider),
-        ))
+        .register_provider(input)
         .map_err(|error| step("rust-syntax-registration", error))
 }

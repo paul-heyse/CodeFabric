@@ -10,7 +10,6 @@ use std::sync::Arc;
 use arrow_array::{ArrayRef, BinaryArray, BooleanArray, RecordBatch, StringArray, UInt64Array};
 use arrow_schema::{Field, Schema};
 use datafusion::common::TableReference;
-use datafusion::datasource::MemTable;
 
 use super::{ProductionWorkspaceStartupError, step};
 use crate::fabric::epoch_runtime::{FABRIC_CATALOG, FabricSchemaRole};
@@ -416,8 +415,6 @@ fn register_batches(
             .map_err(|error| step("input-observation-arrow-batch", error))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let provider = MemTable::try_new(Arc::clone(&schema), vec![batches])
-        .map_err(|error| step("input-observation-memtable", error))?;
     let reference = TableReference::full(FABRIC_CATALOG, role.as_str(), table);
     let contract = SchemaContract::try_new(
         format!("codefabric.input-observation.v1:{relation_id}"),
@@ -427,12 +424,13 @@ fn register_batches(
         mappings,
     )
     .map_err(|error| step("input-observation-schema-contract", error))?;
-    let mut input = ProviderInput::new(
+    let mut input = ProviderInput::try_from_arrow(
         ProgrammaticRelationId::new(relation_id),
         reference,
         Arc::new(contract),
-        Arc::new(provider),
-    );
+        vec![batches],
+    )
+    .map_err(|error| step("input-observation-memtable", error))?;
     if let Some(identity) = immutable_input_identity {
         input = input.with_immutable_input_identity(identity);
     }

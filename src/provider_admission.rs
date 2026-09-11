@@ -17,6 +17,7 @@ use arrow_array::{
 use arrow_ipc::reader::StreamReader;
 use arrow_schema::SchemaRef;
 use datafusion::common::{DataFusionError, TableReference};
+#[cfg(test)]
 use datafusion::datasource::MemTable;
 use thiserror::Error;
 
@@ -1449,7 +1450,6 @@ fn register_prepared_programmatic(
 ) -> Result<ProviderAdmissionReport, ProviderAdmissionError> {
     for table in prepared.tables {
         let partitions = table.batches.into_iter().map(|batch| vec![batch]).collect();
-        let provider = Arc::new(MemTable::try_new(Arc::clone(&table.schema), partitions)?);
         let table_reference = TableReference::full(
             FABRIC_CATALOG,
             table.binding.role.as_str(),
@@ -1464,12 +1464,12 @@ fn register_prepared_programmatic(
                 .map(|index| FieldIndexMapping::direct(index, index))
                 .collect(),
         )?);
-        assembly.register_provider(ProviderInput::new(
+        assembly.register_provider(ProviderInput::try_from_arrow(
             ProgrammaticRelationId::new(table.binding.provider_relation.as_str()),
             table_reference,
             contract,
-            provider,
-        ))?;
+            partitions,
+        )?)?;
     }
     Ok(prepared.report)
 }
@@ -3281,6 +3281,9 @@ pub(crate) mod tests {
                     Arc::new(StringArray::from(vec![value])) as ArrayRef
                 }
                 DataType::UInt64 => Arc::new(UInt64Array::from(vec![7])) as ArrayRef,
+                DataType::Binary => Arc::new(arrow_array::BinaryArray::from(vec![
+                    (!field.is_nullable()).then_some(b"fixture".as_slice()),
+                ])) as ArrayRef,
                 DataType::Boolean => Arc::new(BooleanArray::from(vec![true])) as ArrayRef,
                 DataType::FixedSizeBinary(32) => {
                     let value = if field.name() == "content_digest" {
@@ -3394,6 +3397,9 @@ pub(crate) mod tests {
                     Arc::new(UInt64Array::from(vec![value])) as ArrayRef
                 }
                 DataType::Boolean => Arc::new(BooleanArray::from(vec![true])) as ArrayRef,
+                DataType::Binary => Arc::new(arrow_array::BinaryArray::from(vec![
+                    (!field.is_nullable()).then_some(b"fixture".as_slice()),
+                ])) as ArrayRef,
                 DataType::FixedSizeBinary(width @ (16 | 32)) => {
                     fixed_value(*width, &vec![91; usize::try_from(*width).unwrap()])
                 }

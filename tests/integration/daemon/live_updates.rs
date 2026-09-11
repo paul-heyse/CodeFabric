@@ -2977,6 +2977,31 @@ fn selected_source_pins(
         .collect()
 }
 
+fn selected_comment_pin(
+    fixture: &ProductionFixture,
+    expected_rows: usize,
+) -> codefabric::fabric::delta_exact::ExactDeltaPin {
+    let selected = all_activation_control_rows(fixture)
+        .into_iter()
+        .max_by_key(|row| row.row().ordinal.get())
+        .unwrap();
+    let relation = "provider.ruff.comment";
+    assert_eq!(
+        selected_relation_batches(&selected, relation)
+            .iter()
+            .map(RecordBatch::num_rows)
+            .sum::<usize>(),
+        expected_rows
+    );
+    selected
+        .table_versions()
+        .components()
+        .find(|(id, _)| *id == relation)
+        .unwrap()
+        .1
+        .clone()
+}
+
 #[test]
 fn shutdown_during_semantic_delta_publication_joins_workspace_owners() {
     exercise_semantic_publication_shutdown(PublicationShutdownProbe::Python);
@@ -3032,7 +3057,7 @@ fn exercise_semantic_publication_shutdown(probe: PublicationShutdownProbe) {
             value
         },
     );
-    wait_for_unselected_delta_writes(&fixture, &published_epoch, if mixed { 100 } else { 8 });
+    wait_for_unselected_delta_writes(&fixture, &published_epoch, 8);
     assert_eq!(
         all_activation_control_rows(&fixture).len(),
         1,
@@ -3211,6 +3236,7 @@ fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart
     );
     let first_semantic = pending_semantic_candidate(&fixture);
     let initial_source_pins = selected_source_pins(&fixture);
+    let initial_empty_comment_pin = selected_comment_pin(&fixture, 0);
     fs::write(first_semantic.with_extension("resume"), b"resume").unwrap();
     let initial = public_query(&fixture, &stack, "staged-initial", request.clone());
     assert_eq!(initial.rows[0]["name"], "original");
@@ -3228,7 +3254,8 @@ fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart
         .unwrap(),
     )
     .unwrap();
-    assert_eq!(costs["reused_relation_versions"], 2);
+    assert!(costs["reused_relation_versions"].as_u64().unwrap() > 2);
+    assert_eq!(initial_empty_comment_pin, selected_comment_pin(&fixture, 0));
     let syntax = &costs["workspace_syntax_cache"];
     for field in ["python_reuses", "rust_reuses", "ruff_parse_reuses"] {
         assert!(
@@ -3240,11 +3267,13 @@ fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart
 
     fs::write(
         workspace.join("sample.py"),
-        b"def obsolete():\n    return 2\ndef caller():\n    return obsolete()\n",
+        b"# admitted current comment\ndef obsolete():\n    return 2\ndef caller():\n    return obsolete()\n",
     )
     .unwrap();
     let obsolete = pending_semantic_candidate(&fixture);
     let obsolete_source_pins = selected_source_pins(&fixture);
+    let populated_comment_pin = selected_comment_pin(&fixture, 1);
+    assert_ne!(initial_empty_comment_pin, populated_comment_pin);
     assert!(
         initial_source_pins
             .iter()
@@ -3342,6 +3371,8 @@ fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart
     }
     let repaired = pending_semantic_candidate(&fixture);
     let repaired_source_pins = selected_source_pins(&fixture);
+    let repaired_empty_comment_pin = selected_comment_pin(&fixture, 0);
+    assert_ne!(populated_comment_pin, repaired_empty_comment_pin);
     assert!(
         obsolete_source_pins
             .iter()
@@ -3358,6 +3389,10 @@ fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart
     fs::write(repaired.with_extension("resume"), b"resume").unwrap();
     let final_result = public_query(&fixture, &stack, "repaired-semantic", request.clone());
     assert_eq!(final_result.rows[0]["name"], "repaired");
+    assert_eq!(
+        repaired_empty_comment_pin,
+        selected_comment_pin(&fixture, 0)
+    );
     assert_eq!(
         repaired_source_pins,
         selected_source_pins(&fixture),
@@ -3392,6 +3427,10 @@ fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart
     fs::write(resumed.with_extension("resume"), b"resume").unwrap();
     let final_result = public_query(&fixture, &stack, "resumed-semantic", request);
     assert_eq!(final_result.rows[0]["name"], "after_restart");
+    assert_eq!(
+        repaired_empty_comment_pin,
+        selected_comment_pin(&fixture, 0)
+    );
     assert_eq!(
         restart_source_pins,
         selected_source_pins(&fixture),

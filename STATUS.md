@@ -46,6 +46,14 @@ The call-query continuation present at session start was preserved, exercised an
 originally stopped at the diagnostic checkpoint. The subsequent user instruction resumes execution
 of the cross-cutting packages in §3.3 of the detailed plan.
 
+The uv CLI pin is removed in `a644b295` at the user's request. Local tooling accepts the installed
+uv; CI prefers an existing executable and uses an unpinned setup fallback only when absent. Python,
+`uv_build` and application dependency selection remain separate. On 2026-09-10, system uv 0.12.13
+passes `just tools-doctor`, `just tool-version-contract-check`, shell syntax and workflow parsing.
+`just tooling-test tooling/product/test_harness.py` passes all 228 selected tooling tests in 3.36 s
+(`/tmp/codefabric-system-uv-consumer.log`); the CLI report is `/tmp/codefabric-system-uv-report.log`.
+Earlier historical uv reconciliation entries below no longer prescribe a CLI version.
+
 ## P04 retained inputs and syntax — implementation in progress
 
 P03's related-context integration is committed in `75687368`. P04's immutable-input pin reuse and
@@ -325,6 +333,35 @@ Final affected Clippy is clean, including modified function headers after extrac
 setup (`/tmp/codefabric-p04-inventory-merkle-clippy-final.jsonl`). Documentation, focused spelling
 and diff checks pass. P04 input validity, full topology, Cargo-unit reuse and shared scheduling remain
 open; the hashing change does not alter any source/context selection or close a package.
+
+The accepted P04 persistence continuation gives fully materialized, zero-row Arrow inputs an
+immutable content identity. Native `MemTable` validation still checks partitions/schema; an exact
+empty input then uses DataFusion's read-only `EmptyTable`. Every batch must be empty, and arbitrary
+providers gain no identity from statistics or estimates. The existing Delta path requires full
+executable-descriptor equality and validates the selected exact version before reuse. Provider
+coverage and current processing remain independently published; empty fact storage is not an
+absence/completeness assertion. Native provider admission, Rust syntax and input-observation tables
+use the constructor. Nonempty data and changed descriptors retain candidate-owned writes.
+
+All 22 focused schema/admission/Delta cases pass in 1.689 s
+(`/tmp/codefabric-p04-empty-arrow-focused-v3.log`). The initial selection exposed old admission
+fixtures missing the current Pyrefly/Rust binary fields; those fixtures now construct the selected
+schemas. Focused cases cover actual empty-version reuse without a new table, empty→populated→empty
+replacement, old readers, exact reopen, malformed schemas/partitions and explicit incomplete scope.
+All three installed cases pass in 804.945 s (`/tmp/codefabric-p04-empty-arrow-installed.log`,
+nextest `3b1fb102-ee05-40c6-8805-b5fa9927a1c3`): mixed first-four-form/reopen takes 214.848 s,
+staged invalidation/restart takes 804.940 s and client-timeout/publication/reopen takes 265.048 s.
+The exact nonempty selectors run with `just root-test-incremental -j 2 --no-fail-fast`, explicit
+installed provider paths and a delegated Linux user-systemd scope, against `7e4ba9d9` plus this
+continuation. The independent uv-only commit lands while these binaries run. Root checks overlap
+execution; these durations are correctness evidence, not isolated performance measurements.
+Default/featureless `just root-check` passes (`/tmp/codefabric-p04-empty-arrow-root.log`). Final
+affected Clippy reports no changed-line diagnostics (`/tmp/codefabric-p04-empty-arrow-clippy-final.jsonl`);
+existing root warnings, including the long staged integration fixture, remain. Documentation,
+focused spelling and diff checks pass. No full CI or doctest claim is made.
+The staged case now checks a real Ruff comment's empty reuse, creation and deletion alongside public
+pending/semantic results. Shutdown probes wait for eight real candidate writes because empty-version
+reuse reduces the number of new tables; no fixed total table count is a correctness assumption.
 
 ## P03 first-release query boundary delivered
 

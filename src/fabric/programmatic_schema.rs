@@ -22,7 +22,6 @@ use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 use datafusion::common::{
     Column, Constraints, DFSchema, DFSchemaRef, DataFusionError, Statistics, TableReference,
 };
-#[cfg(test)]
 use datafusion::datasource::MemTable;
 use datafusion::datasource::{ViewTable, provider_as_source};
 use datafusion::execution::context::{SessionContext, SessionState, TaskContext};
@@ -513,6 +512,38 @@ impl std::fmt::Debug for ProviderInput {
 }
 
 impl ProviderInput {
+    /// Consume materialized Arrow storage batches. Empty data has a complete immutable
+    /// content identity, independent of producer coverage, which remains a separate relation.
+    /// Native `MemTable` validation still rejects absent partitions or incompatible schemas.
+    pub(crate) fn try_from_arrow(
+        relation_id: ProgrammaticRelationId,
+        table_reference: TableReference,
+        contract: Arc<SchemaContract>,
+        partitions: Vec<Vec<RecordBatch>>,
+    ) -> Result<Self, DataFusionError> {
+        let empty = partitions
+            .iter()
+            .flatten()
+            .all(|batch| batch.num_rows() == 0);
+        let schema = Arc::clone(contract.storage_schema());
+        let provider = MemTable::try_new(Arc::clone(&schema), partitions)?;
+        let provider: Arc<dyn TableProvider> = if empty {
+            // EmptyTable has no mutable batch store or insert path. This is an exact observed
+            // zero-row input, not an estimate or a claim that a provider's coverage is complete.
+            Arc::new(datafusion::datasource::empty::EmptyTable::new(schema))
+        } else {
+            Arc::new(provider)
+        };
+        let mut input = Self::new(relation_id, table_reference, contract, provider);
+        if empty {
+            // The exact Delta reuse path separately compares the entire executable descriptor.
+            input.immutable_input_identity = Some(crate::integrity::digest_bytes(
+                b"codefabric.materialized-empty-arrow-input.v1\0",
+            ));
+        }
+        Ok(input)
+    }
+
     /// Bind an exact provider contract to a fully qualified candidate table.
     #[must_use]
     pub fn new(
@@ -4684,6 +4715,76 @@ mod tests {
             contract,
             provider,
         )
+    }
+
+    #[tokio::test]
+    async fn materialized_arrow_empty_identity_requires_valid_partitions_and_every_batch_empty() {
+        let template = provider_input(
+            "provider.events",
+            TableReference::full("c", "s", "events"),
+            false,
+        );
+        let schema = Arc::clone(template.contract.storage_schema());
+        let make = |partitions| {
+            ProviderInput::try_from_arrow(
+                template.relation_id.clone(),
+                template.table_reference.clone(),
+                Arc::clone(&template.contract),
+                partitions,
+            )
+        };
+        let empty = make(vec![
+            vec![],
+            vec![RecordBatch::new_empty(Arc::clone(&schema))],
+        ])
+        .unwrap();
+        assert!(empty.immutable_input_identity.is_some());
+        let context = SessionContext::new();
+        assert_eq!(
+            context
+                .read_table(empty.provider)
+                .unwrap()
+                .count()
+                .await
+                .unwrap(),
+            0
+        );
+        let batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(Int64Array::from(vec![1])),
+                Arc::new(BooleanArray::from(vec![true])),
+            ],
+        )
+        .unwrap();
+        let nonempty = make(vec![vec![RecordBatch::new_empty(schema)], vec![batch]]).unwrap();
+        assert!(nonempty.immutable_input_identity.is_none());
+        assert_eq!(
+            context
+                .read_table(nonempty.provider)
+                .unwrap()
+                .count()
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(
+            make(vec![]).is_err(),
+            "an absent partition is invalid input"
+        );
+        let foreign = RecordBatch::new_empty(Arc::new(Schema::new(vec![Field::new(
+            "other",
+            DataType::Utf8,
+            false,
+        )])));
+        assert!(
+            make(vec![vec![foreign]]).is_err(),
+            "zero rows do not bypass schema validation"
+        );
+        assert!(
+            template.immutable_input_identity.is_none(),
+            "arbitrary providers do not gain a content assertion"
+        );
     }
 
     async fn fixture_with_contract(

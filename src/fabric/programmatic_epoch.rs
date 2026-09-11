@@ -1506,12 +1506,20 @@ mod tests {
         identity: Option<[u8; 32]>,
         selected: Option<&ProgrammaticFabricEpoch>,
     ) -> (TempDir, ProgrammaticFabricEpoch) {
-        let root = TempDir::new().unwrap();
-        let write = write_identity(seed);
         let mut input = provider_input_with_values(values);
         if let Some(identity) = identity {
             input = input.with_immutable_input_identity(identity);
         }
+        prepare_reuse_input(seed, input, selected).await
+    }
+
+    async fn prepare_reuse_input(
+        seed: u8,
+        input: ProviderInput,
+        selected: Option<&ProgrammaticFabricEpoch>,
+    ) -> (TempDir, ProgrammaticFabricEpoch) {
+        let root = TempDir::new().unwrap();
+        let write = write_identity(seed);
         let builder = positive_builder_with_input(write.epoch_id(), input);
         let observations = builder
             .provision_observation_histories(observation_roots(&root))
@@ -1530,6 +1538,84 @@ mod tests {
             .await
             .unwrap();
         (root, epoch)
+    }
+
+    fn materialized_values(values: Vec<i64>) -> ProviderInput {
+        let input = provider_input_with_values(vec![]);
+        let schema = Arc::clone(input.contract.storage_schema());
+        let batch = RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(values))]).unwrap();
+        ProviderInput::try_from_arrow(
+            input.relation_id,
+            input.table_reference,
+            input.contract,
+            vec![vec![batch]],
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn materialized_empty_inputs_reuse_only_exact_empty_versions_and_preserve_reopen() {
+        let id = ProgrammaticRelationId::new("facts.input_values");
+        let (_first_root, first) = prepare_reuse_input(61, materialized_values(vec![]), None).await;
+        let (second_root, second) =
+            prepare_reuse_input(62, materialized_values(vec![]), Some(&first)).await;
+        let first_pin = &first.relation_publication().table_version_map()[&id];
+        assert_eq!(
+            first_pin,
+            &second.relation_publication().table_version_map()[&id]
+        );
+        assert!(positive_rows(&second).await.is_empty());
+        assert!(
+            !relation_layout(&second_root)
+                .root()
+                .to_file_path()
+                .unwrap()
+                .join(
+                    first_pin
+                        .canonical_root()
+                        .to_file_path()
+                        .unwrap()
+                        .file_name()
+                        .unwrap()
+                )
+                .exists()
+        );
+
+        let (_populated_root, populated) =
+            prepare_reuse_input(63, materialized_values(vec![3, 3]), Some(&second)).await;
+        assert_ne!(
+            first_pin,
+            &populated.relation_publication().table_version_map()[&id]
+        );
+        assert_eq!(positive_rows(&populated).await, [3, 3]);
+        let (_deleted_root, deleted) =
+            prepare_reuse_input(64, materialized_values(vec![]), Some(&populated)).await;
+        assert_ne!(
+            &populated.relation_publication().table_version_map()[&id],
+            &deleted.relation_publication().table_version_map()[&id]
+        );
+        assert!(positive_rows(&deleted).await.is_empty());
+        assert_eq!(
+            positive_rows(&populated).await,
+            [3, 3],
+            "old facts remain readable"
+        );
+
+        let reopened = ProgrammaticFabricEpochBuilder::try_new(
+            *deleted.identity(),
+            FabricEpochRuntimeConfig::default(),
+        )
+        .unwrap()
+        .reopen(Arc::clone(deleted.table_version_set()))
+        .await
+        .unwrap();
+        let (_after_root, after) =
+            prepare_reuse_input(65, materialized_values(vec![]), Some(&reopened)).await;
+        assert_eq!(
+            &deleted.relation_publication().table_version_map()[&id],
+            &after.relation_publication().table_version_map()[&id]
+        );
+        assert!(positive_rows(&after).await.is_empty());
     }
 
     #[tokio::test]

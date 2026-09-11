@@ -2299,6 +2299,24 @@ The subsequent native Python updates and mixed stale-completion/restart scenario
 rebuilt providers, as recorded in §6A and STATUS. This bounded overlap
 does not replace selective persistence, native owner replacement or shared scheduling.
 
+**P04 empty Arrow input continuation (2026-09-10; accepted checkpoint).** Consumed,
+schema-validated Arrow batches can establish exact empty content without scanning a Delta table or
+interpreting missing statistics. All partitions/batches must be empty; absent partitions and schema
+mismatches remain native `MemTable` errors. Such inputs use native `EmptyTable` and a fixed empty
+content identity; full executable-descriptor equality and exact selected-Delta validation still
+govern reuse. This follows the precision distinction in the DataFusion reference §47, Planner
+metadata, and the pinned-provider boundary in Delta reference §7.1, TableProvider integration.
+Coverage is separate: missing/partial producers can have empty fact relations while current
+processing continues to identify the unknown scope. Nonempty relations and changed descriptors
+still write isolated candidate histories. All 22 focused cases pass, as do the three installed
+mixed four-form/reopen, comment creation/deletion with stale-completion rejection/restart, and
+client-timeout/publication/reopen cases (804.945 s total). The staged case preserves the exact empty
+comment pin across semantic publication and reopen while replacing populated/cleared storage.
+Shutdown probes now wait for eight real candidate writes as reuse reduces the new-table count.
+Default/featureless checks, final affected Clippy and documentation checks pass; existing root
+warnings remain. STATUS records commands, configuration, logs and performance limits. This does
+not resolve the earlier unreproduced native cleanup cascade or finish selective owner replacement.
+
 **Remaining implementation progression (E11/E22/E24; P04/P12).**
 
 1. Inventory actual readers of current non-observation and observation relations. Mark each as
