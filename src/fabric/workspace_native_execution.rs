@@ -144,6 +144,7 @@ impl WorkspaceNativeExecution {
         .await
     }
 
+    #[cfg(test)]
     pub(crate) async fn run_mutation<T, E, F, O>(
         &self,
         name: &str,
@@ -163,6 +164,7 @@ impl WorkspaceNativeExecution {
         .await
     }
 
+    #[cfg(test)]
     pub(crate) async fn run_mutation_classified<T, E, F, O, C>(
         &self,
         name: &str,

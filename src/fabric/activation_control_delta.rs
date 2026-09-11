@@ -1667,7 +1667,7 @@ impl ActivationEventPort for DeltaActivationRuntimeAuthority {
             let fault = control.assurance_fault;
             let request = contract.clone();
             let result = execution
-                .run_mutation(
+                .run_draining_mutation(
                     "activation-append",
                     crate::resource_budget::ResourceClass::Control,
                     std::time::Instant::now() + std::time::Duration::from_secs(120),

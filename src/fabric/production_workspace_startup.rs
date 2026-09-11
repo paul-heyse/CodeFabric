@@ -381,7 +381,7 @@ async fn open_activation_authority(
         let provision_root = root.clone();
         let provision_session = Arc::clone(&session);
         let version = executor
-            .run_mutation(
+            .run_draining_mutation(
                 "activation-control-provision",
                 crate::resource_budget::ResourceClass::Control,
                 Instant::now() + Duration::from_secs(120),
