@@ -1,10 +1,11 @@
 //! Joined execution for native libraries whose Tokio tasks bypass the DataFusion task tracer.
 //!
 //! The entire native operation, including construction and stream consumption, runs on a
-//! private multi-thread runtime. Its registered blocking owner drops that runtime before
-//! publishing a result. Tokio runtime destruction joins started blocking tasks even after
-//! their native futures or observers were dropped. `shutdown_background` and timed runtime
-//! shutdown would violate that ownership contract and are deliberately unavailable here.
+//! private multi-thread runtime. Its registered blocking owner drives started library work
+//! through cancellation before dropping that runtime and publishing an outcome. Cancellation
+//! closes new application admission; it does not destroy the async dependencies of kernel
+//! blocking workers. Runtime destruction then joins those workers. `shutdown_background` and
+//! timed runtime shutdown would violate that ownership contract and are unavailable here.
 //!
 //! Thread counts are enforced by Tokio. Memory and native task slots are admitted capacity,
 //! not RSS measurements or an allocator limit. Callers must bound the selected native
@@ -154,10 +155,12 @@ pub(crate) struct NativeLaneAdmission<'a> {
     pub cancellation_mode: NativeCancellationMode,
 }
 
-/// A Delta mutation may have blocking kernel calls waiting on this runtime. Its owner
-/// must stop admitting writes on the probe and drain started writes before returning.
+/// Native reads and writes may have blocking kernel calls waiting on this runtime. Their owner
+/// stops admitting new application work on the probe and drains started work before returning.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum NativeCancellationMode {
+    // Assurance-only mode for drop-safe synthetic futures and upload-abort ownership tests.
+    #[cfg(test)]
     DropFuture,
     DrainFuture,
 }

@@ -266,7 +266,7 @@ impl ProcessingPageReader {
         self.resources
             .native_execution(&self.scope)
             .map_err(|error| error.to_string())?
-            .run_read(
+            .run_draining_read(
                 "processing-remainder",
                 ResourceClass::Data,
                 deadline,
@@ -316,18 +316,19 @@ async fn read_page(
         .read_table(provider.provider)
         .map_err(|e| e.to_string())?;
     let frame = selected_remainder(frame, &selection, summary.processing.source_generation)?;
-    let mut stream = ordered(frame)?
+    if cancellation.is_cancelled() {
+        return Err("processing continuation cancelled".to_owned());
+    }
+    let stream = ordered(frame)?
         .limit(offset, Some(REMAINDER_PAGE_SIZE))
         .map_err(|e| e.to_string())?
         .execute_stream()
         .await
         .map_err(|e| e.to_string())?;
-    let mut batches = Vec::new();
-    while let Some(batch) = stream.next().await {
+    let batches = collect_joined_page(stream, |batch| {
         if cancellation.is_cancelled() {
             return Err("processing continuation cancelled".to_owned());
         }
-        let batch = batch.map_err(|e| e.to_string())?;
         validate(
             &batch,
             selection.workspace,
@@ -338,8 +339,9 @@ async fn read_page(
             batch.get_array_memory_size() as u64 + 512,
         )
         .map_err(|e| e.to_string())?;
-        batches.push(charge.into_charged_value(batch));
-    }
+        Ok(charge.into_charged_value(batch))
+    })
+    .await?;
     let snapshot = EntityProcessingSnapshot {
         batches,
         generation: summary.processing.source_generation,
@@ -368,9 +370,102 @@ async fn read_page(
     charge.into_charged_vec(bytes).map_err(|e| e.to_string())
 }
 
+// A processing page has a fixed row limit. After cancellation or a retention/validation error,
+// release its partial response and drive the started native stream to completion. Dropping it
+// early can leave a kernel blocking receiver dependent on the runtime we are about to join.
+async fn collect_joined_page<T>(
+    mut stream: datafusion::physical_plan::SendableRecordBatchStream,
+    mut retain: impl FnMut(RecordBatch) -> Result<T, String>,
+) -> Result<Vec<T>, String> {
+    let mut batches = Vec::new();
+    let mut failure = None;
+    while let Some(batch) = stream.next().await {
+        if failure.is_some() {
+            continue;
+        }
+        match batch
+            .map_err(|error| error.to_string())
+            .and_then(&mut retain)
+        {
+            Ok(batch) => batches.push(batch),
+            Err(error) => {
+                failure = Some(error);
+                batches.clear();
+            }
+        }
+    }
+    failure.map_or(Ok(batches), Err)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancelled_page_releases_partial_response_and_drains_started_stream() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Retained(Arc<AtomicUsize>);
+        impl Drop for Retained {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let released = Arc::clone(&dropped);
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&consumed);
+        let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
+        let signal = cancellation.clone();
+        let schema = Arc::new(arrow_schema::Schema::empty());
+        let batch = RecordBatch::new_empty(Arc::clone(&schema));
+        let source = futures::stream::iter((0..4).map(move |index| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            if index == 1 {
+                signal.cancel();
+            }
+            if index == 2 {
+                assert_eq!(
+                    released.load(Ordering::SeqCst),
+                    1,
+                    "release before draining"
+                );
+            }
+            if index == 3 {
+                return Err(datafusion::common::DataFusionError::Execution(
+                    "later native error must not replace cancellation".into(),
+                ));
+            }
+            Ok(batch.clone())
+        }));
+        let stream = Box::pin(
+            datafusion::physical_plan::stream::RecordBatchStreamAdapter::new(schema, source),
+        );
+        let mut retained = 0;
+        let result = collect_joined_page(stream, |_| {
+            retained += 1;
+            if cancellation.is_cancelled() {
+                return Err("processing continuation cancelled".to_owned());
+            }
+            Ok(Retained(Arc::clone(&dropped)))
+        })
+        .await;
+        assert_eq!(
+            result.err().as_deref(),
+            Some("processing continuation cancelled")
+        );
+        assert_eq!(
+            consumed.load(Ordering::SeqCst),
+            4,
+            "native producer drained"
+        );
+        assert_eq!(retained, 2, "no new response retention after cancellation");
+        assert_eq!(
+            dropped.load(Ordering::SeqCst),
+            1,
+            "partial response released"
+        );
+    }
 
     #[tokio::test]
     #[allow(

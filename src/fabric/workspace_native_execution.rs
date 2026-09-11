@@ -94,6 +94,7 @@ impl WorkspaceNativeExecution {
         })
     }
 
+    #[cfg(test)]
     pub(crate) async fn run_read<T, E, F, O>(
         &self,
         name: &str,
@@ -116,6 +117,7 @@ impl WorkspaceNativeExecution {
     /// The classifier preserves typed application pressure/failure outcomes. Use it when an
     /// application error enum wraps a budget, task-capacity, or native-admission error; callers
     /// must not infer those categories from the diagnostic-only convenience method's text.
+    #[cfg(test)]
     pub(crate) async fn run_read_classified<T, E, F, O, C>(
         &self,
         name: &str,
@@ -189,6 +191,35 @@ impl WorkspaceNativeExecution {
             },
             operation,
             classify,
+        )
+        .await
+    }
+
+    /// A bounded native read keeps its runtime alive until the callback has drained its
+    /// started library work. Cancellation discards the response, not the runtime's dependencies.
+    pub(crate) async fn run_draining_read<T, E, F, O>(
+        &self,
+        name: &str,
+        class: ResourceClass,
+        deadline: Instant,
+        operation: O,
+    ) -> Result<T, NativeLaneError>
+    where
+        T: NativeLaneOutput,
+        E: Display,
+        F: Future<Output = Result<T, E>>,
+        O: FnOnce(Cancellation, Arc<OwnedLocalStore>) -> F + Send + 'static,
+    {
+        self.run(
+            WorkspaceNativeRequest {
+                name,
+                class,
+                deadline,
+                mutation: false,
+                cancellation_mode: NativeCancellationMode::DrainFuture,
+            },
+            operation,
+            |error| NativeLaneError::operation(&error),
         )
         .await
     }
@@ -605,7 +636,7 @@ mod tests {
         let forbidden = fixture.location("reader-write");
         fixture
             .executor
-            .run_read(
+            .run_draining_read(
                 "read",
                 ResourceClass::Data,
                 deadline(),
