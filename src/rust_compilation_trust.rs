@@ -1315,6 +1315,7 @@ pub struct RustCompilationCancellationContract {
 enum RustLaunchPurpose {
     Compilation,
     Metadata,
+    UnitGraph,
 }
 
 /// Immutable launch plan compiled from policy, platform proof, exact inputs, and run pins.
@@ -1425,11 +1426,32 @@ impl RustCompilationLaunchPlan {
         paths: &RustCompilationPrivatePaths,
         receipt: &RustCompilationLauncherReceipt,
     ) -> Result<Vec<u8>, RustCompilationTrustError> {
+        self.read_discovery_output(paths, receipt, RustLaunchPurpose::Metadata)
+    }
+
+    /// Read the native Cargo unit graph only from this successful contained discovery operation.
+    ///
+    /// # Errors
+    /// Rejects a foreign/failed operation, changed output or a non-unit-graph launch purpose.
+    pub fn read_unit_graph(
+        &self,
+        paths: &RustCompilationPrivatePaths,
+        receipt: &RustCompilationLauncherReceipt,
+    ) -> Result<Vec<u8>, RustCompilationTrustError> {
+        self.read_discovery_output(paths, receipt, RustLaunchPurpose::UnitGraph)
+    }
+
+    fn read_discovery_output(
+        &self,
+        paths: &RustCompilationPrivatePaths,
+        receipt: &RustCompilationLauncherReceipt,
+        purpose: RustLaunchPurpose,
+    ) -> Result<Vec<u8>, RustCompilationTrustError> {
         use std::os::unix::fs::OpenOptionsExt as _;
         self.verify_digest()?;
         paths.revalidate()?;
         receipt.verify_digest()?;
-        if self.purpose != RustLaunchPurpose::Metadata
+        if self.purpose != purpose
             || receipt.plan_digest != self.plan_digest
             || paths.run_root != self.output_root
             || !receipt.terminal.process_group_empty
@@ -1714,6 +1736,34 @@ pub fn compile_rust_metadata_launch_plan(
     )
 }
 
+/// Plan native, feature-resolved Cargo unit discovery with the actual compilation selection.
+/// No build script or compiler fact production is authorized by this discovery plan.
+///
+/// # Errors
+/// Rejects unavailable containment, unqualified context/inputs, or unsafe paths/policy.
+pub fn compile_rust_unit_graph_launch_plan(
+    policy: &RustCompilationTrustPolicy,
+    capabilities: &SandboxCapabilityMatrix,
+    sandbox_profile: &GeneratedSandboxProfile,
+    inputs: &RustCompilationInputs,
+    paths: &RustCompilationPrivatePaths,
+    request: &RustCompilationRunRequest,
+) -> Result<RustCompilationLaunchPlan, RustCompilationTrustError> {
+    if policy.trust_mode != RustCompilationTrustMode::UntrustedSandboxed {
+        return Err(RustCompilationTrustError::UntrustedAdmissionRequired);
+    }
+    compile_rust_launch_plan(
+        policy,
+        capabilities,
+        sandbox_profile,
+        inputs,
+        paths,
+        request,
+        None,
+        RustLaunchPurpose::UnitGraph,
+    )
+}
+
 #[allow(clippy::too_many_arguments)] // Shared compiler/metadata policy and ownership boundary.
 fn compile_rust_launch_plan(
     policy: &RustCompilationTrustPolicy,
@@ -1727,7 +1777,7 @@ fn compile_rust_launch_plan(
 ) -> Result<RustCompilationLaunchPlan, RustCompilationTrustError> {
     let policy_digest = policy.digest()?;
     match purpose {
-        RustLaunchPurpose::Compilation => request
+        RustLaunchPurpose::Compilation | RustLaunchPurpose::UnitGraph => request
             .preparation
             .require_available(&request.context, inputs)?,
         RustLaunchPurpose::Metadata => request
@@ -1797,7 +1847,7 @@ fn compile_rust_launch_plan(
     let contained_manifest = layout.workspace_view.join(relative_manifest);
     let mut contained_arguments = vec![
         match purpose {
-            RustLaunchPurpose::Compilation => "check",
+            RustLaunchPurpose::Compilation | RustLaunchPurpose::UnitGraph => "check",
             RustLaunchPurpose::Metadata => "metadata",
         }
         .into(),
@@ -1852,8 +1902,18 @@ fn compile_rust_launch_plan(
             }
         }
     }
-    if purpose == RustLaunchPurpose::Compilation {
+    if matches!(
+        purpose,
+        RustLaunchPurpose::Compilation | RustLaunchPurpose::UnitGraph
+    ) {
         contained_arguments.extend(request.preparation.cargo_selection_arguments.clone());
+        if purpose == RustLaunchPurpose::UnitGraph {
+            contained_arguments.extend([
+                "--unit-graph".into(),
+                "-Z".into(),
+                "unstable-options".into(),
+            ]);
+        }
     } else {
         contained_arguments.extend(["--format-version".into(), "1".into()]);
         let settings = match &request.preparation.authority {
@@ -1875,8 +1935,8 @@ fn compile_rust_launch_plan(
     }
     let mut environment =
         RustCompilationEnvironment::build(inputs, paths, request, sandbox_profile.mechanism)?;
-    if purpose == RustLaunchPurpose::Metadata {
-        // Metadata can probe rustc, but must neither emit nor impersonate an extraction run.
+    if purpose != RustLaunchPurpose::Compilation {
+        // Discovery can probe rustc, but must neither emit nor impersonate an extraction run.
         environment.variables.remove("RUSTC_WRAPPER");
         environment
             .variables
@@ -4133,6 +4193,39 @@ mod tests {
             .unwrap();
         assert!(harness.request.preparation.remainders().is_empty());
         let plan = compile_untrusted(&harness);
+        let unit_graph = compile_rust_unit_graph_launch_plan(
+            &untrusted_policy(),
+            &harness.capabilities,
+            &harness.profile,
+            &harness.inputs,
+            &harness.paths,
+            &harness.request,
+        )
+        .unwrap();
+        assert_eq!(unit_graph.contained_arguments[0], "check");
+        assert!(unit_graph.contained_arguments.ends_with(&[
+            "--unit-graph".into(),
+            "-Z".into(),
+            "unstable-options".into()
+        ]));
+        assert!(
+            !unit_graph
+                .environment
+                .variables
+                .contains_key("RUSTC_WRAPPER")
+        );
+        assert!(
+            unit_graph
+                .environment
+                .variables
+                .keys()
+                .all(|key| !key.starts_with("CODEFABRIC_"))
+        );
+        assert!(matches!(
+            unit_graph.protocol_binding(),
+            Err(RustCompilationTrustError::CompilerObservationBindingMismatch)
+        ));
+        assert_ne!(unit_graph.plan_digest, plan.plan_digest);
         let expected_sysroot = if harness.profile.mechanism == SandboxMechanism::LinuxBubblewrap {
             PathBuf::from("/dependencies/toolchain")
         } else {

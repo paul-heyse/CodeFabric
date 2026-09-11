@@ -19,8 +19,7 @@ fn processing_remainder_pages_keep_exact_scope_across_reopen_and_updates() {
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
     // This case tests retained pagination across a completed repair. Full semantic publication
     // is a setup prerequisite, independently of any individual public query's freshness deadline.
-    let initial =
-        wait_for_semantic_activation_with_timeout(&fixture, Duration::from_secs(600));
+    let initial = wait_for_semantic_activation_with_timeout(&fixture, Duration::from_secs(600));
     let find = semantic_request(
         &fixture.workspace.public_id(),
         "unused",
@@ -993,7 +992,11 @@ fn captured_python_site_packages_survive_public_queries_and_reopen() {
         b"def py_leaf() -> int:\n    return 42\n",
     )
     .unwrap();
-    fs::write(root.join(".venv/lib/python3.14/site-packages/external/py.typed"), b"").unwrap();
+    fs::write(
+        root.join(".venv/lib/python3.14/site-packages/external/py.typed"),
+        b"",
+    )
+    .unwrap();
     fs::write(
         root.join("pyrefly.toml"),
         "site-package-path=['.venv/lib/python3.14/site-packages']\n",
@@ -1987,6 +1990,94 @@ fn cargo_build_script_observation(
     vec![entities, calls, source, empty, incoming, build_calls]
 }
 
+// Native Cargo discovery is independently checked here; it is not compiler/fact completeness.
+fn cargo_build_unit_graph_observation(
+    fixture: &ProductionFixture,
+) -> (
+    u64,
+    serde_json::Value,
+    Vec<codefabric::fabric::delta_exact::ExactDeltaPin>,
+    Vec<u8>,
+) {
+    let selected = all_activation_control_rows(fixture)
+        .into_iter()
+        .max_by_key(|row| row.row().ordinal.get())
+        .unwrap();
+    let graphs = selected_relation_batches(&selected, "source.cargo_unit_graph");
+    assert_eq!(graphs.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
+    let graph: serde_json::Value = serde_json::from_slice(
+        graphs
+            .iter()
+            .find(|batch| batch.num_rows() > 0)
+            .unwrap()
+            .column_by_name("native_graph_json")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow_array::BinaryArray>()
+            .unwrap()
+            .value(0),
+    )
+    .unwrap();
+    assert_eq!(graph["version"], 1);
+    let units = graph["units"].as_array().unwrap();
+    assert_eq!(units.len(), 3);
+    let library = units.iter().find(|unit| unit["mode"] == "check").unwrap();
+    assert_eq!(library["target"]["src_path"], "/workspace/src/lib.rs");
+    let build = units.iter().find(|unit| unit["mode"] == "build").unwrap();
+    let execution = units
+        .iter()
+        .find(|unit| unit["mode"] == "run-custom-build")
+        .unwrap();
+    assert_eq!(
+        build["target"]["src_path"],
+        "/workspace/custom/configure.rs"
+    );
+    assert_ne!(build["profile"], execution["profile"]);
+    let selection = selected_relation_batches(&selected, "source.cargo_unit_graph_selection");
+    assert_eq!(
+        selection.iter().map(RecordBatch::num_rows).sum::<usize>(),
+        1
+    );
+    let run = selection
+        .iter()
+        .find(|batch| batch.num_rows() > 0)
+        .unwrap()
+        .column_by_name("provider_run_id")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<arrow_array::BinaryArray>()
+        .unwrap()
+        .value(0)
+        .to_vec();
+    let pins = [
+        "source.cargo_unit_graph",
+        "source.cargo_compilation_unit",
+        "source.cargo_unit_dependency",
+    ]
+    .into_iter()
+    .map(|relation| {
+        assert!(
+            selected_relation_batches(&selected, relation)
+                .iter()
+                .any(|batch| batch.num_rows() > 0)
+        );
+        selected
+            .table_versions()
+            .components()
+            .find(|(id, _)| *id == relation)
+            .unwrap()
+            .1
+            .clone()
+    })
+    .collect();
+    (
+        selected.row().pins.source_generation.get(),
+        graph,
+        pins,
+        run,
+    )
+}
+
 #[test]
 fn custom_cargo_build_input_changes_context_and_matches_clean_public_results() {
     let fixture = ProductionFixture::with_source(b"marker = 1\n");
@@ -2022,6 +2113,8 @@ fn custom_cargo_build_input_changes_context_and_matches_clean_public_results() {
         store.backup_to(&registration).unwrap();
     }
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    wait_for_semantic_activation_with_timeout(&fixture, Duration::from_secs(300));
+    let initial_graph = cargo_build_unit_graph_observation(&fixture);
     let initial = cargo_build_script_observation(
         &fixture,
         &stack,
@@ -2029,6 +2122,25 @@ fn custom_cargo_build_input_changes_context_and_matches_clean_public_results() {
         "fixture::selected",
     );
     fs::write(root.join("custom/configure.rs"), build_script(false)).unwrap();
+    wait_for_semantic_activation_after_generation(
+        &fixture,
+        Some(initial_graph.0),
+        Duration::from_secs(300),
+    );
+    let live_graph = cargo_build_unit_graph_observation(&fixture);
+    assert_ne!(initial_graph.0, live_graph.0);
+    assert_eq!(
+        initial_graph.1, live_graph.1,
+        "Cargo structure is unchanged by build-script bytes"
+    );
+    assert_eq!(
+        initial_graph.2, live_graph.2,
+        "nonempty graph/unit/dependency pins survive source publication"
+    );
+    assert_ne!(
+        initial_graph.3, live_graph.3,
+        "the current selection has its own provider run"
+    );
     let live = cargo_build_script_observation(
         &fixture,
         &stack,
@@ -2041,6 +2153,8 @@ fn custom_cargo_build_input_changes_context_and_matches_clean_public_results() {
     );
     let clean = clean_fixture(&fixture, &registration, &stack);
     let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+    wait_for_semantic_activation_with_timeout(&clean, Duration::from_secs(300));
+    assert_eq!(live_graph.1, cargo_build_unit_graph_observation(&clean).1);
     assert_eq!(
         live,
         cargo_build_script_observation(&clean, &stack, "cargo-build-clean", "fixture::alternate")
@@ -2048,6 +2162,8 @@ fn custom_cargo_build_input_changes_context_and_matches_clean_public_results() {
     clean_supervisor.stop();
     supervisor.stop();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let reopened_graph = cargo_build_unit_graph_observation(&fixture);
+    assert_eq!(live_graph, reopened_graph);
     assert_eq!(
         live,
         cargo_build_script_observation(

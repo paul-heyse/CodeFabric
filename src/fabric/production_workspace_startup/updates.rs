@@ -143,6 +143,7 @@ impl SourceUpdateOwner {
         let syntax_cache = Arc::clone(self.resources.syntax_cache());
         let pyrefly_cache = Arc::clone(self.resources.pyrefly_cache());
         let rust_toolchain_cache = Arc::clone(self.resources.rust_toolchain_cache());
+        let rust_unit_graph_cache = Arc::clone(self.resources.rust_unit_graph_cache());
         let guard = budget
             .try_reserve(
                 ResourceClass::Control,
@@ -172,6 +173,11 @@ impl SourceUpdateOwner {
                     Ok(mut cache) => cache.evict_idle(Instant::now()),
                     Err(std::sync::TryLockError::WouldBlock) => {}
                     Err(error) => return Err(step("rust-toolchain-cache-owner", error)),
+                }
+                match rust_unit_graph_cache.try_lock() {
+                    Ok(mut cache) => cache.evict_idle(Instant::now()),
+                    Err(std::sync::TryLockError::WouldBlock) => {}
+                    Err(error) => return Err(step("cargo-unit-graph-cache-owner", error)),
                 }
                 let _writer = writer
                     .lock()

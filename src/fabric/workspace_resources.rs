@@ -33,6 +33,8 @@ pub(crate) struct ProductionWorkspaceResources {
             super::production_workspace_startup::rustc::toolchain_cache::ToolchainCache,
         >,
     >,
+    rust_unit_graph_cache:
+        Arc<std::sync::Mutex<super::production_workspace_startup::rustc::unit_graph::Cache>>,
     native: WorkspaceFabricResources,
     scheduler: WorkspaceResourceCoordinator,
     config: ProductionActiveWorkspaceConfig,
@@ -139,6 +141,9 @@ impl ProductionWorkspaceResources {
                     budget.clone(),
                 ),
             )),
+            rust_unit_graph_cache: Arc::new(std::sync::Mutex::new(
+                super::production_workspace_startup::rustc::unit_graph::Cache::new(budget.clone()),
+            )),
             budget,
             native,
             scheduler,
@@ -174,6 +179,12 @@ impl ProductionWorkspaceResources {
         >,
     > {
         &self.rust_toolchain_cache
+    }
+
+    pub(in crate::fabric) fn rust_unit_graph_cache(
+        &self,
+    ) -> &Arc<std::sync::Mutex<super::production_workspace_startup::rustc::unit_graph::Cache>> {
+        &self.rust_unit_graph_cache
     }
 
     /// Serializes short operational writes; provider computation never retains this gate.

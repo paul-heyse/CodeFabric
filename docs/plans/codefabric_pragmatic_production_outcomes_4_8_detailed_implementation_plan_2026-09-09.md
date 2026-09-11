@@ -1877,6 +1877,32 @@ of the unreproduced earlier cleanup cascade. Product selectors are `publication-
 `mixed-publication-shutdown` and `client-timeout-shutdown`. Default/featureless checks, final affected
 Clippy and all 48 wrapper tests pass; STATUS retains logs/configuration and the original failure.
 
+**Native Cargo unit-graph continuation (2026-09-11; accepted installed checkpoint).**
+
+The next Cargo census slice captures the selected nightly's native unit graph under the same
+contained package/target/features/profile/configuration selection used for compilation. Discovery
+cannot authorize extractor output. The immutable native JSON and typed unit/dependency projections
+have separate current generation/context/run selection rows. Native build-script compilation and
+execution remain distinct, and complete effective profile/target configuration is preserved. A
+workspace-owned charged cache keeps only the latest graph set through source-only publication,
+which has no graph selections; idle/headroom eviction cannot revoke an already held artifact lease.
+Private Cargo target outputs still remain fresh. Actual command/artifact/fact census and valid
+replay or retained-fact admission are the next Rust retention boundary, not delivered by discovery.
+Three focused discovery/containment tests pass in 0.025 s (run
+`0cdb973a-c79f-422b-a6de-77f980bfbfdd`,
+`/tmp/codefabric-p04-cargo-unit-graph-focused-v2.log`). The extended installed build-script edit /
+independent clean / exact reopen scenario passes in **584.354 s**, run
+`554ddcc5-7693-4ce1-a0bf-1e82605502e5`
+(`/tmp/codefabric-p04-cargo-unit-graph-installed.log`; isolated target, installed providers,
+delegated user-systemd scope). It independently checks the three native units/effective profiles,
+nonempty graph/unit/dependency pin reuse through source publication, changed selection provenance,
+expected cfg-dependent facts and exact reopen. Final graph retention/containment checks also pass
+in the seven-case input-metadata selection (0.084 s,
+`/tmp/codefabric-p04-unit-graph-submodule-focused.log`). Featureless checking and document navigation
+pass. All-target Clippy completes with the warning backlog and function-size advisories; its new
+private-field/redundant-closure diagnostics are corrected and included in the final focused build.
+Native checks overlapped this installed run, so its duration is not an isolated performance sample.
+
 **Remaining implementation progression (E02/E04/E05/E12/E21/E22; P04).**
 
 1. Extend the delivered workspace-owned parser/checker/toolchain caches to retained Cargo unit/fact
@@ -1894,7 +1920,8 @@ Clippy and all 48 wrapper tests pass; STATUS retains logs/configuration and the 
    Its versioned JSON distinguishes compiler units, build-script execution and unit dependencies;
    `cargo metadata` alone does not represent feature resolution by unit. A local four-unit probe
    on 2026-09-11 confirms separate build/check/run-custom-build modes and effective profiles with
-   the selected nightly; this is API evidence, not product integration. Retain actual wrapper
+   the selected nightly. Contained native capture and separate immutable artifacts/current selections
+   now pass the installed build-script/live/clean/reopen case described above. Retain actual wrapper
    argument/environment inputs with the unit/owner census before attempting replay. The existing
    invocation digest alone cannot reconstruct a Cargo `Fresh` unit's extraction command. Join
    expected units, actual compilation/artifact events and produced owners explicitly; absent fresh

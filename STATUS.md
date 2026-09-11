@@ -144,6 +144,30 @@ overlapped the installed run. This does not close the live read-only
 `/usr` runtime boundary: native runtime capture/validity and external dependency closure still need
 work before broader retained Cargo admission.
 
+The next Cargo census slice captures the selected nightly's native unit graph under the same
+contained package/target/features/profile/configuration selection used for compilation. Discovery
+cannot authorize extractor output. The immutable native JSON and typed unit/dependency projections
+have separate current generation/context/run selection rows. Native build-script compilation and
+execution remain distinct, and complete effective profile/target configuration is preserved. A
+workspace-owned charged cache keeps only the latest graph set through source-only publication,
+which has no graph selections; idle/headroom eviction cannot revoke an already held artifact lease.
+Private Cargo target outputs still remain fresh. Actual command/artifact/fact census and valid
+replay or retained-fact admission are the next Rust retention boundary, not delivered by discovery.
+Three focused discovery/containment tests pass in 0.025 s (run
+`0cdb973a-c79f-422b-a6de-77f980bfbfdd`,
+`/tmp/codefabric-p04-cargo-unit-graph-focused-v2.log`). The extended installed build-script edit /
+independent clean / exact reopen scenario passes in **584.354 s**, run
+`554ddcc5-7693-4ce1-a0bf-1e82605502e5`
+(`/tmp/codefabric-p04-cargo-unit-graph-installed.log`; isolated target, installed providers,
+delegated user-systemd scope). It independently checks the three native units/effective profiles,
+nonempty graph/unit/dependency pin reuse through source publication, changed selection provenance,
+expected cfg-dependent facts and exact reopen. Final graph retention/containment checks also pass
+in the seven-case input-metadata selection (0.084 s,
+`/tmp/codefabric-p04-unit-graph-submodule-focused.log`). Featureless checking and document navigation
+pass. All-target Clippy completes with the warning backlog and function-size advisories; its new
+private-field/redundant-closure diagnostics are corrected and included in the final focused build.
+Native checks overlapped this installed run, so its duration is not an isolated performance sample.
+
 The resumed inclusion slice uses one capture/watch policy. Captured root `pyrefly.toml` and
 `[tool.pyrefly]` search/site-package candidates can select subtrees beneath normally pruned
 `.venv`/build directories, with ancestor observation, sibling pruning, no-follow source capture

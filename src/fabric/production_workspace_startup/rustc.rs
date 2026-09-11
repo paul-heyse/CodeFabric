@@ -53,6 +53,7 @@ use super::{CompiledSemanticRelease, ProductionWorkspaceStartupError, digest16, 
 
 mod targets;
 pub(in crate::fabric) mod toolchain_cache;
+pub(in crate::fabric) mod unit_graph;
 
 use toolchain_cache::{FileWitness, ToolchainSelectionKey};
 
@@ -72,6 +73,8 @@ pub(super) struct RustcOutcome {
     pub context_pin: ContextPin,
     pub admitted: Vec<AdmittedProviderResult>,
     pub progress: Vec<RustTargetProgress>,
+    unit_graphs: Vec<unit_graph::SelectedUnitGraph>,
+    unselected_graphs: Vec<crate::resource_budget::ChargedValue<unit_graph::CapturedUnitGraph>>,
     runs: Vec<TrustQualifiedRustcCompilation>,
     gap: ProviderLaneGap,
 }
@@ -123,6 +126,8 @@ impl RustcOutcome {
             context_pin,
             admitted: Vec::new(),
             progress: Vec::new(),
+            unit_graphs: Vec::new(),
+            unselected_graphs: Vec::new(),
             runs: Vec::new(),
             gap: ProviderLaneGap::RequiredInputAbsent,
         }
@@ -162,6 +167,21 @@ impl RustcOutcome {
             ExactProviderLaneRuns::Accepted(&self.runs)
         }
     }
+
+    pub(super) fn install_unit_graphs(
+        &self,
+        builder: &mut crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder,
+        workspace: [u8; 16],
+        generation: u64,
+    ) -> Result<(), ProductionWorkspaceStartupError> {
+        unit_graph::install(
+            builder,
+            &self.unit_graphs,
+            &self.unselected_graphs,
+            workspace,
+            generation,
+        )
+    }
 }
 
 pub(super) fn run(
@@ -184,6 +204,11 @@ pub(super) fn run(
         ContextPin(record.context_fingerprint),
     );
     if inventory.selected_files().next().is_none() {
+        resources
+            .rust_unit_graph_cache()
+            .lock()
+            .map_err(|error| step("cargo-unit-graph-cache-owner", error))?
+            .clear();
         resources
             .rust_toolchain_cache()
             .lock()
@@ -208,6 +233,11 @@ pub(super) fn run(
         Err(_) => targets, // Preserve requested scope; each semantic preparation reports its failure.
     };
     if stage == super::PublicationStage::Source {
+        outcome.unselected_graphs = resources
+            .rust_unit_graph_cache()
+            .lock()
+            .map_err(|error| step("cargo-unit-graph-cache-owner", error))?
+            .unselected();
         return Ok(outcome.pending_targets(targets));
     }
     let mut contexts = Vec::new();
@@ -222,6 +252,7 @@ pub(super) fn run(
             inventory.clone(),
             &target,
             &toolchain,
+            &mut outcome.unit_graphs,
             resources,
             scope,
             cancellation.clone(),
@@ -269,6 +300,11 @@ pub(super) fn run(
         outcome.context_pin = crate::provider_admission::rustc_context_set_pin(contexts)
             .map_err(|error| step("rust-context-set", error))?;
     }
+    resources
+        .rust_unit_graph_cache()
+        .lock()
+        .map_err(|error| step("cargo-unit-graph-cache-owner", error))?
+        .replace(&outcome.unit_graphs);
     Ok(outcome)
 }
 
@@ -283,6 +319,7 @@ fn prepare_and_run(
     >,
     target: &targets::CargoTarget,
     shared_toolchain: &SharedToolchain,
+    unit_graphs: &mut Vec<unit_graph::SelectedUnitGraph>,
     resources: &crate::fabric::workspace_resources::ProductionWorkspaceResources,
     scope: &StructuredCancellationScope,
     cancellation: Cancellation,
@@ -509,6 +546,41 @@ fn prepare_and_run(
             )
         })
         .map_err(|error| step("rust-metadata-binding", error))?;
+    let graph_paths =
+        RustCompilationPrivatePaths::prepare(&view.output_root, &format!("unit-graph-{attempt}"))
+            .map_err(|error| step("rust-unit-graph-output", error))?;
+    let graph_profile = profile(&compilation_inputs, &graph_paths)?;
+    let graph_plan = crate::rust_compilation_trust::compile_rust_unit_graph_launch_plan(
+        &policy,
+        &capabilities,
+        &graph_profile,
+        &compilation_inputs,
+        &graph_paths,
+        &request,
+    )
+    .map_err(|error| step("rust-unit-graph-plan", error))?;
+    let graph_terminal = supervise_rust_compilation(
+        &graph_plan,
+        &graph_paths,
+        &ProviderSandboxLauncher::new(capabilities.clone()),
+        &graph_profile,
+        ProviderSandboxLaunchMaterial::LinuxSeccomp(&seccomp),
+        &RustCompilationCancellationSignal::default().with_scope_cancellation(cancellation.clone()),
+    )
+    .map_err(|error| step("rust-unit-graph", error))?;
+    let graph = graph_plan
+        .read_unit_graph(&graph_paths, &graph_terminal)
+        .map_err(|error| step("rust-unit-graph-result", error))?;
+    unit_graphs.push(unit_graph::SelectedUnitGraph {
+        captured: unit_graph::capture(graph, inputs.budget())?,
+        context: decode_public_id(
+            IdentityDomain::AnalysisContext,
+            None,
+            &product.context.analysis_context_id,
+        )
+        .map_err(|error| step("rust-unit-graph-context", error))?,
+        run: run_id,
+    });
     let mut context_charge = crate::inventory::reserve_memory(inputs.budget(), 4096)
         .map_err(|error| step("rust-context-memory", error))?;
     let context = ProviderContextBinding::try_new(
