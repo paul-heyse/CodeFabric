@@ -1,9 +1,10 @@
 # CodeFabric status
 
-Updated 2026-09-10 from the canonical `/home/paul/CodeFabric` working tree on `master`, through
-implementation commit `722b57d4`. The current provider executable invalidation task is concluded;
-its installed live/reopen acceptance passes. Work is stopped at the user's request after updating
-this file and the detailed plan. No next implementation slice is started or scheduled.
+Updated 2026-09-11 from the canonical `/home/paul/CodeFabric` working tree on `master`, reviewed at
+`a26c00a7`, through implementation commit `722b57d4`. The provider executable invalidation task is
+concluded; its installed live/reopen acceptance passes. Implementation remains paused. The latest
+requested full workspace test run and remediation planning are complete; no production, test or
+configuration fix was applied during that review.
 
 P01/P02 initial vertical exits and P03's first-release query boundary are delivered. P04 retained
 continuous operation is partial; P05–P14 remain open. The detailed plan §10 and the package handoff
@@ -15,6 +16,30 @@ does not complete an outcome or the first useful release.
 **Outcomes 1–3 are implemented for the current Linux workflow. Outcomes 4 and 5 are partially
 implemented. Outcome 6 has a partial production update loop; outcomes 7–8 remain open with selected implemented
 prerequisites. No outcome from 4 through 8 is complete.**
+
+The 2026-09-11 `cargo nextest run --workspace --no-fail-fast` baseline is **not green**:
+1,164 passed, 68 failed, three timed out and two were explicitly ignored (1,235 run, 134.287 s;
+build separately 2m39s). The clean reviewed revision is `a26c00a7`; run ID
+`b1bc0a36-e41a-48a0-9ce9-ccbf5f46c796`. The default profile used installed native providers and a
+delegated user-systemd scope, with no test filter, thread override or retries. This command covers
+the stable root workspace, not separate provider/adapter suites or doctests.
+
+The [workspace test remediation plan](docs/plans/codefabric_workspace_nextest_failure_remediation_plan_2026-09-11.md)
+records all 71 unsuccessful identities, source/library evidence, exact reproduction context and
+six ordered repair packages. Fifty failures stop at native watcher creation under exhausted
+per-user inotify instance capacity; 13 stop at startup readiness deadlines. The remaining failures
+are a stale provider census, three stale Binary-field fixtures and an obsolete seal-time execution
+expectation. Three tests hit nextest's 120-second bound. Five sequential diagnostics produce four
+passes and expose a stale direct-backend freshness argument behind one timeout; they do not replace
+full-suite acceptance. Retained-Pyrefly shutdown emits a warning in one passing readiness case and
+remains a traced follow-up, not a proved leak or a passing semantic-completion claim.
+
+Local logs are in `target/nextest-review/2026-09-11-workspace/`; the durable findings and full test
+inventory are in the new plan. The next repair is bounded native-fixture scheduling, followed by
+typed fixture/census updates, actual-read resource assertions, admitted-snapshot freshness and
+resolution of any remaining startup/timeout defects. A full unfiltered passing run is required
+before this supplement closes. It supports the current outcomes plan and does not replace its
+backlog or declare P04/P05 complete. No repairs have started.
 
 Follow the [production backlog](docs/plans/codefabric_pragmatic_production_implementation_plan.md)
 and its [detailed outcomes 4–8 execution plan](docs/plans/codefabric_pragmatic_production_outcomes_4_8_detailed_implementation_plan_2026-09-09.md).
