@@ -1711,7 +1711,7 @@ Both source-only mutations reuse the checker; module/configuration changes and u
 configuration exercise retirement and fresh contexts. STATUS records the exact invocation/log.
 This does not finish P04, retained Cargo contexts or shared cost-aware scheduling.
 
-**P04 Rust deployment-input continuation (2026-09-10; integration under validation).** The
+**P04 Rust deployment-input continuation (2026-09-10; accepted checkpoint `44053b64`).** The
 workspace owns one charged immutable compiler/dependency bundle, shared by leases across targets
 and semantic passes. Native dated-toolchain/host selection, the extractor location and freshly
 captured host C driver/search material determine compatibility. Canonical-target and file/directory
@@ -1730,14 +1730,19 @@ extraction while removing repeated sysroot byte capture. No claim is made that a
 automatically invalidates semantics after a tool-only deployment change; observation/invalidation
 integration still follows. Counters and phase reports expose actual capture reuse and its cost.
 
-The first four focused cache/context cases pass; the final five focused cases also pass in the
-ongoing installed selection. The installed mixed raw-path scenario now changes a Rust call target,
-asserts a shared retained capture, compares all four public forms with independent clean inputs,
-and reopens the exact result. The first installed invocation times out during initial semantic
-writes; shutdown then exposes native executor cancellation panics and an exhausted two-second
-daemon task-drain allowance. That recovery failure remains open. The comparison now waits for the
-exact semantic source selection before querying; its rerun is in progress. Default/featureless
-checks and final affected Clippy pass; product acceptance remains pending. STATUS records commands and results. This does not close P04 or implement Cargo-unit target reuse.
+The final six-test selection passes in 522.443 s. Its installed mixed raw-path case changes a
+Rust call target, records one retained capture reuse, compares all four public forms with independent
+clean inputs and reopens the exact result (522.423 s). Five focused cases cover capture identity,
+same-size replacement with restored modification time, new/deleted inputs, symlink retargeting and
+escape rejection, cancellation, bounded reads, idle eviction and leases surviving eviction.
+Default/featureless checks and final affected Clippy pass, including changed-function headers.
+
+The first installed invocation timed out during initial semantic writes. Shutdown then exposed
+native executor cancellation panics and an exhausted two-second daemon task-drain allowance. That
+recovery failure remains open; the successful comparison now waits for exact semantic source
+selection before querying. A separate real-publication shutdown/reopen case is being implemented
+to isolate it. STATUS records exact commands, phase observations and validation limits. This
+checkpoint does not close P04 or implement Cargo-unit target reuse.
 
 **Remaining implementation progression (E02/E04/E05/E12/E21/E22; P04).**
 

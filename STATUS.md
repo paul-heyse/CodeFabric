@@ -200,11 +200,12 @@ All nine focused watcher/configuration/failure-drain cases pass in 10.142 s
 product-harness cases pass in 0.76 s (`/tmp/codefabric-p04-watch-harness-final.log`); focused Python
 lint/format and documentation checks pass. No full CI/doctest or performance claim is made.
 
-## P04 retained Rust deployment inputs — integration in progress
+## P04 retained Rust deployment inputs — accepted checkpoint
 
 The pruned native/poll watcher and bounded exact-write checkpoint is committed in `2e71be9e`.
-The next slice retains one immutable captured Rust toolchain bundle under the existing workspace
-resource owner. Every semantic pass resolves the dated compiler/host and extractor and freshly
+The retained Rust toolchain implementation is committed in `44053b64` and passes the installed
+clean/update/reopen scenario. One immutable captured Rust toolchain bundle lives under the existing
+workspace resource owner. Every semantic pass resolves the dated compiler/host and extractor and freshly
 captures the host C driver/search selection. Reuse additionally checks canonical targets, inode,
 size, mode and modification/change times for every captured file and directory. A changed selection,
 missing input, directory transition or failed validation discards the cache entry. These metadata
@@ -233,14 +234,25 @@ cancelled during private-runtime destruction; no dependency/runtime changes have
 that path. Resolve real publication cancellation/drain behavior before claiming sustained recovery.
 
 The fixture now waits for the exact selected source bytes in a semantic activation before issuing
-its public comparison; it reuses the existing 180-second bounded input-readiness helper. The rerun
-(`/tmp/codefabric-p04-toolchain-cache-native-v2.log`) has passed all five focused cases and is running
-the installed mixed raw-path/Rust-call edit, retained-capture counter, independent clean-query and
-exact-reopen scenario. Final default/featureless root checks pass (`/tmp/codefabric-p04-toolchain-cache-root-v3.log`).
+its public comparison, reusing the existing 180-second bounded input-readiness helper. The final
+selection passes all six tests in 522.443 s (`/tmp/codefabric-p04-toolchain-cache-native-v2.log`,
+nextest `eeb8316f-860a-43bc-9040-1eb2849f7e98`). The installed scenario takes 522.423 s: the Rust
+call-target edit reuses one captured toolchain, all four public forms agree with independent clean
+state, and exact reopen preserves the result. The clean daemon records its own first capture.
+
+The observed initial/warm Cargo-and-toolchain phases are 28.379/7.809 s; relational execution/writes
+remain 102.652/99.017 s. Both states retain one 1,693,175,554-byte charged bundle. Root checks
+and Clippy overlap parts of this run, and no isolated performance or representative scale claim is
+made. Final default/featureless root checks pass (`/tmp/codefabric-p04-toolchain-cache-root-v3.log`).
 Affected Clippy is clean (`/tmp/codefabric-p04-toolchain-cache-clippy-v3.jsonl`), including modified
 function headers after extracting pending-target setup and the test cost reader. The read buffer
-is bounded on the heap and pointer assertions are explicit. This slice is not yet an accepted
-product checkpoint. P04 and P05–P14 remain open.
+is bounded on the heap and pointer assertions are explicit. Documentation checks pass.
+
+The next P04 continuation is reproducing the publication-shutdown failure above. A new installed
+case stops the supervisor only after an unselected semantic candidate has real Delta data commits,
+then requires a clean join and exact-generation reopen. Compact cleanup-deadline diagnostics name
+at most eight remaining owned tasks. That diagnostic/recovery work is unaccepted; P04 and P05–P14
+remain open, including Cargo target reuse, full input topology/invalidation and shared scheduling.
 
 ## P03 first-release query boundary delivered
 
