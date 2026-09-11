@@ -38,11 +38,20 @@ R05 adds one cancellation regression. This is not yet a green full-suite claim.
 
 The unfiltered rerun started at clean revision `12d2ee0d`, run
 `3bd06a71-7199-4b82-ad8c-002ceb44189f`, with the qualified default group and the same deployed
-providers. `full-1.log` is collecting all results without fail-fast. It has reproduced the earlier
+providers. `full-1.log` reproduced the earlier
 Delta lifetime risk: a candidate publication deadline destroys the runtime while the kernel's
 blocking receiver still depends on an async task on that runtime. Subsequent attempts also reuse
 a provider resource identity retained by the checker, failing with `DuplicateOwner` before reuse
 or retirement can run. These are production ownership defects, not obsolete corpus expectations.
+
+The diagnostic run was interrupted after an independent full nextest run in the user's Cursor
+terminal rebuilt the shared daemon binaries at 05:38 UTC. Later fixtures mixed the original test
+binary with newer daemon code. Its terminal summary is 1,193/1,236 started: 1,176 passed, ten
+ordinary failures, five timeouts and two SIGINT interruptions; 43 cases never started and the
+same two intentional ignores remained. This 3,275.621-second run is diagnostic evidence, not a
+completed or attributable workspace qualification. Subsequent runs use
+`CARGO_TARGET_DIR=target/nextest-remediation-build`, including the daemon paths compiled into their
+fixture binaries. Independent test runs still compete for host resources.
 
 The R05 working change adds an explicit draining mutation mode. Deadline/cancellation signals its
 probe; publication stops admitting relation writes and observes every started write while the
@@ -53,24 +62,35 @@ library patch or a detached cleanup task. Native lane regressions reproduce the 
 receive/async-send dependency for both cancellation and deadline; bounded-write regression checks
 that an unstarted sibling is never admitted after cancellation.
 
-Provider resource attempts receive fresh operation identities independently of stable provider,
-source and context identities. Live-owner uniqueness and charging remain enforced. The capture
-fixture checks that a retry has its own owner while the prior retained reservation remains charged.
+Provider attempts now receive fresh run IDs equal to their resource-owner operation IDs; source,
+context and Rust input-view identities remain stable. The initial resource-only nonce in
+`2262e861` violated exact provider-job admission and is corrected in `cbd7a241`. A focused regression
+now prepares two actual compiled Pyrefly jobs from identical captured inputs, checks both exact
+run/resource bindings and retains the first job's charge across retry admission. Live-owner
+uniqueness and charging remain enforced.
 Failed supervisor fixtures retain their existing source/semantic preparation reports in test
 output before temporary cleanup. The site-packages scenario reached successful semantic writes
-and reopen queries at its old 120-second outer timeout; it now has the same finite five-minute
-envelope as the analogous search-path/reopen scenario. Aggregate scheduling and all these changes
+and reopen queries at its old 120-second outer timeout; it now has a finite five-minute envelope.
+Aggregate scheduling and all these changes
 remain subject to real daemon and full-run qualification. The 23 focused lifetime/publication
-checks pass in 1.023 s, run `1b62bcf2-5652-427b-bc9c-4e4a28b4fddc`, recorded in
-`r05-lifetime-focused-2.log`. They include the existing actual Delta write/exact kernel read test.
-They use a separate build target to preserve the original binaries used by the active aggregate.
+checks with actual compiled-job admission pass in 1.017 s, run
+`5f9fdb5c-383b-44d0-9383-ce5b03697378`, recorded in `r05-admission-focused.log`. They include the
+existing actual Delta write/exact kernel read test. The isolated inventory contains 1,239 selected
+cases and the same two ignores; all 71 originally unsuccessful identities map to selected tests,
+including R03's documented rename.
 
 The first aggregate also reached the final independent clean rebuild in the mixed function-source
 case before its 900-second outer limit. Live inspection confirmed four simultaneous daemon
 processes owned by the two admitted comparison fixtures. The revised default/CI group gives
 `integration::daemon::live_updates::` and the full first-release corpus both slots, preserving the
 ordinary watcher/single-workspace admission and all longer timeout overrides. Production worker
-budgets and deadlines are unchanged. This refinement still requires the terminal full run.
+budgets and deadlines are unchanged. The mixed function case now allows 1,200 seconds, and the
+two-edit Python stub/search-path/raw-path comparisons allow 600 seconds for their five
+source/semantic publication cycles. Retained phase reports show 108.143 seconds of completed
+semantic writes in the mixed case and its last clean rebuild interrupted after 59.419 seconds
+of writes. Product wrappers retain build/cleanup headroom (1,500/900 seconds respectively); the
+site-packages wrapper allows 600 seconds. The tooling consumer passes 232 tests in 4.18 s and
+formatting/lint passes. These sequence limits still require the terminal full run.
 
 ## 1. Result and scope
 
