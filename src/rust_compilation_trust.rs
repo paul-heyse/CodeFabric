@@ -76,6 +76,7 @@ pub enum RustExecutableExtensionPolicy {
 /// Exact resource contract monitored across the complete compiler process group.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RustCompilationResourceLimits {
+    pub cpu_workers: u16,
     pub wall_time_millis: u64,
     pub stdout_bytes: u64,
     pub stderr_bytes: u64,
@@ -95,7 +96,8 @@ impl RustCompilationResourceLimits {
     ///
     /// Rejects zero or policy-ceiling-exceeding limits and impossible cross-field combinations.
     pub fn validate(self) -> Result<(), RustCompilationTrustError> {
-        let finite = self.wall_time_millis > 0
+        let finite = self.cpu_workers > 0
+            && self.wall_time_millis > 0
             && self.stdout_bytes > 0
             && self.stderr_bytes > 0
             && self.artifact_bytes > 0
@@ -105,7 +107,8 @@ impl RustCompilationResourceLimits {
             && self.cpu_seconds > 0
             && self.memory_bytes > 0
             && self.open_files > 2;
-        let within_ceiling = self.wall_time_millis <= MAX_WALL_TIME_MILLIS
+        let within_ceiling = u32::from(self.cpu_workers) <= self.process_count
+            && self.wall_time_millis <= MAX_WALL_TIME_MILLIS
             && self.stdout_bytes <= MAX_CAPTURE_BYTES
             && self.stderr_bytes <= MAX_CAPTURE_BYTES
             && self.artifact_bytes <= MAX_ARTIFACT_BYTES
@@ -606,17 +609,32 @@ impl SelectedRustCompilationPreparation {
         // Discovery pins a sysroot artifact, but does not map its authorized contained path.
         remainders.push(RustCompilationPreparationRemainder::SysrootMappingRequired);
         remainders.push(RustCompilationPreparationRemainder::SourceFileManifestRequired);
-        if settings
-            .environment
-            .iter()
-            .any(|entry| !matches!(entry.name.as_str(), "RUSTFLAGS" | "CARGO_ENCODED_RUSTFLAGS"))
-        {
+        if settings.environment.iter().any(|entry| {
+            !matches!(
+                entry.name.as_str(),
+                "RUSTFLAGS" | "CARGO_ENCODED_RUSTFLAGS" | "CARGO_BUILD_JOBS"
+            )
+        }) {
             remainders.push(RustCompilationPreparationRemainder::UnsupportedBuildEnvironment);
         }
-        let selected_environment = BTreeMap::from([(
+        let mut selected_environment = BTreeMap::from([(
             "CARGO_ENCODED_RUSTFLAGS".to_owned(),
             compiler_arguments.join("\u{1f}"),
         )]);
+        for entry in &settings.environment {
+            if entry.name == "CARGO_BUILD_JOBS" {
+                let workers = entry
+                    .value
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|workers| *workers > 0)
+                    .ok_or(RustCompilationTrustError::InvalidInvocationToken)?;
+                if entry.value != workers.to_string() {
+                    return Err(RustCompilationTrustError::InvalidInvocationToken);
+                }
+                selected_environment.insert(entry.name.clone(), entry.value.clone());
+            }
+        }
         validate_environment_variables(&selected_environment)?;
         Ok(Self {
             manifest_relative_path: std::ffi::OsString::from_vec(settings.manifest_path.clone())
@@ -1088,7 +1106,16 @@ impl RustCompilationEnvironment {
         paths: &RustCompilationPrivatePaths,
         request: &RustCompilationRunRequest,
         mechanism: SandboxMechanism,
+        cpu_workers: u16,
     ) -> Result<Self, RustCompilationTrustError> {
+        if request
+            .preparation
+            .selected_environment
+            .get("CARGO_BUILD_JOBS")
+            .is_some_and(|selected| selected != &cpu_workers.to_string())
+        {
+            return Err(RustCompilationTrustError::EnvironmentNotClosed);
+        }
         let layout = ContainedPathLayout::new(inputs, paths, mechanism)?;
         let mut variables = BTreeMap::from([
             (
@@ -1106,6 +1133,7 @@ impl RustCompilationEnvironment {
                 "CARGO_TARGET_DIR".into(),
                 layout.target_root.display().to_string(),
             ),
+            ("CARGO_BUILD_JOBS".into(), cpu_workers.to_string()),
             ("CARGO_NET_OFFLINE".into(), "true".into()),
             ("CARGO_INCREMENTAL".into(), "0".into()),
             ("CARGO_TERM_COLOR".into(), "never".into()),
@@ -1907,6 +1935,7 @@ fn compile_rust_launch_plan(
         RustLaunchPurpose::Compilation | RustLaunchPurpose::UnitGraph
     ) {
         contained_arguments.extend(request.preparation.cargo_selection_arguments.clone());
+        contained_arguments.extend(["--jobs".into(), policy.limits.cpu_workers.to_string()]);
         if purpose == RustLaunchPurpose::UnitGraph {
             contained_arguments.extend([
                 "--unit-graph".into(),
@@ -1933,8 +1962,13 @@ fn compile_rust_launch_plan(
             }
         }
     }
-    let mut environment =
-        RustCompilationEnvironment::build(inputs, paths, request, sandbox_profile.mechanism)?;
+    let mut environment = RustCompilationEnvironment::build(
+        inputs,
+        paths,
+        request,
+        sandbox_profile.mechanism,
+        policy.limits.cpu_workers,
+    )?;
     if purpose != RustLaunchPurpose::Compilation {
         // Discovery can probe rustc, but must neither emit nor impersonate an extraction run.
         environment.variables.remove("RUSTC_WRAPPER");
@@ -3616,7 +3650,7 @@ fn validate_digest(value: &str) -> Result<(), RustCompilationTrustError> {
 fn validate_environment_variables(
     variables: &BTreeMap<String, String>,
 ) -> Result<(), RustCompilationTrustError> {
-    const ALLOWED: [&str; 28] = [
+    const ALLOWED: [&str; 29] = [
         "CODEFABRIC_SOURCE_WORKSPACE_ROOT",
         "CODEFABRIC_SOURCE_FILE_MANIFEST",
         "CODEFABRIC_SOURCE_FILE_MANIFEST_DIGEST",
@@ -3627,6 +3661,7 @@ fn validate_environment_variables(
         "CARGO_HOME",
         "RUSTUP_HOME",
         "CARGO_TARGET_DIR",
+        "CARGO_BUILD_JOBS",
         "CARGO_NET_OFFLINE",
         "CARGO_INCREMENTAL",
         "CARGO_TERM_COLOR",
@@ -3882,6 +3917,13 @@ mod tests {
     fn rust_selected_settings_causally_prepare_contained_arguments_and_environment() {
         let mut harness = harness(RustCompilationTrustMode::UntrustedSandboxed);
         let mut request = selected_context_request(&harness);
+        request
+            .selection
+            .environment
+            .push(crate::analysis_context::RustEnvironmentSetting {
+                name: "CARGO_BUILD_JOBS".into(),
+                value: "2".into(),
+            });
         let before = discover_selected(&request);
         bind_selected_context(&mut harness, &before);
         assert_eq!(
@@ -3933,7 +3975,9 @@ mod tests {
                 "--target",
                 "aarch64-unknown-linux-gnu",
                 "--profile",
-                "release"
+                "release",
+                "--jobs",
+                "2"
             ]
         );
         assert_eq!(
@@ -3945,6 +3989,23 @@ mod tests {
             fs::read(harness.inputs.workspace_view.join("src/lib.rs")).unwrap()
         );
         plan.verify_digest().unwrap();
+        assert_eq!(plan.environment.variables["CARGO_BUILD_JOBS"], "2");
+        assert!(matches!(
+            RustCompilationEnvironment::build(
+                &harness.inputs,
+                &harness.paths,
+                &harness.request,
+                harness.profile.mechanism,
+                3,
+            ),
+            Err(RustCompilationTrustError::EnvironmentNotClosed)
+        ));
+        request.selection.environment[0].value = "3".into();
+        let resized = discover_selected(&request);
+        assert_ne!(
+            changed.context.analysis_context_id,
+            resized.context.analysis_context_id
+        );
     }
 
     #[test]
@@ -4193,6 +4254,12 @@ mod tests {
             .unwrap();
         assert!(harness.request.preparation.remainders().is_empty());
         let plan = compile_untrusted(&harness);
+        assert_eq!(plan.environment.variables["CARGO_BUILD_JOBS"], "2");
+        assert!(
+            plan.contained_arguments
+                .windows(2)
+                .any(|pair| pair == ["--jobs", "2"])
+        );
         let unit_graph = compile_rust_unit_graph_launch_plan(
             &untrusted_policy(),
             &harness.capabilities,
@@ -4307,6 +4374,7 @@ mod tests {
 
     fn limits() -> RustCompilationResourceLimits {
         RustCompilationResourceLimits {
+            cpu_workers: 2,
             wall_time_millis: 30_000,
             stdout_bytes: 1024 * 1024,
             stderr_bytes: 1024 * 1024,
@@ -4327,6 +4395,7 @@ mod tests {
             .as_u64()
             .expect("Claim 016 output_bytes");
         RustCompilationResourceLimits {
+            cpu_workers: 2,
             wall_time_millis: input["wall_ms"].as_u64().expect("Claim 016 wall_ms"),
             stdout_bytes: output_bytes,
             stderr_bytes: output_bytes,

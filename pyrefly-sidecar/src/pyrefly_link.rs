@@ -26,8 +26,8 @@ mod relation_schema;
 use relation_schema::{PYREFLY_RELEASE, PYREFLY_REVISION};
 pub(crate) use relation_schema::{PyreflyRelation, schema_bundle_digest, schema_digests};
 
-pub(crate) mod preparation;
 mod members;
+pub(crate) mod preparation;
 mod references;
 mod type_graph;
 use preparation::SelectedPyreflyPreparation;
@@ -144,6 +144,7 @@ struct LoadedModule {
 pub(crate) struct SemanticContext {
     view: ProviderView,
     query: Query,
+    workers: std::num::NonZeroUsize,
     preparation: SelectedPyreflyPreparation,
     /// Opaque input IDs own state; an import name may name several roots or a .py/.pyi pair.
     loaded: BTreeMap<String, LoadedModule>,
@@ -400,6 +401,7 @@ impl SemanticContext {
         state_root: &Path,
         context_key: &str,
         preparation: SelectedPyreflyPreparation,
+        workers: std::num::NonZeroUsize,
     ) -> Result<Self, String> {
         if !state_root.is_absolute() || context_key.is_empty() {
             return Err("Pyrefly context state root or key is invalid".to_owned());
@@ -414,10 +416,11 @@ impl SemanticContext {
         std::fs::create_dir(&root)
             .map_err(|error| format!("create Pyrefly provider view: {error}"))?;
         let view = ProviderView { root };
-        let query = query_for_root(&view.root, &preparation)?;
+        let query = query_for_root(&view.root, &preparation, workers)?;
         Ok(Self {
             view,
             query,
+            workers,
             preparation,
             loaded: BTreeMap::new(),
             completed_generations: 0,
@@ -431,6 +434,7 @@ impl SemanticContext {
             state_root,
             context_key,
             SelectedPyreflyPreparation::test_only_protocol_fixture(),
+            std::num::NonZeroUsize::new(3).unwrap(),
         )
     }
 
@@ -510,7 +514,7 @@ impl SemanticContext {
             // Query::change_files re-adds every private retained handle and exposes no
             // remove-files method. Retire that exact checker state, including its cache,
             // before installing the remaining full inventory. Do not resurrect deleted names.
-            self.query = query_for_root(&self.view.root, &self.preparation)?;
+            self.query = query_for_root(&self.view.root, &self.preparation, self.workers)?;
         }
 
         let mut created = Vec::new();
@@ -598,13 +602,15 @@ impl SemanticContext {
     }
 }
 
-fn query_for_root(root: &Path, preparation: &SelectedPyreflyPreparation) -> Result<Query, String> {
+fn query_for_root(
+    root: &Path,
+    preparation: &SelectedPyreflyPreparation,
+    workers: std::num::NonZeroUsize,
+) -> Result<Query, String> {
     let config = preparation.config_for_root(root)?;
     Ok(Query::new(
         ConfigFinder::new_constant(ArcId::new(config)),
-        ThreadCount::NumThreads(
-            std::num::NonZeroUsize::new(16).expect("workstation checker threads"),
-        ),
+        ThreadCount::NumThreads(workers),
     ))
 }
 
@@ -1870,7 +1876,13 @@ mod tests {
             let preparation =
                 SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap());
             let preparation = preparation.unwrap();
-            let mut context = SemanticContext::new(&root, "selected-context", preparation).unwrap();
+            let mut context = SemanticContext::new(
+                &root,
+                "selected-context",
+                preparation,
+                std::num::NonZeroUsize::new(3).unwrap(),
+            )
+            .unwrap();
             let module = inventory_module(&root, "main", source);
             let first = context
                 .analyze_modules(&inventory_run(1), &complete([module.clone()]))
@@ -1906,7 +1918,13 @@ mod tests {
         let preparation =
             SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
                 .unwrap();
-        let mut context = SemanticContext::new(&root, "raw-diagnostics", preparation).unwrap();
+        let mut context = SemanticContext::new(
+            &root,
+            "raw-diagnostics",
+            preparation,
+            std::num::NonZeroUsize::new(3).unwrap(),
+        )
+        .unwrap();
         let modules = [
             inventory_module(&root, "raw", b"value: int = 'wrong'\n"),
             inventory_module(&root, "unicode", b"value: int = 1\n"),
@@ -1965,7 +1983,13 @@ mod tests {
         let preparation =
             SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
                 .unwrap();
-        let mut context = SemanticContext::new(&root, "stub-and-source", preparation).unwrap();
+        let mut context = SemanticContext::new(
+            &root,
+            "stub-and-source",
+            preparation,
+            std::num::NonZeroUsize::new(3).unwrap(),
+        )
+        .unwrap();
         let main = inventory_module(
             &root,
             "main",
@@ -2058,7 +2082,13 @@ mod tests {
             let preparation =
                 SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
                     .unwrap();
-            let mut context = SemanticContext::new(&root, "selected-roots", preparation).unwrap();
+            let mut context = SemanticContext::new(
+                &root,
+                "selected-roots",
+                preparation,
+                std::num::NonZeroUsize::new(3).unwrap(),
+            )
+            .unwrap();
             let main = inventory_module(
                 &root,
                 "main",
@@ -2677,7 +2707,11 @@ mod tests {
         let module = &result.modules[0];
         assert_eq!(module.relations.len(), PyreflyRelation::ALL.len());
         assert_eq!(
-            module.relations.iter().map(|relation| relation.relation).collect::<Vec<_>>(),
+            module
+                .relations
+                .iter()
+                .map(|relation| relation.relation)
+                .collect::<Vec<_>>(),
             PyreflyRelation::ALL,
             "module digest order must agree with the daemon's closed relation census"
         );

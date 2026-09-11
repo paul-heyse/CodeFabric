@@ -287,6 +287,7 @@ async fn contained_cargo_observations(compile_failure: bool) {
     harness.protocol_policy.toolchain_identity_digest = identity_digest;
     harness.protocol_policy.provider_deadline_unix_ms = now_millis() + 120_000;
     harness.trust_policy.limits = RustCompilationResourceLimits {
+        cpu_workers: 2,
         wall_time_millis: 120_000,
         stdout_bytes: 64 * 1024 * 1024,
         stderr_bytes: 64 * 1024 * 1024,
@@ -305,6 +306,7 @@ async fn contained_cargo_observations(compile_failure: bool) {
         &RustcRelation::ALL,
     );
     let result = run_untrusted_rustc_provider_lifecycle(UntrustedRustcProviderLifecycle {
+        cpu_lease: None,
         task_scope: task_scope(),
         provider_job: &job,
         trust_policy: &harness.trust_policy,

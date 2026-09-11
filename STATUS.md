@@ -191,6 +191,37 @@ All-target Clippy completes with the existing warning backlog and function-size/
 advisories; featureless checking and document navigation pass
 (`/tmp/codefabric-p04-submodule-{clippy,featureless}*`).
 
+**Shared native CPU ownership continuation (2026-09-11).** The existing workspace resource
+coordinator now owns finite native CPU slots through Tokio's owned FIFO semaphore permits. Each
+checker/compiler receives an explicit deterministic worker width, capped by the existing native
+profile and half the available cooperative capacity. The capacity leaves two logical workers for
+source/control responsiveness where the host permits; it is not a bound on kernel CPU time, native
+helper threads or all DataFusion execution. Queue bookkeeping uses the shared resource budget,
+with cancellation and an admission deadline. Stable widths avoid contention-dependent Cargo context
+identity and repeated reconstruction of retained checker pools.
+
+The actual Cargo `--jobs`/`CARGO_BUILD_JOBS` selection is captured in effective context before
+compilation, because build scripts observe `NUM_JOBS`. Launch construction rejects a conflicting
+resource width. Pyrefly requires `--workers` and passes it to native `Query`/`ThreadCount::NumThreads`;
+its retained service serializes native analysis across resident contexts. Idle checkers release CPU
+slots after a complete response. The actual process owner retains the lease during cancelled
+construction, partial/error responses and failed joins. Compiler process ownership likewise carries
+the CPU lease through process-group termination. Compact preparation costs report capacity, peak,
+admissions and remaining allocated slots. Independent context dispatch and broader priority/backlog
+integration are the next scheduling work; target execution remains serialized in this checkpoint.
+
+Validation: 30 focused containment/context/CPU checks pass in 1.042 s (run
+`c19897c9-8723-499f-81c5-b83cb4425365`, `/tmp/codefabric-p04-native-cpu-context-focused.log`).
+The final deterministic FIFO adjustment passes the same 30 checks in 1.090 s (run
+`ffc30dc8-6d12-40aa-ab18-5956cf43f6b3`, `/tmp/codefabric-p04-native-cpu-final-focused.log`). The preceding installed mixed
+raw-path/live/clean/reopen scenario passes in 546.517 s (run
+`8b7c4726-9558-4bf8-a83c-c216df344dc6`, `/tmp/codefabric-p04-native-cpu-installed.log`),
+including both actual provider lanes and zero retained active CPU slots after each preparation.
+That installed run precedes the context-identity/deterministic-width refinement; integrated
+qualification continues with context scheduling. Sidecar strict checks and all 43 tests pass,
+and its installed binary has been rebuilt. Root all-target Clippy completes with the existing
+warning backlog; featureless checking passes. No full suite, doctest or performance claim is made.
+
 The resumed inclusion slice uses one capture/watch policy. Captured root `pyrefly.toml` and
 `[tool.pyrefly]` search/site-package candidates can select subtrees beneath normally pruned
 `.venv`/build directories, with ancestor observation, sibling pruning, no-follow source capture
@@ -2523,8 +2554,9 @@ Do not recreate delivered parser/checker/toolchain-input retention, scoped exact
 pruned source/Git metadata watching, first-four typed composition or source-context meanings.
 Retained Cargo outputs are different from retained immutable toolchain inputs: Cargo `Fresh` can
 skip the fact-producing wrapper, so output reuse needs complete unit/fact admission. Existing
-job-count admission is also different from shared native CPU allocation; Pyrefly still uses 16
-checker threads and Rust targets are serialized.
+job-count admission and native CPU allocation are separate controls. Native checker/compiler widths
+now use deterministic shared allocations and process-owned leases; independent dispatch and broader
+priority/backlog integration remain, with Rust targets still serialized.
 
 The unresolved native Delta executor/cleanup cascade in
 `/tmp/codefabric-p04-toolchain-cache-native-final.log` (nextest

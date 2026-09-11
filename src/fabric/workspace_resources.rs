@@ -277,6 +277,23 @@ impl ProductionWorkspaceResources {
     pub(crate) fn native(&self) -> &WorkspaceFabricResources {
         &self.native
     }
+    pub(in crate::fabric) fn native_cpu_allocation(
+        &self,
+        cancellation: &crate::cancellation::Cancellation,
+    ) -> Result<
+        crate::resource_budget::native_cpu::NativeCpuLease,
+        crate::resource_budget::native_cpu::NativeCpuError,
+    > {
+        tokio::runtime::Handle::current().block_on(
+            self.scheduler.admit_native_cpu(
+                local_native_profile(ResourceClass::Data)
+                    .lane
+                    .worker_threads,
+                cancellation,
+            ),
+        )
+    }
+
     pub(crate) fn scheduler(&self) -> &WorkspaceResourceCoordinator {
         &self.scheduler
     }

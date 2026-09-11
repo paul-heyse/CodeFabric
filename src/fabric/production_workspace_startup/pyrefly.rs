@@ -186,12 +186,19 @@ pub(super) fn run(
         changed_module_ids: ids,
         modules,
     };
+    let cpu = resources
+        .native_cpu_allocation(&cancellation)
+        .map_err(|error| step("pyrefly-cpu-admission", error))?;
     let prepared = prepare_job(
         release,
         inputs,
         context,
         source_pin,
         outcome.requested_units,
+        cpu.workers()
+            .get()
+            .try_into()
+            .expect("bounded native worker profile"),
         cancellation,
     )?;
     let result = tokio::runtime::Handle::current().block_on(
@@ -205,6 +212,7 @@ pub(super) fn run(
                 executable,
                 &input_root,
                 view.output_root,
+                cpu,
             ),
     );
     match result {
@@ -258,6 +266,7 @@ pub(super) fn prepare_job(
     context: &ChargedValue<ProviderContextBinding>,
     source_pin: SourcePin,
     requested_units: u64,
+    workers: u16,
     cancellation: Cancellation,
 ) -> Result<PreparedProviderJob, ProductionWorkspaceStartupError> {
     let resource_budget = inputs.provider_operation_budget()?;
@@ -311,7 +320,7 @@ pub(super) fn prepare_job(
                         max_wall_millis: 120_000,
                         max_visited_nodes: 4_000_000,
                         max_traversal_depth: 512,
-                        max_workers: 16,
+                        max_workers: workers,
                         max_retained_revisions: 1,
                         cancellation_poll_work_units: 1_024,
                         cancellation_ack_millis: 2_000,

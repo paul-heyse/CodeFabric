@@ -1758,8 +1758,8 @@ fn source_line_windows_and_hard_limits_survive_public_delivery_and_reopen() {
     supervisor.stop();
 }
 
-fn rust_toolchain_costs(fixture: &ProductionFixture) -> Value {
-    let costs: Value = serde_json::from_slice(
+fn native_preparation_costs(fixture: &ProductionFixture) -> Value {
+    serde_json::from_slice(
         &fs::read(
             fixture
                 .fabric_workspace_root()
@@ -1767,8 +1767,26 @@ fn rust_toolchain_costs(fixture: &ProductionFixture) -> Value {
         )
         .unwrap(),
     )
-    .unwrap();
-    costs["workspace_rust_toolchain_cache"].clone()
+    .unwrap()
+}
+
+fn rust_toolchain_costs(fixture: &ProductionFixture) -> Value {
+    native_preparation_costs(fixture)["workspace_rust_toolchain_cache"].clone()
+}
+
+fn assert_native_cpu_released_after_mixed_preparation(fixture: &ProductionFixture) {
+    let costs = native_preparation_costs(fixture);
+    let cpu = &costs["native_cpu"];
+    assert!(cpu["capacity"].as_u64().unwrap() > 0);
+    assert!(cpu["peak_allocated_slots"].as_u64().unwrap() <= cpu["capacity"].as_u64().unwrap());
+    assert_eq!(
+        cpu["allocated_slots"], 0,
+        "completed native work releases shares while the checker remains resident"
+    );
+    assert!(
+        cpu["admissions"].as_u64().unwrap() >= 2,
+        "both native provider lanes were admitted"
+    );
 }
 
 #[test]
@@ -1818,6 +1836,7 @@ fn mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen() {
     wait_for_selected_sources(&fixture, &["sample.py", "src/café.rs"]);
     four_forms(&fixture, &stack, "rust-raw-initial", &expected);
     assert_eq!(rust_toolchain_costs(&fixture)["captures"], 1);
+    assert_native_cpu_released_after_mixed_preparation(&fixture);
     fs::write(
         root.join(std::ffi::OsStr::from_bytes(b"dir-\xff/marker.py")),
         b"marker = 2\n",
@@ -1836,6 +1855,7 @@ fn mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen() {
     ];
     wait_for_selected_sources(&fixture, &["sample.py", "src/café.rs"]);
     let live = four_forms(&fixture, &stack, "rust-raw-edited", &expected);
+    assert_native_cpu_released_after_mixed_preparation(&fixture);
     let reused = rust_toolchain_costs(&fixture);
     assert_eq!(
         reused["captures"], 1,
@@ -1856,6 +1876,7 @@ fn mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen() {
         live,
         four_forms(&clean, &stack, "rust-raw-clean", &expected)
     );
+    assert_native_cpu_released_after_mixed_preparation(&clean);
     assert_eq!(rust_toolchain_costs(&clean)["captures"], 1);
     assert_eq!(rust_toolchain_costs(&clean)["reuses"], 0);
     clean_supervisor.stop();

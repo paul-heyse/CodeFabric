@@ -354,6 +354,14 @@ fn prepare_and_run(
         })
         .as_ref()
         .map_err(|error| step("rust-toolchain", error))?;
+    let cpu = resources
+        .native_cpu_allocation(&cancellation)
+        .map_err(|error| step("rust-cpu-admission", error))?;
+    let workers = cpu
+        .workers()
+        .get()
+        .try_into()
+        .expect("bounded native worker profile");
     let mut dependencies = toolchain.dependencies.entries.clone();
     let workspace_id = public_id(IdentityDomain::Workspace, record.workspace_id)?;
     let files = captured_files(inputs)?;
@@ -381,7 +389,7 @@ fn prepare_and_run(
     ));
     let dependencies = DependencyInputBundle::pin(dependencies)
         .map_err(|error| step("rust-dependency-bundle", error))?;
-    let selection = initial_selection(&files, target, toolchain)?;
+    let selection = initial_selection(&files, target, toolchain, workers)?;
     let product = discover_rust_context(&RustContextDiscoveryRequest {
         workspace_id: workspace_id.clone(),
         source_generation: inventory.source_generation(),
@@ -449,6 +457,7 @@ fn prepare_and_run(
     .map_err(|error| step("rust-compilation-inputs", error))?;
     drop(dependencies);
     let limits = RustCompilationResourceLimits {
+        cpu_workers: workers,
         wall_time_millis: 120_000,
         stdout_bytes: 64 * 1024 * 1024,
         stderr_bytes: 64 * 1024 * 1024,
@@ -648,7 +657,7 @@ fn prepare_and_run(
                         max_wall_millis: 120_000,
                         max_visited_nodes: 4_000_000,
                         max_traversal_depth: 512,
-                        max_workers: 16,
+                        max_workers: workers,
                         max_retained_revisions: 1,
                         cancellation_poll_work_units: 1_024,
                         cancellation_ack_millis: 2_000,
@@ -685,6 +694,7 @@ fn prepare_and_run(
     tokio::runtime::Handle::current().block_on(async {
         let result = Box::pin(run_untrusted_rustc_provider_lifecycle(
             UntrustedRustcProviderLifecycle {
+                cpu_lease: Some(cpu),
                 task_scope: child.clone(),
                 provider_job: prepared.job(),
                 trust_policy: &policy,
@@ -1238,6 +1248,7 @@ fn initial_selection(
     files: &[ContextFileInput],
     selected: &targets::CargoTarget,
     toolchain: &ToolchainInputs,
+    workers: u16,
 ) -> Result<RustContextSelection, ProductionWorkspaceStartupError> {
     let identity: serde_json::Value = serde_json::from_slice(TOOLCHAIN_IDENTITY)
         .map_err(|error| step("rust-toolchain-identity", error))?;
@@ -1295,6 +1306,12 @@ fn initial_selection(
     };
     let build_inputs = targets::build_inputs(files)?;
     Ok(RustContextSelection {
+        // Cargo exports NUM_JOBS to build scripts. Pin the actual granted width as selected
+        // build environment before deriving a context; resource policy alone is not identity.
+        environment: vec![crate::analysis_context::RustEnvironmentSetting {
+            name: "CARGO_BUILD_JOBS".into(),
+            value: workers.to_string(),
+        }],
         manifest_path: Some(selected.manifest.clone()),
         cargo_workspace_root,
         package_name: Some(selected.package.clone()),
@@ -1385,7 +1402,7 @@ mod tests {
         }
     }
 
-    fn context_for_toolchain(toolchain: &ToolchainInputs, generation: u64) -> String {
+    fn context_for_toolchain(toolchain: &ToolchainInputs, generation: u64, workers: u16) -> String {
         let files = [
             (
                 "Cargo.toml",
@@ -1407,7 +1424,7 @@ mod tests {
         })
         .collect::<Vec<_>>();
         let selected = targets::discover(&files).unwrap().remove(0);
-        let selection = initial_selection(&files, &selected, toolchain).unwrap();
+        let selection = initial_selection(&files, &selected, toolchain, workers).unwrap();
         let product = discover_rust_context(&RustContextDiscoveryRequest {
             workspace_id: format!("workspace:{:032x}", 1),
             source_generation: generation,
@@ -1443,14 +1460,15 @@ mod tests {
         }
         let first = captured_toolchain(first_root.path());
         let relocated = captured_toolchain(second_root.path());
-        let before = context_for_toolchain(&first, 1);
-        assert_eq!(before, context_for_toolchain(&relocated, 2));
+        let before = context_for_toolchain(&first, 1, 2);
+        assert_eq!(before, context_for_toolchain(&relocated, 2, 2));
+        assert_ne!(before, context_for_toolchain(&relocated, 2, 3));
         std::fs::write(second_root.path().join("lib/runtime.so"), b"other runtime").unwrap();
         let changed = captured_toolchain(second_root.path());
-        assert_ne!(before, context_for_toolchain(&changed, 2));
+        assert_ne!(before, context_for_toolchain(&changed, 2, 2));
         // The original captured view remains exact after the installed input changes.
         assert_eq!(&*relocated.dependencies.entries[0].bytes, b"first runtime");
-        assert_eq!(before, context_for_toolchain(&relocated, 3));
+        assert_eq!(before, context_for_toolchain(&relocated, 3, 2));
         assert!(first.memory_bytes().unwrap() >= b"first runtime".len() as u64);
     }
 }

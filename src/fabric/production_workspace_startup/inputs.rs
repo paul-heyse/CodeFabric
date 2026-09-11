@@ -911,6 +911,7 @@ mod tests {
                 &initial,
                 crate::relation_ipc::SourcePin(first.inventory.identity()),
                 1,
+                2,
                 Cancellation::default(),
             )
             .unwrap()

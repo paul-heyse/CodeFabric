@@ -344,6 +344,19 @@ impl WorkspaceResourceCoordinator {
         if all_zero(&resource_policy) {
             return Err(EpochResourceError::InvalidResourcePolicy);
         }
+        // Cooperative native worker widths leave headroom for control/source work. This is
+        // independent of kernel CPU-time containment and native helper-thread creation.
+        #[cfg(feature = "daemon")]
+        let native_cpu = crate::resource_budget::native_cpu::NativeCpuPool::new(
+            NonZeroUsize::new(
+                std::thread::available_parallelism()
+                    .map_or(1, NonZeroUsize::get)
+                    .saturating_sub(2)
+                    .max(1),
+            )
+            .expect("nonempty native CPU budget"),
+            budget.clone(),
+        );
         Ok(Self {
             inner: Arc::new(ResourceInner {
                 resource_policy,
@@ -351,9 +364,42 @@ impl WorkspaceResourceCoordinator {
                 datafusion_runtime,
                 budget,
                 native: NativeOperationRegistry::default(),
+                #[cfg(feature = "daemon")]
+                native_cpu,
                 state: Mutex::new(SchedulerState::default()),
             }),
         })
+    }
+
+    #[cfg(feature = "daemon")]
+    pub(crate) async fn admit_native_cpu(
+        &self,
+        preferred: NonZeroUsize,
+        cancellation: &Cancellation,
+    ) -> Result<
+        crate::resource_budget::native_cpu::NativeCpuLease,
+        crate::resource_budget::native_cpu::NativeCpuError,
+    > {
+        // Two independent native contexts can make progress on this workstation. Select a
+        // stable per-context width, capped by the existing native profile, before queueing.
+        let width = preferred
+            .get()
+            .min((self.inner.native_cpu.observation().capacity / 2).max(1));
+        self.inner
+            .native_cpu
+            .admit(
+                NonZeroUsize::new(width).expect("nonempty native context width"),
+                cancellation,
+                Duration::from_millis(self.inner.policy.max_execution_millis.get()),
+            )
+            .await
+    }
+
+    #[cfg(feature = "daemon")]
+    pub(crate) fn native_cpu_observation(
+        &self,
+    ) -> crate::resource_budget::native_cpu::NativeCpuObservation {
+        self.inner.native_cpu.observation()
     }
 
     pub(crate) fn for_epoch(
@@ -386,6 +432,8 @@ struct ResourceInner {
     datafusion_runtime: Arc<RuntimeEnv>,
     budget: ResourceBudget,
     native: NativeOperationRegistry,
+    #[cfg(feature = "daemon")]
+    native_cpu: crate::resource_budget::native_cpu::NativeCpuPool,
     state: Mutex<SchedulerState>,
 }
 

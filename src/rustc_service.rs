@@ -1883,6 +1883,7 @@ impl RustcObservationService {
 /// this transaction compiles their exact launch plan and never accepts a preconstructed compiler
 /// response or a trusted-local fallback.
 pub struct UntrustedRustcProviderLifecycle<'a> {
+    pub(crate) cpu_lease: Option<crate::resource_budget::native_cpu::NativeCpuLease>,
     pub(crate) task_scope: StructuredCancellationScope,
     pub provider_job: &'a ProviderJob,
     pub trust_policy: &'a RustCompilationTrustPolicy,
@@ -1949,6 +1950,13 @@ pub(crate) async fn run_untrusted_rustc_provider_lifecycle(
     if lifecycle.trust_policy.trust_mode != RustCompilationTrustMode::UntrustedSandboxed {
         return Err(RustCompilationTrustError::UntrustedAdmissionRequired.into());
     }
+    if lifecycle.cpu_lease.as_ref().is_some_and(|lease| {
+        lease.workers().get() != usize::from(lifecycle.trust_policy.limits.cpu_workers)
+            || lifecycle.trust_policy.limits.cpu_workers
+                > lifecycle.provider_job.ceilings().max_workers()
+    }) {
+        return Err(RustCompilationTrustError::InvalidResourceLimits.into());
+    }
     validate_job_admission(lifecycle.provider_job, &lifecycle.run_admission)
         .map_err(RustcProviderLifecycleError::Protocol)?;
     let plan = compile_rust_compilation_launch_plan(
@@ -1971,8 +1979,10 @@ pub(crate) async fn run_untrusted_rustc_provider_lifecycle(
         .task_scope
         .child("supervisor")
         .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?;
-    let native_owner =
-        crate::provider_contracts::allocation::reserve_native_state(lifecycle.provider_job)?;
+    let native_owner = (
+        crate::provider_contracts::allocation::reserve_native_state(lifecycle.provider_job)?,
+        lifecycle.cpu_lease,
+    );
     execute_prepared_rustc_lifecycle(
         lifecycle.provider_job.clone(),
         lifecycle.task_scope,
@@ -2647,6 +2657,7 @@ mod tests {
 
     fn lifecycle_limits() -> RustCompilationResourceLimits {
         RustCompilationResourceLimits {
+            cpu_workers: 2,
             wall_time_millis: 30_000,
             stdout_bytes: 1024 * 1024,
             stderr_bytes: 1024 * 1024,
@@ -3431,6 +3442,7 @@ mod tests {
             &[RustcRelation::MirBody],
         );
         let result = run_untrusted_rustc_provider_lifecycle(UntrustedRustcProviderLifecycle {
+            cpu_lease: None,
             task_scope: task_scope(),
             provider_job: &provider_job,
             trust_policy: &harness.trust_policy,
@@ -3475,6 +3487,7 @@ mod tests {
             &[RustcRelation::MirBody],
         );
         let result = run_untrusted_rustc_provider_lifecycle(UntrustedRustcProviderLifecycle {
+            cpu_lease: None,
             task_scope: task_scope(),
             provider_job: &provider_job,
             trust_policy: &trusted_local,

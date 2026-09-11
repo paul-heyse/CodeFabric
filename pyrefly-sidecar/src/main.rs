@@ -21,7 +21,10 @@ const PYREFLY_LOCK_SOURCE_BLAKE3: &str = env!("PYREFLY_LOCK_SOURCE_BLAKE3");
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Identity,
-    Serve(Option<OsString>),
+    Serve {
+        endpoint: Option<OsString>,
+        workers: std::num::NonZeroUsize,
+    },
 }
 
 fn parse_command(args: impl IntoIterator<Item = OsString>) -> Result<Command, &'static str> {
@@ -29,12 +32,25 @@ fn parse_command(args: impl IntoIterator<Item = OsString>) -> Result<Command, &'
     match args.next().as_deref() {
         Some(value) if value == "--identity" && args.next().is_none() => Ok(Command::Identity),
         Some(value) if value == "--serve" => {
-            let endpoint = args.next();
-            if args.next().is_none() {
-                Ok(Command::Serve(endpoint))
+            let first = args.next();
+            let (endpoint, flag) = if first.as_deref() == Some(std::ffi::OsStr::new("--workers")) {
+                (None, first)
             } else {
-                Err("expected at most one private UDS endpoint")
+                (first, args.next())
+            };
+            if flag.as_deref() != Some(std::ffi::OsStr::new("--workers")) {
+                return Err("--serve requires an explicit --workers allocation");
             }
+            let workers = args
+                .next()
+                .and_then(|value| value.to_str().and_then(|value| value.parse::<usize>().ok()))
+                .filter(|count| (1..=256).contains(count))
+                .and_then(std::num::NonZeroUsize::new)
+                .ok_or("--workers must be between 1 and 256")?;
+            if args.next().is_some() {
+                return Err("unexpected Pyrefly serving argument");
+            }
+            Ok(Command::Serve { endpoint, workers })
         }
         _ => Err("expected --identity or --serve"),
     }
@@ -52,7 +68,7 @@ fn run(
             writeln!(stderr, "{}", IDENTITY.trim())
                 .map_err(|_| "failed to write identity".to_owned())?;
         }
-        Command::Serve(endpoint) => {
+        Command::Serve { endpoint, workers } => {
             let endpoint = endpoint
                 .map_or_else(
                     || std::env::var("CODEFABRIC_PYREFLY_ENDPOINT"),
@@ -67,7 +83,11 @@ fn run(
             }
             let sandbox_profile_digest = std::env::var("CODEFABRIC_SANDBOX_PROFILE_DIGEST")
                 .map_err(|_| "CODEFABRIC_SANDBOX_PROFILE_DIGEST is required".to_owned())?;
-            server::serve(std::path::Path::new(socket), &sandbox_profile_digest)?;
+            server::serve(
+                std::path::Path::new(socket),
+                &sandbox_profile_digest,
+                workers,
+            )?;
         }
     }
     Ok(())
@@ -101,6 +121,22 @@ mod tests {
             String::from_utf8(stderr).unwrap(),
             format!("{}\n", IDENTITY.trim())
         );
+    }
+
+    #[test]
+    fn serving_requires_and_preserves_the_explicit_native_worker_allocation() {
+        let parse = |args: &[&str]| parse_command(args.iter().map(OsString::from));
+        assert_eq!(
+            parse(&["--serve", "unix:///private/checker.sock", "--workers", "3"]),
+            Ok(Command::Serve {
+                endpoint: Some("unix:///private/checker.sock".into()),
+                workers: std::num::NonZeroUsize::new(3).unwrap()
+            })
+        );
+        assert!(parse(&["--serve", "unix:///private/checker.sock"]).is_err());
+        for value in ["0", "257", "-1", "all"] {
+            assert!(parse(&["--serve", "--workers", value]).is_err());
+        }
     }
 
     #[test]

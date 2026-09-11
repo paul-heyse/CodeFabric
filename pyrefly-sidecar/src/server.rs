@@ -122,6 +122,8 @@ impl ActiveRun {
 
 #[derive(Clone)]
 struct Service {
+    workers: std::num::NonZeroUsize,
+    native_gate: Arc<Mutex<()>>,
     contexts: Arc<Mutex<BTreeMap<String, Arc<OpenContext>>>>,
     runs: Arc<Mutex<BTreeMap<String, Arc<ActiveRun>>>>,
     state_root: Arc<PathBuf>,
@@ -132,7 +134,11 @@ struct Service {
 }
 
 impl Service {
-    fn new(state_root: &Path, sandbox_profile_digest: &str) -> Result<Self, String> {
+    fn new(
+        state_root: &Path,
+        sandbox_profile_digest: &str,
+        workers: std::num::NonZeroUsize,
+    ) -> Result<Self, String> {
         if !state_root.is_absolute() {
             return Err("Pyrefly sidecar state root must be absolute".to_owned());
         }
@@ -143,6 +149,8 @@ impl Service {
             .map_err(|error| format!("create Pyrefly sidecar state root: {error}"))?;
         let (shutdown, _receiver) = tokio::sync::watch::channel(false);
         Ok(Self {
+            workers,
+            native_gate: Arc::new(Mutex::new(())),
             contexts: Arc::new(Mutex::new(BTreeMap::new())),
             runs: Arc::new(Mutex::new(BTreeMap::new())),
             state_root: Arc::new(state_root.to_owned()),
@@ -652,9 +660,13 @@ impl PyreflySidecar for Service {
                 ));
             }
             let semantic_root = self.state_root.join("contexts");
-            let semantic =
-                crate::pyrefly_link::SemanticContext::new(&semantic_root, &handle, preparation)
-                    .map_err(Status::internal)?;
+            let semantic = crate::pyrefly_link::SemanticContext::new(
+                &semantic_root,
+                &handle,
+                preparation,
+                self.workers,
+            )
+            .map_err(Status::internal)?;
             contexts.insert(
                 handle.clone(),
                 Arc::new(OpenContext {
@@ -779,6 +791,7 @@ impl PyreflySidecar for Service {
         ));
         let (sender, receiver) = tokio::sync::mpsc::channel(8);
         let sandbox_profile_digest = Arc::clone(&self.sandbox_profile_digest);
+        let native_gate = Arc::clone(&self.native_gate);
         let registration = ActiveRunRegistration {
             runs: Arc::clone(&self.runs),
             provider_run_id: start.provider_run_id.clone(),
@@ -848,6 +861,11 @@ impl PyreflySidecar for Service {
             };
             let progress_sender = sender.clone();
             let analysis = match tokio::task::spawn_blocking(move || {
+                // Several contexts may be resident, but only one native checker uses this
+                // process's allocated CPU share at once. The blocking owner keeps the gate.
+                let _native = native_gate
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 progress_sender
                     .blocking_send(Ok(analysis_started))
                     .map_err(|_| {
@@ -1238,7 +1256,11 @@ impl PyreflySidecar for Service {
     }
 }
 
-pub(crate) fn serve(socket: &Path, sandbox_profile_digest: &str) -> Result<(), String> {
+pub(crate) fn serve(
+    socket: &Path,
+    sandbox_profile_digest: &str,
+    workers: std::num::NonZeroUsize,
+) -> Result<(), String> {
     if socket.exists() {
         return Err("Pyrefly sidecar socket already exists".to_owned());
     }
@@ -1255,7 +1277,7 @@ pub(crate) fn serve(socket: &Path, sandbox_profile_digest: &str) -> Result<(), S
             .parent()
             .ok_or_else(|| "Pyrefly socket has no parent state root".to_owned())?
             .join("pyrefly-state");
-        let service = Service::new(&state_root, sandbox_profile_digest)?;
+        let service = Service::new(&state_root, sandbox_profile_digest, workers)?;
         let shutdown = service.shutdown_receiver();
         let listener = tokio::net::UnixListener::bind(socket)
             .map_err(|error| format!("bind Pyrefly sidecar socket: {error}"))?;
@@ -1484,7 +1506,12 @@ mod tests {
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&state_root);
-        let service = Service::new(&state_root, TEST_SANDBOX_PROFILE_DIGEST).unwrap();
+        let service = Service::new(
+            &state_root,
+            TEST_SANDBOX_PROFILE_DIGEST,
+            std::num::NonZeroUsize::new(3).unwrap(),
+        )
+        .unwrap();
         let shutdown = service.shutdown_receiver();
 
         let mut mismatch = hello();
@@ -1666,15 +1693,34 @@ mod tests {
 
     #[test]
     fn sidecar_context_trust_and_memory_faults() {
-        assert!(Service::new(Path::new("relative"), TEST_SANDBOX_PROFILE_DIGEST).is_err());
-        assert!(Service::new(Path::new("/tmp"), "sha256:not-a-digest").is_err());
+        assert!(
+            Service::new(
+                Path::new("relative"),
+                TEST_SANDBOX_PROFILE_DIGEST,
+                std::num::NonZeroUsize::new(3).unwrap()
+            )
+            .is_err()
+        );
+        assert!(
+            Service::new(
+                Path::new("/tmp"),
+                "sha256:not-a-digest",
+                std::num::NonZeroUsize::new(3).unwrap()
+            )
+            .is_err()
+        );
 
         let state_root = std::env::temp_dir().join(format!(
             "codefabric-pyrefly-registration-{}",
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&state_root);
-        let service = Service::new(&state_root, TEST_SANDBOX_PROFILE_DIGEST).unwrap();
+        let service = Service::new(
+            &state_root,
+            TEST_SANDBOX_PROFILE_DIGEST,
+            std::num::NonZeroUsize::new(3).unwrap(),
+        )
+        .unwrap();
         let run = active_run("context-bounded", 1);
         service
             .runs
@@ -1712,7 +1758,12 @@ mod tests {
         let state_root =
             std::env::temp_dir().join(format!("codefabric-pyrefly-drain-{}", std::process::id()));
         let _ = fs::remove_dir_all(&state_root);
-        let service = Service::new(&state_root, TEST_SANDBOX_PROFILE_DIGEST).unwrap();
+        let service = Service::new(
+            &state_root,
+            TEST_SANDBOX_PROFILE_DIGEST,
+            std::num::NonZeroUsize::new(3).unwrap(),
+        )
+        .unwrap();
         let shutdown = service.shutdown_receiver();
         let run = active_run("context-drain", 9);
         service

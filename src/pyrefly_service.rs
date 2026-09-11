@@ -527,6 +527,7 @@ impl SupervisedPyreflyWorkspace {
         job: &ProviderJob,
         output: std::os::fd::OwnedFd,
         cleanup_tasks: crate::cancellation::StructuredCancellationScope,
+        cpu: crate::resource_budget::native_cpu::NativeCpuActivity,
         launch: F,
     ) -> Result<Self, PyreflyServiceError>
     where
@@ -550,16 +551,20 @@ impl SupervisedPyreflyWorkspace {
         let worker_socket = socket.clone();
         let grace = Duration::from_millis(job.ceilings().cancellation_ack_millis());
         cleanup_tasks
-            .spawn_blocking_owned("process-owner", (native_envelope, output), move |cancel| {
-                run_owned_pyrefly_process(
-                    launch,
-                    &cancel,
-                    &worker_socket,
-                    grace,
-                    &worker_state,
-                    ready,
-                );
-            })
+            .spawn_blocking_owned(
+                "process-owner",
+                (native_envelope, output, cpu.process_owner()),
+                move |cancel| {
+                    run_owned_pyrefly_process(
+                        launch,
+                        &cancel,
+                        &worker_socket,
+                        grace,
+                        &worker_state,
+                        ready,
+                    );
+                },
+            )
             .await
             .map_err(PyreflyServiceError::process_admission)?;
         let sandbox_profile_digest = tokio::time::timeout(
@@ -2477,9 +2482,15 @@ mod tests {
         let descriptor =
             crate::secure_path::open_absolute_directory_nofollow(output.path()).unwrap();
         let pinned_path = PathBuf::from(format!("/proc/self/fd/{}", descriptor.as_raw_fd()));
-        let result = SupervisedPyreflyWorkspace::try_new(&job, descriptor, scope.clone(), || {
-            panic!("a cancelled admission must never invoke the process launcher");
-        })
+        let result = SupervisedPyreflyWorkspace::try_new(
+            &job,
+            descriptor,
+            scope.clone(),
+            Default::default(),
+            || {
+                panic!("a cancelled admission must never invoke the process launcher");
+            },
+        )
         .await;
         assert!(matches!(result, Err(PyreflyServiceError::Cancelled)));
         scope.cancel_and_join(Duration::from_secs(1)).await.unwrap();
@@ -3413,7 +3424,12 @@ mod tests {
                     host_executable: executable.clone(),
                     contained_executable: Path::new("/dependencies")
                         .join(executable.file_name().unwrap()),
-                    arguments: vec!["--serve".into(), "unix:///output/pyrefly.sock".into()],
+                    arguments: vec![
+                        "--serve".into(),
+                        "unix:///output/pyrefly.sock".into(),
+                        "--workers".into(),
+                        "2".into(),
+                    ],
                     environment: BTreeMap::from([("PATH".into(), "/usr/bin:/bin".into())]),
                     output_root: output_root.clone(),
                     limits: ProviderProcessLimits {
@@ -3443,6 +3459,7 @@ mod tests {
                 ProcessCommand::new(executable)
                     .arg("--serve")
                     .arg(format!("unix://{}", socket.display()))
+                    .args(["--workers", "2"])
                     .env("CODEFABRIC_SANDBOX_PROFILE_DIGEST", &sandbox_profile_digest)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
@@ -3900,6 +3917,22 @@ mod tests {
             .unwrap();
         let budget = job.resource_budget().clone();
         let baseline = budget.observation().used.memory_bytes;
+        let cpu_pool = crate::resource_budget::native_cpu::NativeCpuPool::new(
+            std::num::NonZeroUsize::new(1).unwrap(),
+            budget.clone(),
+        );
+        let cpu = crate::resource_budget::native_cpu::NativeCpuActivity::default();
+        cpu.begin(
+            cpu_pool
+                .admit(
+                    std::num::NonZeroUsize::new(1).unwrap(),
+                    &crate::cancellation::Cancellation::default(),
+                    Duration::from_secs(1),
+                )
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         let child_pid = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let observed_pid = Arc::clone(&child_pid);
         let release = Arc::new(AtomicBool::new(false));
@@ -3911,6 +3944,7 @@ mod tests {
             &job,
             pinned_output,
             cleanup.clone(),
+            cpu,
             move || {
                 let child = launcher.launch(
                     &ProviderLaunchRequest {
@@ -3955,6 +3989,11 @@ mod tests {
                     .await
                     .is_err()
             );
+            assert_eq!(
+                cpu_pool.observation().allocated_slots,
+                1,
+                "failed join keeps actual native ownership"
+            );
             release.store(true, Ordering::Release);
         } else {
             assert!(matches!(
@@ -3980,6 +4019,11 @@ mod tests {
             Err(rustix::io::Errno::SRCH)
         );
         assert_eq!(budget.observation().used.memory_bytes, baseline);
+        assert_eq!(
+            cpu_pool.observation().allocated_slots,
+            0,
+            "actual process-group completion releases CPU shares"
+        );
         assert_ne!(
             std::fs::read_link(&pinned_path).ok().as_ref(),
             Some(&output)

@@ -11,6 +11,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use thiserror::Error;
 
+#[cfg(feature = "daemon")]
+pub(crate) mod native_cpu;
+
 const DIMENSIONS: usize = 8;
 
 /// Explicit finite quantities; zero is valid for an unused reservation dimension.

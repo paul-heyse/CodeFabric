@@ -1,5 +1,7 @@
 //! A contained checker is a workspace accelerator; accepted Arrow owns every published fact.
 
+use crate::resource_budget::native_cpu::{NativeCpuActivity, NativeCpuLease};
+
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -51,6 +53,7 @@ impl Compatibility {
 }
 
 struct Retained {
+    cpu: NativeCpuActivity,
     process: SupervisedPyreflyWorkspace,
     output_root: PathBuf,
     compatibility: Compatibility,
@@ -161,7 +164,14 @@ impl PyreflyCache {
         executable: PathBuf,
         input_root: &Path,
         output_root: PathBuf,
+        cpu: NativeCpuLease,
     ) -> Result<PyreflyProviderRunResult, StartupPyreflyError> {
+        if cpu.workers().get() != usize::from(job.ceilings().max_workers()) {
+            return Err(PyreflyServiceError::Invalid(
+                "native CPU allocation differs from checker job".into(),
+            )
+            .into());
+        }
         let compatibility = Compatibility::read(job, &executable)?;
         if self.retained.as_mut().is_some_and(|entry| {
             !entry.reusable
@@ -174,6 +184,7 @@ impl PyreflyCache {
         }) {
             self.retire().await?;
         }
+        let mut cpu = Some(cpu);
         if self.retained.is_none() {
             let scope = self.scope.as_ref().ok_or_else(|| {
                 PyreflyServiceError::ProcessTermination(
@@ -196,8 +207,21 @@ impl PyreflyCache {
             // Prior failed process output is recomputable. Clear it only before a new
             // process owns this private directory, after any prior retained owner joined.
             clear_checker_output(&output_root)?;
-            let process = launch(job, executable, input_root, output_root.clone(), scope).await?;
+            let activity = NativeCpuActivity::default();
+            activity
+                .begin(cpu.take().expect("one new activity"))
+                .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))?;
+            let process = launch(
+                job,
+                executable,
+                input_root,
+                output_root.clone(),
+                scope,
+                activity.clone(),
+            )
+            .await?;
             self.retained = Some(Retained {
+                cpu: activity,
                 process,
                 output_root,
                 compatibility,
@@ -213,6 +237,12 @@ impl PyreflyCache {
             .retained
             .as_mut()
             .expect("created or retained workspace checker");
+        if let Some(cpu) = cpu {
+            entry
+                .cpu
+                .begin(cpu)
+                .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))?;
+        }
         entry.reusable = false;
         let result = analyze_pyrefly_uds(&mut entry.process, job, &input).await;
         // Retain only a complete accepted observation. Cancellation or partial extraction may
@@ -221,6 +251,7 @@ impl PyreflyCache {
             .as_ref()
             .is_ok_and(|result| result.accepted().is_some())
         {
+            entry.cpu.complete();
             entry.reusable = true;
             entry.last_used = Instant::now();
         } else {
@@ -254,6 +285,7 @@ async fn launch(
     input_root: &Path,
     output_root: PathBuf,
     scope: &StructuredCancellationScope,
+    cpu: NativeCpuActivity,
 ) -> Result<SupervisedPyreflyWorkspace, StartupPyreflyError> {
     use crate::provider_sandbox::{
         CompiledProviderSeccomp, GeneratedSandboxProfile, ProviderLaunchRequest,
@@ -282,7 +314,12 @@ async fn launch(
     let request = ProviderLaunchRequest {
         contained_executable: Path::new("/dependencies").join(executable.file_name().unwrap()),
         host_executable: executable,
-        arguments: vec!["--serve".into(), "unix:///output/pyrefly.sock".into()],
+        arguments: vec![
+            "--serve".into(),
+            "unix:///output/pyrefly.sock".into(),
+            "--workers".into(),
+            job.ceilings().max_workers().to_string(),
+        ],
         environment: BTreeMap::from([("PATH".into(), "/usr/bin:/bin".into())]),
         output_root,
         limits: ProviderProcessLimits {
@@ -297,7 +334,7 @@ async fn launch(
         },
     };
     let process =
-        match SupervisedPyreflyWorkspace::try_new(job, output, cleanup.clone(), move || {
+        match SupervisedPyreflyWorkspace::try_new(job, output, cleanup.clone(), cpu, move || {
             ProviderSandboxLauncher::new(SandboxCapabilityMatrix::probe_current_host()).launch(
                 &request,
                 &profile,
@@ -325,6 +362,7 @@ async fn launch(
     _: &Path,
     _: PathBuf,
     _: &StructuredCancellationScope,
+    _: NativeCpuActivity,
 ) -> Result<SupervisedPyreflyWorkspace, StartupPyreflyError> {
     Err(PyreflyServiceError::TrustUnavailable.into())
 }

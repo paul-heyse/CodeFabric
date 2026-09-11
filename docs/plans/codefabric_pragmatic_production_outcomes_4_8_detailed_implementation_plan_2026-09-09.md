@@ -1,6 +1,9 @@
 # CodeFabric: detailed implementation of remaining outcomes 4–8
 
-Created 2026-09-09 against `126cf71f`; expanded design committed in `b2a97b9c`. Updated 2026-09-10 through implementation commit `722b57d4`: P01/P02 initial exits, P03 first-release query acceptance and the implemented P04 continuations. Work is stopped at the user's request; §10 records the handoff and remaining package order.
+Created 2026-09-09 against `126cf71f`; expanded design committed in `b2a97b9c`.
+Updated 2026-09-11 through `008cbad0` and the native CPU ownership continuation below.
+P01/P02 initial exits and P03's first-release query boundary are delivered. P04 is active at the
+user's request, followed by P05; §10 records the remaining package order.
 
 This document expands outcomes 4–8 of the [production implementation plan](codefabric_pragmatic_production_implementation_plan.md). It is the detailed execution portion of that same backlog, not a competing plan or a new workflow. [STATUS](../../STATUS.md) remains the handoff for demonstrated behavior. Execute the cross-cutting packages in §3.3 order. The status notes distinguish demonstrated behavior and remaining acceptance; writing or updating this plan is not implementation evidence.
 
@@ -1928,6 +1931,37 @@ pass. All-target Clippy completes with the warning backlog and function-size adv
 private-field/redundant-closure diagnostics are corrected and included in the final focused build.
 Native checks overlapped this installed run, so its duration is not an isolated performance sample.
 
+**Shared native CPU ownership continuation (2026-09-11).** The existing workspace resource
+coordinator now owns finite native CPU slots through Tokio's owned FIFO semaphore permits. Each
+checker/compiler receives an explicit deterministic worker width, capped by the existing native
+profile and half the available cooperative capacity. The capacity leaves two logical workers for
+source/control responsiveness where the host permits; it is not a bound on kernel CPU time, native
+helper threads or all DataFusion execution. Queue bookkeeping uses the shared resource budget,
+with cancellation and an admission deadline. Stable widths avoid contention-dependent Cargo context
+identity and repeated reconstruction of retained checker pools.
+
+The actual Cargo `--jobs`/`CARGO_BUILD_JOBS` selection is captured in effective context before
+compilation, because build scripts observe `NUM_JOBS`. Launch construction rejects a conflicting
+resource width. Pyrefly requires `--workers` and passes it to native `Query`/`ThreadCount::NumThreads`;
+its retained service serializes native analysis across resident contexts. Idle checkers release CPU
+slots after a complete response. The actual process owner retains the lease during cancelled
+construction, partial/error responses and failed joins. Compiler process ownership likewise carries
+the CPU lease through process-group termination. Compact preparation costs report capacity, peak,
+admissions and remaining allocated slots. Independent context dispatch and broader priority/backlog
+integration are the next scheduling work; target execution remains serialized in this checkpoint.
+
+Validation: 30 focused containment/context/CPU checks pass in 1.042 s (run
+`c19897c9-8723-499f-81c5-b83cb4425365`, `/tmp/codefabric-p04-native-cpu-context-focused.log`).
+The final deterministic FIFO adjustment passes the same 30 checks in 1.090 s (run
+`ffc30dc8-6d12-40aa-ab18-5956cf43f6b3`, `/tmp/codefabric-p04-native-cpu-final-focused.log`). The preceding installed mixed
+raw-path/live/clean/reopen scenario passes in 546.517 s (run
+`8b7c4726-9558-4bf8-a83c-c216df344dc6`, `/tmp/codefabric-p04-native-cpu-installed.log`),
+including both actual provider lanes and zero retained active CPU slots after each preparation.
+That installed run precedes the context-identity/deterministic-width refinement; integrated
+qualification continues with context scheduling. Sidecar strict checks and all 43 tests pass,
+and its installed binary has been rebuilt. Root all-target Clippy completes with the existing
+warning backlog; featureless checking passes. No full suite, doctest or performance claim is made.
+
 **Remaining implementation progression (E02/E04/E05/E12/E21/E22; P04).**
 
 1. Extend the delivered workspace-owned parser/checker/toolchain caches to retained Cargo unit/fact
@@ -1952,8 +1986,8 @@ Native checks overlapped this installed run, so its duration is not an isolated 
    expected units, actual compilation/artifact events and produced owners explicitly; absent fresh
    facts remain incomplete until valid retained-fact admission or owned compiler replay is proved.
    Schedule independent contexts using allocated CPU slots; account Cargo/rustc parallelism and
-   Pyrefly's pool together. The current fixed 16-thread checker setting becomes a context allocation
-   from the shared scheduler, with broad useful defaults preserved.
+   Pyrefly's pool together. Explicit deterministic shared allocations and actual process-owned
+   leases are now implemented above; independent dispatch and priority/backlog integration remain.
 4. Extend the current coalescing coordinator with bounded priority classes for source/status/control,
    interactive required families and background convergence. Bound maximum coalescing delay and age
    lower-priority jobs so repeated interactive requests do not starve background completion. Coalesce
@@ -2926,9 +2960,9 @@ The remaining **P04** progression is:
    private target outputs. A native Cargo `Fresh` result can skip the extractor wrapper and produce
    no current facts; qualify owned replay/retained-fact admission before enabling target reuse.
    Current immutable toolchain capture reuse is already delivered (§4A/§6C/E01/E02).
-4. Allocate native CPU shares from the shared scheduler across effective contexts. Rust target work
-   is still serialized and Pyrefly still selects 16 native checker threads; current job-count
-   budgets do not allocate those CPU slots. Add bounded fair coalescing/backlog with aging and
+4. Schedule independent contexts using the now implemented shared native CPU allocations. Cargo
+   and Pyrefly receive deterministic explicit widths with actual process-owned leases; Rust target
+   work remains serialized. Add bounded fair coalescing/backlog with aging and
    interactive/source/control responsiveness, preserving useful workstation defaults (§6C/E12).
 5. Extend exact nonempty unchanged input/owner reuse and consumer-based persistence. Integrate
    remaining owner retention and measured eviction with P12 early enough to avoid full-ontology

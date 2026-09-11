@@ -891,6 +891,7 @@ fn build_fresh_native_source(
             .map_err(|error| step("rust-toolchain-cache-owner", error))?
             .observation(),
     );
+    costs.native_cpu(workspace_resources.scheduler().native_cpu_observation());
     costs.start("provider-composition");
     let authority = ProductionProviderAuthority::try_new(
         ExactProviderLaneAuthority::try_new(

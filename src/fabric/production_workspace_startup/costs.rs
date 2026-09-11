@@ -31,6 +31,7 @@ struct Report {
     workspace_pyrefly_cache: Option<super::pyrefly_cache::PyreflyCacheObservation>,
     workspace_rust_toolchain_cache:
         Option<super::rustc::toolchain_cache::ToolchainCacheObservation>,
+    native_cpu: Option<crate::resource_budget::native_cpu::NativeCpuObservation>,
     finished: bool,
     phases: Vec<PhaseCost>,
 }
@@ -60,6 +61,7 @@ impl PreparationCosts {
                 workspace_syntax_cache: None,
                 workspace_pyrefly_cache: None,
                 workspace_rust_toolchain_cache: None,
+                native_cpu: None,
                 finished: false,
                 phases: Vec::with_capacity(12),
             },
@@ -84,6 +86,13 @@ impl PreparationCosts {
         observation: super::pyrefly_cache::PyreflyCacheObservation,
     ) {
         self.report.workspace_pyrefly_cache = Some(observation);
+    }
+
+    pub(super) fn native_cpu(
+        &mut self,
+        observation: crate::resource_budget::native_cpu::NativeCpuObservation,
+    ) {
+        self.report.native_cpu = Some(observation);
     }
 
     pub(super) fn start(&mut self, phase: &'static str) {
