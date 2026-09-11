@@ -463,6 +463,18 @@ impl StructuredCancellationScope {
                     failure.get_or_insert(error);
                 }
                 Err(_) => {
+                    let unfinished = tasks
+                        .iter()
+                        .filter(|(_, task)| !task.abort.is_finished())
+                        .count();
+                    tracing::warn!(scope = %self.path, unfinished, cleanup_millis = cleanup_reserve.as_millis(), "structured task cleanup deadline elapsed");
+                    for (key, task) in tasks
+                        .iter()
+                        .filter(|(_, task)| !task.abort.is_finished())
+                        .take(8)
+                    {
+                        tracing::warn!(scope = %self.path, task = %key, mode = ?task.mode, "task remains owned after cleanup deadline");
+                    }
                     for (_, task) in &tasks {
                         if task.mode == TaskCancellationMode::AbortableAsync {
                             task.abort.abort();

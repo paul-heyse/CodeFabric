@@ -2963,6 +2963,177 @@ fn selected_source_pins(
 }
 
 #[test]
+fn shutdown_during_semantic_delta_publication_joins_workspace_owners() {
+    exercise_semantic_publication_shutdown(PublicationShutdownProbe::Python);
+}
+
+#[test]
+fn mixed_semantic_publication_shutdown_joins_workspace_owners() {
+    exercise_semantic_publication_shutdown(PublicationShutdownProbe::Mixed);
+}
+
+#[test]
+fn timed_out_client_during_publication_drains_and_reopens_exactly() {
+    exercise_semantic_publication_shutdown(PublicationShutdownProbe::ClientTimeout);
+}
+
+#[derive(Clone, Copy)]
+enum PublicationShutdownProbe {
+    Python,
+    Mixed,
+    ClientTimeout,
+}
+
+fn exercise_semantic_publication_shutdown(probe: PublicationShutdownProbe) {
+    let mixed = !matches!(probe, PublicationShutdownProbe::Python);
+    let fixture = ProductionFixture::new();
+    if mixed {
+        let root = Path::new(&fixture.workspace.root_path_display);
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("Cargo.toml"), "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[lib]\ntest = false\ndoctest = false\n").unwrap();
+        fs::write(
+            root.join("Cargo.lock"),
+            "version = 4\n[[package]]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn leaf() -> u32 { 1 }\npub fn caller() -> u32 { leaf() }\n",
+        )
+        .unwrap();
+    }
+    let stack = InstalledProductionStack::build();
+    fixture.bind_installed_adapter(&stack, "policy-one", 0x11);
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let source = all_activation_control_rows(&fixture)
+        .into_iter()
+        .max_by_key(|row| row.row().ordinal.get())
+        .unwrap();
+    let published_epoch = source.row().pins.epoch.as_bytes().iter().fold(
+        String::with_capacity(32),
+        |mut value, byte| {
+            std::fmt::Write::write_fmt(&mut value, format_args!("{byte:02x}"))
+                .expect("format epoch");
+            value
+        },
+    );
+    wait_for_unselected_delta_writes(&fixture, &published_epoch, if mixed { 100 } else { 8 });
+    assert_eq!(
+        all_activation_control_rows(&fixture).len(),
+        1,
+        "shutdown occurs before semantic activation"
+    );
+    if matches!(probe, PublicationShutdownProbe::ClientTimeout) {
+        timeout_semantic_query(&fixture, &stack);
+    }
+    supervisor.stop();
+    let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    let reopened = wait_for_semantic_activation_with_timeout(&fixture, Duration::from_secs(180));
+    assert_eq!(
+        source.row().pins.source_generation,
+        reopened.row().pins.source_generation
+    );
+    let request = semantic_request(
+        &fixture.workspace.public_id(),
+        "unused",
+        "Python function declarations",
+    );
+    let result = public_query(&fixture, &stack, "cancelled-publication-reopened", request);
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["name"], "answer");
+    if mixed {
+        let request = semantic_request(
+            &fixture.workspace.public_id(),
+            "unused",
+            "Rust function declarations",
+        );
+        let result = public_query(
+            &fixture,
+            &stack,
+            "cancelled-publication-rust-reopened",
+            request,
+        );
+        assert_eq!(
+            result
+                .rows
+                .iter()
+                .map(|row| row["name"].as_str().unwrap())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["fixture::caller", "fixture::leaf"])
+        );
+    }
+    supervisor.stop();
+}
+
+fn wait_for_unselected_delta_writes(
+    fixture: &ProductionFixture,
+    published_epoch: &str,
+    committed_tables: usize,
+) {
+    let deadline = Instant::now() + Duration::from_secs(180);
+    loop {
+        let writing = fs::read_dir(fixture.fabric_workspace_root().join("epochs"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name() != published_epoch)
+            .any(|entry| {
+                fs::read_dir(entry.path().join("relations")).is_ok_and(|tables| {
+                    tables
+                        .filter_map(Result::ok)
+                        .filter(|table| {
+                            table
+                                .path()
+                                .join("_delta_log/00000000000000000001.json")
+                                .is_file()
+                        })
+                        .take(committed_tables)
+                        .count()
+                        == committed_tables
+                })
+            });
+        if writing {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "semantic candidate did not start real Delta writes"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn timeout_semantic_query(fixture: &ProductionFixture, stack: &InstalledProductionStack) {
+    let mut request = semantic_request(
+        &fixture.workspace.public_id(),
+        "request:timeout-during-publication",
+        "Python function declarations",
+    );
+    request["freshness"] = json!({"policy": "require_semantic_current", "deadline_ms": 120_000});
+    let scenario = modern_client_scenario(
+        fixture,
+        stack,
+        "policy-one",
+        json!([]),
+        json!([
+            {"id": "query", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": request, "delivery": "resource"}, "timeout_seconds": 0.5}
+        ]),
+    );
+    let path = write_modern_client_scenario(fixture, "timeout-during-publication", &scenario);
+    let output = run_modern_client(stack, &path);
+    assert!(
+        !output.status.success(),
+        "client must time out before semantic completion"
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["failure_step"], "query", "{report}");
+    assert_eq!(report["failure_class"], "MCPError", "{report}");
+    assert!(
+        report["failure_public_error"].is_null(),
+        "client transport timeout, not a daemon public failure: {report}"
+    );
+}
+
+#[test]
 fn source_current_publication_fences_delayed_semantics_and_resumes_after_restart() {
     use arrow::array::StringArray;
     let fixture = ProductionFixture::with_source_and_activation_startup_fault(

@@ -18,6 +18,9 @@ CASES = {
     "python-serving": "wp63_beh_real_source_to_installed_fastmcp_is_causal_and_epoch_coherent",
     "reopen": "wp63_ops_installed_restart_reconstructs_only_exact_activation_authority",
     "cancellation": "wp47_ops_real_progress_cancel_restart_reconnect_and_two_agent_isolation",
+    "publication-shutdown": "live_updates::shutdown_during_semantic_delta_publication_joins_workspace_owners",
+    "mixed-publication-shutdown": "live_updates::mixed_semantic_publication_shutdown_joins_workspace_owners",
+    "client-timeout-shutdown": "live_updates::timed_out_client_during_publication_drains_and_reopens_exactly",
     "rust-failure": "pragmatic_rust_target_failure_retains_other_targets",
     "first-release-queries": (
         "first_release::pragmatic_plan_corpus_first_four_forms_and_independent_expectations_survive_reopen"
@@ -142,6 +145,8 @@ def main(argv=None) -> int:
                     in {
                         "first-release-queries",
                         "mixed-clean-live",
+                        "mixed-publication-shutdown",
+                        "client-timeout-shutdown",
                         "python-poll-live",
                         "python-stubs-live",
                         "python-roots-live",

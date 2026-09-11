@@ -1740,9 +1740,26 @@ Default/featureless checks and final affected Clippy pass, including changed-fun
 The first installed invocation timed out during initial semantic writes. Shutdown then exposed
 native executor cancellation panics and an exhausted two-second daemon task-drain allowance. That
 recovery failure remains open; the successful comparison now waits for exact semantic source
-selection before querying. A separate real-publication shutdown/reopen case is being implemented
-to isolate it. STATUS records exact commands, phase observations and validation limits. This
+selection before querying. Separate real-publication shutdown/reopen probes pass as recorded below,
+but have not reproduced that earlier failure. STATUS records commands and validation limits. This
 checkpoint does not close P04 or implement Cargo-unit target reuse.
+
+**P04 publication-drain continuation (2026-09-10; accepted narrow correction).** The supervisor now
+allows the existing finite 30-second accepted-work shutdown bound for `Drain`, whose acknowledgement
+follows up to ten seconds of accepted-query cleanup in the daemon. Ordinary control IO retains its
+two-second deadline. This follows the Tokio/cancellation and ordered-shutdown ownership boundaries
+in the Rust gRPC daemon reference §§27 and 37; it adds no second task tracker or detached cleanup.
+Cleanup-deadline diagnostics report at most eight unfinished task owners; cancellation/join policy
+and native executor dependencies are unchanged.
+
+Three focused protocol/ownership cases pass in 0.063 s. Installed Python-only and mixed publication
+shutdown/reopen probes pass in 126.463/278.169 s before the correction. With the correction, a mixed
+probe additionally forces an installed-client transport timeout during real unselected Delta writes,
+then cleanly joins and reopens the same source generation with expected Python/Rust facts (273.319 s).
+Its captured stderr has no native executor panic; this is bounded recovery evidence, not resolution
+of the unreproduced earlier cleanup cascade. Product selectors are `publication-shutdown`,
+`mixed-publication-shutdown` and `client-timeout-shutdown`. Default/featureless checks, final affected
+Clippy and all 48 wrapper tests pass; STATUS retains logs/configuration and the original failure.
 
 **Remaining implementation progression (E02/E04/E05/E12/E21/E22; P04).**
 

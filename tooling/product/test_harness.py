@@ -179,6 +179,8 @@ def test_golden_stops_and_records_not_run_after_failure(tmp_path, monkeypatch):
         "python-live",
         "python-poll-live",
         "mixed-clean-live",
+        "mixed-publication-shutdown",
+        "client-timeout-shutdown",
         "python-context-live",
         "python-stubs-live",
         "python-roots-live",

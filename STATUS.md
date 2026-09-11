@@ -248,11 +248,34 @@ Affected Clippy is clean (`/tmp/codefabric-p04-toolchain-cache-clippy-v3.jsonl`)
 function headers after extracting pending-target setup and the test cost reader. The read buffer
 is bounded on the heap and pointer assertions are explicit. Documentation checks pass.
 
-The next P04 continuation is reproducing the publication-shutdown failure above. A new installed
-case stops the supervisor only after an unselected semantic candidate has real Delta data commits,
-then requires a clean join and exact-generation reopen. Compact cleanup-deadline diagnostics name
-at most eight remaining owned tasks. That diagnostic/recovery work is unaccepted; P04 and P05–P14
-remain open, including Cargo target reuse, full input topology/invalidation and shared scheduling.
+The publication-shutdown continuation corrects a separate confirmed control-protocol timeout:
+the daemon drains accepted queries for up to ten seconds before acknowledging `Drain`, while the
+supervisor previously used its ordinary two-second IO allowance. `Drain` now uses the existing
+30-second accepted-work shutdown allowance, with ordinary control deadlines unchanged. A delayed
+authenticated acknowledgement regression, ordinary timeout/generation retirement and cooperative
+cleanup ownership all pass (three cases, 0.063 s; `/tmp/codefabric-p04-drain-focused.log`). Compact
+cleanup-deadline diagnostics name at most eight remaining owned tasks without changing join policy.
+
+Three installed probes stop after real, unselected semantic Delta data commits and require clean
+supervisor joins, same-source-generation reopen and independently expected public facts. Python-only
+publication passes in 126.463 s (`/tmp/codefabric-p04-publication-shutdown-diagnostic.log`); mixed
+Python/Rust publication passes in 278.169 s
+(`/tmp/codefabric-p04-mixed-publication-shutdown-diagnostic.log`). Those two probes predate the
+control correction. The final mixed probe additionally forces a 0.5-second installed-client transport
+timeout during publication and passes in 273.319 s with the correction
+(`/tmp/codefabric-p04-client-timeout-publication-shutdown.log`, nextest
+`3bfc2f01-3645-43ef-855a-a932c06d5270`). Its captured success stderr contains no native executor
+panic. These checks did not reproduce the earlier failing cleanup cascade; its cause remains open.
+
+The runs use `just root-test-incremental -j 1` with exact nonempty selectors, the installed extractor
+and sidecar, and a delegated user-systemd scope on Linux, against `90e372ca` plus this continuation.
+`just golden --case publication-shutdown`, `mixed-publication-shutdown` and
+`client-timeout-shutdown` expose the cases. Default/featureless `just root-check` passes
+(`/tmp/codefabric-p04-publication-drain-root.log`), and final affected Clippy is clean, including
+modified function headers (`/tmp/codefabric-p04-publication-drain-clippy-final.jsonl`). All 48
+product-harness tests pass in 0.79 s with focused Ruff checks clean
+(`/tmp/codefabric-p04-publication-drain-harness.log`). No full CI or doctest claim is made.
+Continue P04 input topology/invalidation and retained-context scheduling; P04 and P05–P14 remain open.
 
 ## P03 first-release query boundary delivered
 

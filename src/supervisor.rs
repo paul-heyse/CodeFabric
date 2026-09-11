@@ -1434,6 +1434,23 @@ struct DaemonControlClient {
 }
 
 impl DaemonControlClient {
+    async fn drain_accepted_work(&self) -> Result<(), SupervisorError> {
+        // Drain acknowledgement follows accepted-query cancellation and joins. It can outlive
+        // ordinary control IO, and must fit the supervisor's bounded shutdown allowance.
+        let acknowledgement = self
+            .transact_with_timeout(
+                &DaemonControlRequest::Drain {
+                    request_id: request_id("drain")?,
+                },
+                DAEMON_ACCEPTED_WORK_DRAIN_TIMEOUT,
+            )
+            .await?;
+        if !acknowledgement.accepted || acknowledgement.code != "DRAIN_ACCEPTED" {
+            return Err(SupervisorError::Control(acknowledgement.code));
+        }
+        Ok(())
+    }
+
     fn is_available(&self) -> bool {
         self.available.load(Ordering::Acquire)
     }
@@ -2115,17 +2132,10 @@ async fn drain_shutdown_and_join_daemon(
     launches: &Mutex<SupervisorLaunchRegistry>,
 ) -> Result<(), SupervisorError> {
     retire_all_launches_for_shutdown(launches, &daemon.control).await?;
-    let drain = DaemonControlRequest::Drain {
-        request_id: request_id("drain")?,
-    };
-    let acknowledgement = daemon.control.transact(&drain).await?;
-    if !acknowledgement.accepted || acknowledgement.code != "DRAIN_ACCEPTED" {
-        return Err(SupervisorError::Control(acknowledgement.code));
-    }
+    daemon.control.drain_accepted_work().await?;
     // Shutdown is queued only after the authenticated drain acknowledgement. The daemon closes
-    // query admission and lets already-accepted Tonic work finish before reading and
-    // acknowledging this second record; the extended bound is therefore the accepted-work drain
-    // deadline, not an unbounded control-channel exception.
+    // query admission and drains workspace publication before reading and acknowledging this
+    // second record; both stages have the explicit finite shutdown allowance.
     let shutdown = DaemonControlRequest::Shutdown {
         request_id: request_id("shutdown")?,
     };
@@ -4921,6 +4931,48 @@ mod tests {
         assert!(envelope.session_expires_at_unix_ms > unix_millis().unwrap());
         assert_eq!(launches.lock().await.active.len(), 1);
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn accepted_work_drain_waits_beyond_control_io_without_retiring_the_generation() {
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let key = DaemonControlKey([0x79; 32]);
+        let control = Arc::new(DaemonControlClient {
+            state: Mutex::new(DaemonControlClientState {
+                stream: client,
+                next_sequence: 1,
+            }),
+            workspace_id: [0x22; 16],
+            daemon_generation: 7,
+            supervisor_generation: 9,
+            key: key.clone(),
+            available: AtomicBool::new(true),
+            io_timeout: Duration::from_millis(10),
+        });
+        let task = {
+            let control = Arc::clone(&control);
+            tokio::spawn(async move { control.drain_accepted_work().await })
+        };
+        let record: DaemonControlRecord = read_line(&mut server, CONTROL_MAX_BYTES).await.unwrap();
+        assert!(matches!(record.request, DaemonControlRequest::Drain { .. }));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !task.is_finished(),
+            "accepted-work cleanup must outlive the ordinary IO allowance"
+        );
+        let acknowledgement = DaemonControlAcknowledgement::new(
+            &key,
+            &record.header,
+            record.request.request_id(),
+            true,
+            "DRAIN_ACCEPTED",
+        )
+        .unwrap();
+        write_line(&mut server, &acknowledgement, CONTROL_MAX_BYTES)
+            .await
+            .unwrap();
+        task.await.unwrap().unwrap();
+        assert!(control.is_available());
     }
 
     #[tokio::test]
