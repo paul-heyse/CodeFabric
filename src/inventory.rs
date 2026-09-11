@@ -1015,26 +1015,21 @@ pub(crate) fn merkle_inventory_digest(records: &[SourceInventoryRecord]) -> [u8;
 
 fn merkle_from_leaves(leaves: impl IntoIterator<Item = (Vec<u8>, [u8; 32])>) -> [u8; 32] {
     let mut directories = BTreeMap::<Vec<u8>, Vec<(Vec<u8>, u8, [u8; 32])>>::new();
-    let mut leaf_paths = Vec::new();
+    let mut directory_paths = BTreeSet::from([Vec::new()]);
     for (path, digest) in leaves {
         let (parent, name) = split_parent(&path);
+        let mut ancestor = parent.clone();
+        // Every inserted directory already has all of its ancestors inserted. Stop at the
+        // first shared ancestor instead of scanning every known directory for every leaf.
+        while directory_paths.insert(ancestor.clone()) {
+            ancestor = split_parent(&ancestor).0;
+        }
         directories
             .entry(parent)
             .or_default()
             .push((name, 1, digest));
-        leaf_paths.push(path);
     }
-    let mut directory_paths = directories.keys().cloned().collect::<Vec<_>>();
-    directory_paths.push(Vec::new());
-    for path in leaf_paths {
-        let mut parent = split_parent(&path).0;
-        while !parent.is_empty() {
-            if !directory_paths.contains(&parent) {
-                directory_paths.push(parent.clone());
-            }
-            parent = split_parent(&parent).0;
-        }
-    }
+    let mut directory_paths = directory_paths.into_iter().collect::<Vec<_>>();
     directory_paths.sort_by_key(|path| {
         std::cmp::Reverse(if path.is_empty() {
             0
@@ -1042,7 +1037,6 @@ fn merkle_from_leaves(leaves: impl IntoIterator<Item = (Vec<u8>, [u8; 32])>) -> 
             path.split(|byte| *byte == b'/').count()
         })
     });
-    directory_paths.dedup();
     for path in directory_paths {
         let mut children = directories.remove(&path).unwrap_or_default();
         children.sort_by(|left, right| left.0.cmp(&right.0));
@@ -1151,6 +1145,39 @@ mod tests {
     use crate::identity::PlatformCode;
     use crate::secure_path::open_workspace_root;
     use crate::workspace_registry::{WorkspaceRegistry, WorkspaceSourceRegistration};
+
+    #[test]
+    fn large_inventory_merkle_preserves_shared_ancestors_and_raw_path_order() {
+        let mut leaves = (0..16_384_u64)
+            .map(|index| {
+                (
+                    format!("packages/p{:04}/src/deep/m{:02}.rs", index / 8, index % 8)
+                        .into_bytes(),
+                    crate::integrity::digest_bytes(&index.to_be_bytes()),
+                )
+            })
+            .collect::<Vec<_>>();
+        leaves.push((b"README.md".to_vec(), [1; 32]));
+        leaves.push((b"packages/\xff/src/a.py".to_vec(), [2; 32]));
+        let started = Instant::now();
+        let digest = merkle_from_leaves(leaves.clone());
+        // Frozen from the pre-optimization implementation at 20230937. The selected source
+        // identity must remain compatible across process restart and ordering differences.
+        assert_eq!(
+            digest,
+            [
+                231, 215, 28, 199, 98, 48, 213, 58, 146, 198, 59, 58, 186, 73, 92, 96, 205, 22,
+                229, 158, 97, 25, 77, 232, 163, 201, 18, 12, 175, 91, 27, 173,
+            ]
+        );
+        eprintln!(
+            "inventory Merkle: leaves={} elapsed={:?} digest={digest:?}",
+            leaves.len(),
+            started.elapsed()
+        );
+        leaves.reverse();
+        assert_eq!(merkle_from_leaves(leaves), digest);
+    }
 
     #[test]
     fn rt_cpg_wp79_metadata_exhaustion_and_foreign_owner_never_close_inventory() {

@@ -2846,6 +2846,8 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
         b"def original():\n    return 1\n",
         Some("hold_semantic_update_publication"),
     );
+    install_separate_git_metadata(&fixture);
+    let root = Path::new(&fixture.workspace.root_path_display);
     let configuration = fs::read_to_string(&fixture.config_path).unwrap().replace(
         "[static_config]",
         "[static_config]\nsource_watch_profile = \"poll\"",
@@ -2880,7 +2882,6 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
     };
     let (initial, names) = query("poll-initial");
     assert_eq!(names, BTreeSet::from(["original".to_owned()]));
-    let root = Path::new(&fixture.workspace.root_path_display);
     fs::create_dir_all(root.join("new/nested")).unwrap();
     fs::write(
         root.join("new/nested/added.py"),
@@ -2940,6 +2941,20 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
     );
     assert_eq!(reopened["source_generation"], updated["source_generation"]);
     supervisor.stop();
+}
+
+fn install_separate_git_metadata(fixture: &ProductionFixture) {
+    // Real Git administration stays outside captured CPG inputs while the production
+    // watcher resolves its metadata topology through the selected workspace's .git file.
+    let root = Path::new(&fixture.workspace.root_path_display);
+    drop(gix::init(root).unwrap());
+    let metadata = fixture.state.join("observed-git");
+    fs::rename(root.join(".git"), &metadata).unwrap();
+    fs::write(
+        root.join(".git"),
+        format!("gitdir: {}\n", metadata.display()),
+    )
+    .unwrap();
 }
 
 fn selected_source_pins(

@@ -1593,6 +1593,18 @@ inclusion policy and explicitly selected external policy/dependency roots remain
 do not use the older full-repository gix dirwalk as a substitute for the bounded captured inventory,
 or drop ignored-but-admitted compiler inputs. STATUS records exact checks and initial failures.
 
+**P04 census hashing continuation (2026-09-10).** Shared-ancestor discovery now uses a `BTreeSet`
+instead of repeatedly searching a growing directory vector for every source leaf. Each newly
+discovered ancestor is inserted once; encountering an existing ancestor ends that ascent because
+its parents were already inserted. Bottom-up child sorting, raw path bytes and digest framing stay
+unchanged. The leaf-path copy vector is removed; no inventory limit or source capability is reduced.
+The 16,386-leaf compatibility fixture retains its frozen pre-change and reversed-input digest; the
+observed local hashing step drops from 521.957 ms to 27.748 ms. All seven inventory tests pass.
+The installed polling/source-publication/reopen case also passes with a separate Git administrative
+directory outside captured source (85.998 s). This is exact identity/correctness and synthetic local
+cost evidence, not representative end-to-end performance or complete Git inclusion acceptance.
+STATUS records commands/configuration and limits; P04/P14 still own full workload measurement.
+
 **Remaining implementation progression (E06/E10; P01/P04).**
 
 1. Derive source inventory and watch topology from one captured inclusion policy. Watch selected

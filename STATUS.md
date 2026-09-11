@@ -301,6 +301,31 @@ Default/featureless `just root-check` and affected Clippy pass, including modifi
 Documentation navigation, focused spelling and diff checks pass. This continuation is based on
 `8a92d019`; no full CI, doctest, semantic Git acceptance or P04 closure is claimed.
 
+The census hashing continuation replaces a repeated linear search through all known directories
+with a `BTreeSet` of discovered ancestors. Once an ancestor exists, its parents already exist,
+so ancestor discovery stops there. Bottom-up directory hashing, byte ordering and framing are
+unchanged; the separate vector of all leaf paths is removed. A 16,386-leaf fixture including
+shared ancestors and a non-UTF-8 path preserves its frozen pre-change digest and reversed-input
+digest. Its measured hashing step is 521.957 ms before and 27.748 ms after, in the local test profile
+with one test worker (`/tmp/codefabric-p04-inventory-merkle-before.log`,
+`/tmp/codefabric-p04-inventory-merkle-after.log`). This is a synthetic hashing sample, not a
+whole-census or representative CPG throughput claim.
+
+All seven inventory cases pass in 0.292 s, including real secure capture, source-generation fences,
+metadata exhaustion and byte-native identities. The existing installed `python-poll-live` case
+now also uses a real separate Git administrative directory outside captured source. Background
+nested-source publication and exact-generation reopen pass in 85.998 s
+(`/tmp/codefabric-p04-git-poll-merkle-installed.log`, nextest
+`4df82f22-3395-4774-8bd2-b79d7eb14e04`). The invocation uses the exact nonempty test selector under
+`just root-test-incremental -j 1`, installed providers and a delegated Linux user-systemd scope,
+against `20230937` plus this continuation. Root checks overlap that installed run; it is correctness
+evidence, not an isolated performance result. Default/featureless `just root-check` passes
+(`/tmp/codefabric-p04-inventory-merkle-root.log`).
+Final affected Clippy is clean, including modified function headers after extracting the Git fixture
+setup (`/tmp/codefabric-p04-inventory-merkle-clippy-final.jsonl`). Documentation, focused spelling
+and diff checks pass. P04 input validity, full topology, Cargo-unit reuse and shared scheduling remain
+open; the hashing change does not alter any source/context selection or close a package.
+
 ## P03 first-release query boundary delivered
 
 The plan corpus is committed in `47b0c225`; the shared native schema-identity correction is
