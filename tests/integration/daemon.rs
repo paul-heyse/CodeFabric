@@ -483,13 +483,19 @@ impl Drop for RunningSupervisor {
         {
             let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
         }
-        let deadline = Instant::now() + Duration::from_secs(5);
+        // The accepted-work drain alone may take 30 seconds. Allow the ordinary
+        // supervisor stop/join sequence to finish even while unwinding a failed assertion.
+        let deadline = Instant::now() + Duration::from_secs(45);
         while Instant::now() < deadline {
             if self.child.try_wait().ok().flatten().is_some() {
                 return;
             }
             thread::sleep(Duration::from_millis(25));
         }
+        eprintln!(
+            "supervisor {} exceeded failed-fixture cleanup deadline; forcing join",
+            self.child.id()
+        );
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

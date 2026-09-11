@@ -89,15 +89,31 @@ slow-timeout = { period = "60s", terminate-after = 10 }
 filter = 'test(full_golden_scenario_clean_rebuild_equivalence)'
 slow-timeout = { period = "60s", terminate-after = 10 }
 
-# When tests come to share a database, port, or other scarce resource, constrain them
-# with a test group rather than serializing the whole suite (spec section 18.3):
-#
-#   [test-groups.database]
-#   max-threads = 1
-#
-#   [[profile.default.overrides]]
-#   filter = 'test(database_)'
-#   test-group = 'database'
+# Real workspaces share the user's inotify instances and substantial durable I/O.
+# nextest runs each test in a separate process; a Rust mutex cannot admit these fixtures.
+# Keep ordinary library/wire/graph tests parallel and preserve production worker budgets.
+[test-groups.native-workspaces]
+max-threads = 2
+
+[[profile.default.overrides]]
+filter = 'test(integration::daemon::) | test(daemon::tests::wp47_fresh_production_workspace_prepares_exact_and_guarded_semantic_requests) | test(fabric::workspace_updates::tests::native_watch) | test(fabric::workspace_updates::tests::poll_watch) | test(fabric::workspace_updates::tests::owned_watch) | test(fabric::workspace_updates::tests::explicit_poll_watch) | test(rt_cpg_wp79_complete_ten_thousand_file_governed_capture)'
+test-group = 'native-workspaces'
+
+# A complete durable capture uses both slots to avoid concurrent daemon startup I/O.
+[[profile.default.overrides]]
+filter = 'test(rt_cpg_wp79_complete_ten_thousand_file_governed_capture)'
+threads-required = 2
+
+# Repeated public blocks include provider convergence, installed clients and exact reopen.
+# The unchanged sequential baseline takes 101.742s; leave bounded room for admitted overlap.
+# Direct backend execution now explicitly waits for semantic-current admission before reading.
+[[profile.default.overrides]]
+filter = 'test(block_queries::) | test(daemon::tests::wp47_fresh_production_workspace_prepares_exact_and_guarded_semantic_requests)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+[[profile.ci.overrides]]
+filter = 'test(block_queries::) | test(daemon::tests::wp47_fresh_production_workspace_prepares_exact_and_guarded_semantic_requests)'
+slow-timeout = { period = "60s", terminate-after = 5 }
 
 # This scenario runs four public forms across edits, failure and repair and independent clean
 # Rust/Python provider builds. The ordinary two-minute bound interrupts expected work.

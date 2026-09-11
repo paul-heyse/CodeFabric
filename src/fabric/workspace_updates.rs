@@ -15,6 +15,62 @@ use tokio::sync::mpsc;
 use crate::daemon::SourceWatchProfile;
 use crate::freshness::FreshnessBarrier;
 
+/// Keep native error kinds and affected paths until the startup/control presentation boundary.
+#[derive(Debug, thiserror::Error)]
+enum WorkspaceWatchError {
+    #[error("source watcher {profile:?} {operation}: {source}{capacity}")]
+    Backend {
+        profile: SourceWatchProfile,
+        operation: &'static str,
+        #[source]
+        source: notify_debouncer_full::notify::Error,
+        capacity: String,
+    },
+    #[error("{0}")]
+    Setup(String),
+}
+
+impl From<String> for WorkspaceWatchError {
+    fn from(error: String) -> Self {
+        Self::Setup(error)
+    }
+}
+
+impl WorkspaceWatchError {
+    fn backend(
+        profile: SourceWatchProfile,
+        operation: &'static str,
+        source: notify_debouncer_full::notify::Error,
+    ) -> Self {
+        // Called only on the blocking watcher owner, never on the notification callback.
+        // An unavailable diagnostic must not replace the original native error.
+        #[cfg(target_os = "linux")]
+        let capacity = {
+            let limit = |name: &str| {
+                std::fs::read_to_string(format!("/proc/sys/fs/inotify/{name}"))
+                    .ok()
+                    .and_then(|value| value.trim().parse::<u64>().ok())
+            };
+            format!(
+                "; host limits: inotify max_user_instances={:?}, max_user_watches={:?}, \
+                 max_queued_events={:?}, open_files={:?}",
+                limit("max_user_instances"),
+                limit("max_user_watches"),
+                limit("max_queued_events"),
+                rustix::process::getrlimit(rustix::process::Resource::Nofile),
+            )
+        };
+        #[cfg(not(target_os = "linux"))]
+        let capacity = String::new();
+        Self::Backend {
+            profile,
+            operation,
+            source,
+            capacity,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SourceInventoryState {
     pub(crate) digest: [u8; 32],
@@ -289,7 +345,8 @@ impl WorkspaceObservation {
             .map_err(|error| error.to_string())?;
         installed
             .await
-            .map_err(|_| "native watcher ended before installation".to_owned())??;
+            .map_err(|_| "native watcher ended before installation".to_owned())?
+            .map_err(|error| error.to_string())?;
         Ok(WorkspaceWatchControl { commands })
     }
 
@@ -297,6 +354,7 @@ impl WorkspaceObservation {
         &self,
         root: &Path,
         git: &crate::git_state::watch_topology::GitWatchTopology,
+        profile: SourceWatchProfile,
         events: DebounceEventResult,
     ) {
         if let Ok(events) = events {
@@ -330,7 +388,10 @@ impl WorkspaceObservation {
             if rescan || events.iter().any(relevant) {
                 self.event(rescan || topology_changed);
             }
-        } else {
+        } else if let Err(errors) = events {
+            for error in errors {
+                tracing::warn!(?profile, ?error, "source watcher backend callback failed");
+            }
             self.watch_healthy.store(false, Ordering::Release);
             self.topology_revision.fetch_add(1, Ordering::AcqRel);
             self.event(true);
@@ -343,7 +404,7 @@ impl WorkspaceObservation {
         budget: &crate::resource_budget::ResourceBudget,
         cancellation: &crate::cancellation::Cancellation,
         profile: SourceWatchProfile,
-    ) -> Result<WorkspaceWatch, String> {
+    ) -> Result<WorkspaceWatch, WorkspaceWatchError> {
         let observed = self.clone();
         let selected_root = root.to_owned();
         let git = crate::git_state::watch_topology::GitWatchTopology::resolve(root);
@@ -357,7 +418,8 @@ impl WorkspaceObservation {
             )
             .map_err(|error| error.to_string())?;
         let metadata = git.clone();
-        let handler = move |events| observed.observe_events(&selected_root, &metadata, events);
+        let handler =
+            move |events| observed.observe_events(&selected_root, &metadata, profile, events);
         let config = Config::default().with_follow_symlinks(false);
         let watcher = match profile {
             SourceWatchProfile::Native => WatchBackend::Native(
@@ -368,7 +430,7 @@ impl WorkspaceObservation {
                     RecommendedCache::default(),
                     config,
                 )
-                .map_err(|error| error.to_string())?,
+                .map_err(|error| WorkspaceWatchError::backend(profile, "construction", error))?,
             ),
             SourceWatchProfile::Poll => WatchBackend::Poll(
                 new_debouncer_opt(
@@ -380,12 +442,13 @@ impl WorkspaceObservation {
                         .with_poll_interval(Duration::from_secs(2))
                         .with_compare_contents(false),
                 )
-                .map_err(|error| error.to_string())?,
+                .map_err(|error| WorkspaceWatchError::backend(profile, "construction", error))?,
             ),
         };
         // Wrap immediately: even a failed traversal must join the native debouncer thread.
         let mut watch = WorkspaceWatch {
             watcher: Some(watcher),
+            profile,
             retained,
             registered_paths: BTreeSet::new(),
             registered_directories: 0,
@@ -395,7 +458,9 @@ impl WorkspaceObservation {
         let metadata_directories = git.directories();
         for directory in &metadata_directories {
             if cancellation.is_cancelled() {
-                return Err("Git metadata watch installation cancelled".to_owned());
+                return Err("Git metadata watch installation cancelled"
+                    .to_owned()
+                    .into());
             }
             watch.register(directory)?;
         }
@@ -470,6 +535,7 @@ impl WatchBackend {
 /// Native registrations and declared bookkeeping share this owned blocking lifetime.
 pub(crate) struct WorkspaceWatch {
     watcher: Option<WatchBackend>,
+    profile: SourceWatchProfile,
     retained: crate::resource_budget::ResourceReservation,
     registered_paths: BTreeSet<PathBuf>,
     registered_directories: u64,
@@ -488,16 +554,22 @@ impl WorkspaceWatch {
             .map_err(|error| error.to_string())
     }
 
-    fn register(&mut self, path: &Path) -> Result<(), String> {
+    fn register(&mut self, path: &Path) -> Result<(), WorkspaceWatchError> {
         if self.registered_paths.contains(path) {
             return Ok(());
         }
         self.reserve_path(path)?;
         self.watcher
             .as_mut()
-            .ok_or("watcher stopped")?
+            .ok_or_else(|| "watcher stopped".to_owned())?
             .watch(path)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| {
+                WorkspaceWatchError::backend(
+                    self.profile,
+                    "registration",
+                    error.add_path(path.to_owned()),
+                )
+            })?;
         self.registered_paths.insert(path.to_owned());
         self.registered_directories += 1;
         Ok(())
@@ -507,7 +579,7 @@ impl WorkspaceWatch {
         &mut self,
         root: &Path,
         cancellation: &crate::cancellation::Cancellation,
-    ) -> Result<(), String> {
+    ) -> Result<(), WorkspaceWatchError> {
         let limits = crate::inventory::InventoryLimits::default();
         let started = Instant::now();
         // The parent remains observed while a registered root disappears or is recreated.
@@ -520,12 +592,16 @@ impl WorkspaceWatch {
         let mut files = 0_u64;
         while let Some((directory, depth)) = pending.pop() {
             if cancellation.is_cancelled() || started.elapsed() > limits.maximum_duration {
-                return Err("source watch traversal cancelled or timed out".to_owned());
+                return Err("source watch traversal cancelled or timed out"
+                    .to_owned()
+                    .into());
             }
             let metadata =
                 std::fs::symlink_metadata(&directory).map_err(|error| error.to_string())?;
             if !metadata.is_dir() {
-                return Err("source watch directory changed during traversal".to_owned());
+                return Err("source watch directory changed during traversal"
+                    .to_owned()
+                    .into());
             }
             // Registration precedes child enumeration. Events only request secure recapture;
             // lexical watch paths never authorize source reads or establish content identity.
@@ -538,7 +614,9 @@ impl WorkspaceWatch {
                     || started.elapsed() > limits.maximum_duration
                     || index >= limits.maximum_entries_per_directory
                 {
-                    return Err("source watch traversal cancelled or exceeded its bound".to_owned());
+                    return Err("source watch traversal cancelled or exceeded its bound"
+                        .to_owned()
+                        .into());
                 }
                 let entry = entry.map_err(|error| error.to_string())?;
                 if !entry
@@ -548,7 +626,7 @@ impl WorkspaceWatch {
                 {
                     files += 1;
                     if files > limits.maximum_file_count {
-                        return Err("source watch file bound exceeded".to_owned());
+                        return Err("source watch file bound exceeded".to_owned().into());
                     }
                     // PollWatcher retains metadata for immediate child files. Native platforms
                     // may retain IDs too. Keep a broad declared path budget for either backend.
@@ -564,7 +642,9 @@ impl WorkspaceWatch {
                 if discovered > limits.maximum_directory_count
                     || depth >= limits.maximum_directory_depth
                 {
-                    return Err("source watch directory/depth bound exceeded".to_owned());
+                    return Err("source watch directory/depth bound exceeded"
+                        .to_owned()
+                        .into());
                 }
                 let path = entry.path();
                 self.reserve_path(&path)?;
@@ -690,7 +770,7 @@ mod tests {
         std::fs::write(&source, b"old").unwrap();
         let (observed, mut receiver) = WorkspaceObservation::new();
         let budget = crate::provider_types::source_fixture_budget([2; 16]);
-        let watch = observed
+        let mut watch = observed
             .watch(
                 &root,
                 &budget,
@@ -711,6 +791,17 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(observed.freshness.state(), FreshnessState::PotentiallyStale);
+        let missing = root.join("missing-directory");
+        let error = watch.register(&missing).unwrap_err();
+        assert!(error.to_string().contains("Native registration"));
+        let WorkspaceWatchError::Backend { source, .. } = error else {
+            panic!("native registration error lost its category");
+        };
+        assert!(matches!(
+            source.kind,
+            notify_debouncer_full::notify::ErrorKind::PathNotFound
+        ));
+        assert!(source.paths.contains(&missing));
         watch.stop();
     }
 
