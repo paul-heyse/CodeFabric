@@ -216,6 +216,15 @@ pub enum PyreflyRunGap {
 }
 
 impl PyreflyServiceError {
+    /// A closed scope rejected a new process; it did not fail to join an admitted child.
+    /// Use only at task construction/admission, never to relabel an actual cleanup failure.
+    pub(crate) fn process_admission(error: crate::cancellation::StructuredTaskError) -> Self {
+        match error {
+            crate::cancellation::StructuredTaskError::ScopeClosed(_) => Self::Cancelled,
+            other => Self::ProcessTermination(other.to_string()),
+        }
+    }
+
     /// Translate process lifecycle failures into the exact provider-lane gap category.
     #[must_use]
     pub const fn run_gap(&self) -> Option<PyreflyRunGap> {
@@ -552,7 +561,7 @@ impl SupervisedPyreflyWorkspace {
                 );
             })
             .await
-            .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))?;
+            .map_err(PyreflyServiceError::process_admission)?;
         let sandbox_profile_digest = tokio::time::timeout(
             Duration::from_millis(job.ceilings().max_wall_millis()),
             readiness,
@@ -2446,6 +2455,41 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use super::*;
+
+    #[tokio::test]
+    async fn closed_process_scope_cancels_admission_without_launch_or_retained_resources() {
+        use std::os::fd::AsRawFd as _;
+
+        let (job, _) = test_job(b"{}", 7, 7);
+        let budget = job.resource_budget().clone();
+        let before = budget.observation().used;
+        let scope =
+            crate::cancellation::StructuredCancellationScope::try_root_with_control_reserve(
+                "closed-provider",
+                std::num::NonZeroUsize::new(1).unwrap(),
+                std::num::NonZeroUsize::new(1).unwrap(),
+            )
+            .unwrap()
+            .child_control("process")
+            .unwrap();
+        scope.cancel();
+        let output = tempfile::tempdir().unwrap();
+        let descriptor =
+            crate::secure_path::open_absolute_directory_nofollow(output.path()).unwrap();
+        let pinned_path = PathBuf::from(format!("/proc/self/fd/{}", descriptor.as_raw_fd()));
+        let result = SupervisedPyreflyWorkspace::try_new(&job, descriptor, scope.clone(), || {
+            panic!("a cancelled admission must never invoke the process launcher");
+        })
+        .await;
+        assert!(matches!(result, Err(PyreflyServiceError::Cancelled)));
+        scope.cancel_and_join(Duration::from_secs(1)).await.unwrap();
+        assert_eq!(scope.live_task_count().await.unwrap(), 0);
+        assert_eq!(budget.observation().used, before);
+        assert_ne!(
+            std::fs::read_link(pinned_path).ok().as_deref(),
+            Some(output.path())
+        );
+    }
 
     #[tokio::test]
     async fn wp79_pyrefly_cancelled_join_cannot_turn_missing_child_into_joined_absence() {

@@ -299,7 +299,14 @@ pub(super) fn run(
                 Some(PyreflyRunGap::PreparationUnavailable) => ProviderLaneGap::Unsupported,
                 _ => ProviderLaneGap::ProviderFailure,
             };
-            tracing::warn!(%error, "Python semantic provider did not complete");
+            if matches!(
+                error,
+                crate::pyrefly_service::PyreflyServiceError::Cancelled
+            ) {
+                tracing::debug!(%error, "Python semantic provider cancelled");
+            } else {
+                tracing::warn!(%error, "Python semantic provider did not complete");
+            }
         }
     }
     Ok(outcome)

@@ -261,6 +261,9 @@ async fn launch(
         ProviderTrustProfile, SandboxCapabilityMatrix, SandboxMechanism,
     };
     use std::collections::BTreeMap;
+    let cleanup = scope
+        .child_control("pyrefly-process")
+        .map_err(PyreflyServiceError::process_admission)?;
     let profile = GeneratedSandboxProfile::generate(
         ProviderTrustProfile::UntrustedSandboxed,
         SandboxMechanism::LinuxBubblewrap,
@@ -293,9 +296,6 @@ async fn launch(
             process_count: 256,
         },
     };
-    let cleanup = scope
-        .child_control("pyrefly-process")
-        .map_err(|error| PyreflyServiceError::ProcessTermination(error.to_string()))?;
     let process =
         match SupervisedPyreflyWorkspace::try_new(job, output, cleanup.clone(), move || {
             ProviderSandboxLauncher::new(SandboxCapabilityMatrix::probe_current_host()).launch(
