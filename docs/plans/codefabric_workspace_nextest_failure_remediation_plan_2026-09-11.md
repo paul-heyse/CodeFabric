@@ -13,6 +13,12 @@ The user requested the full workspace run, failure review and this new implement
 The user subsequently authorized implementing this sequence. It repairs the workspace baseline;
 broader outcome delivery remains in the parent plan.
 
+The user's implementation steering prioritizes sound ownership/design and complete features over
+arbitrary elapsed-time targets. Durations below are diagnostic observations, not performance
+acceptance criteria. Keep generous finite hang detection around complete scenarios; do not reduce
+capability or repeatedly tune implementation merely to meet a historical test timeout. Performance
+qualification remains the separately scoped representative-workload work in parent P14.
+
 ## 0. Implementation progress
 
 | Package | Current implementation and evidence |
@@ -21,8 +27,8 @@ broader outcome delivery remains in the parent plan.
 | R02 | Implemented in `599db1ad`: census follows the closed current native relation sets and checks member-observation schema semantics; MIR fixtures supply coherent typed raw/display paths. All four original failures and the exhaustive census pass |
 | R03 | Implemented in `599db1ad`: the obsolete sealing-time assertion is replaced by `derived_composition_enforces_output_bound_on_read_without_preexecution`; installed composition must fail on its actual read. It and the existing stream-bound/repeated-read test pass |
 | R04 | Implemented in `fc4f0fa4`: execution accepts only freshness carried by its admitted snapshot; service and test backends use the same interface. Direct preparation retains guarded input behavior, then semantic-current admission precedes positive rows. Direct execution passes in 103.849 s; old-epoch lease coverage passes |
-| R05 | Shutdown admission race correction is implemented in `96e6d165` and passes all four focused cases. The subsequent publication drain/retry ownership correction passes 23 focused cases. Actual join failures keep their original failure path. The first aggregate exposed further lifetime and timeout failures; revised scheduling and real daemon qualification remain pending |
-| R06 | Pending the complete unfiltered workspace run, final configuration/identity reconciliation and handoff |
+| R05 | Shutdown admission race correction is implemented in `96e6d165` and passes all four focused cases. Publication drain/retry ownership correction passes 23 focused cases. Direct semantic admission and the mixed first-release corpus pass at `cbd7a241`; mixed/Python interruption and `c96de52e`'s client-timeout/reopen plus ordinary signal ordering pass. Functional fixes are implemented; aggregate startup/timeout survivor review remains part of the terminal run |
+| R06 | Scoped checks, default/CI group inspection and original-identity reconciliation pass. The complete unfiltered workspace run and its final handoff remain pending |
 
 The first focused selection passes **19/19** in 103.855 s (build 2m31s), run
 `a4e0998c-db7f-4c97-8690-6ea2077eea5e`. Logs are under
@@ -91,6 +97,30 @@ semantic writes in the mixed case and its last clean rebuild interrupted after 5
 of writes. Product wrappers retain build/cleanup headroom (1,500/900 seconds respectively); the
 site-packages wrapper allows 600 seconds. The tooling consumer passes 232 tests in 4.18 s and
 formatting/lint passes. These sequence limits still require the terminal full run.
+
+The isolated real-native selection at `cbd7a241` passes direct semantic admission in 101.002 s
+and the mixed first-release corpus in 203.999 s. Its Python publication-shutdown case fails on
+the daemon's two-second owned-task join reserve, without reproducing the kernel executor panic.
+`ff4b33e0` uses a shared 20-second workspace operation drain, leaving ten seconds inside the
+supervisor's existing 30-second control phase. Failed joins still retain the writer fence and
+report failure. The mixed publication-shutdown/reopen case passes in 268.487 s, including exact
+generation and Python/Rust fact assertions, with no executor panic or cleanup-deadline warning.
+Python interruption/reopen also passes in 142.144 s. The client-timeout variant still exhausts
+that 20-second reserve: `r05-native-drain-focused.log` finishes with two passes and one failure
+in 554.254 s. This establishes that the provisional allowance is insufficient for an already
+started write, not that the native lifetime fix failed. The resolved `WriteBuilder` accepts a
+logical plan and supplies no mid-write cancellation hook; dropping its work remains unsafe.
+The follow-up aligns owned workspace drain with the existing 120-second publication interval,
+adds 30 seconds of supervisor control headroom, and preserves the separate 30-second accepted-query
+drain. Startup readiness and query deadlines remain unchanged. That correction is committed in
+`c96de52e`. Client-timeout/reopen and ordinary signal-order qualification pass **2/2** in 322.168 s,
+run `121102b1-72be-45e2-9466-d2a9da8bdaf1` (`r05-workspace-shutdown-focused.log`), with no executor
+panic or cleanup-deadline warning. The full client-timeout case takes 278.905 s; ordinary signal
+ordering takes 43.250 s. Final all-target Clippy completes with zero errors and the existing
+publication-function length warning (`r05-shutdown-clippy.jsonl`, 2,078 diagnostics including
+duplicate test-build warnings); featureless all-target checking passes. Both default and CI
+group inspection preserve the original startup/timeout cases. These are scoped checks, not
+terminal qualification.
 
 ## 1. Result and scope
 

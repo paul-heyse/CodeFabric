@@ -2603,6 +2603,15 @@ semantics and sustained operation; choose the simplest native mechanism that dem
 
 ### 9.1 Reuse the existing command surface
 
+The authorized [workspace test remediation supplement](codefabric_workspace_nextest_failure_remediation_plan_2026-09-11.md)
+is in progress on 2026-09-11. It retains the complete selected workspace corpus and modernizes
+stale schema/composition/freshness assertions, bounds native fixture overlap and repairs actual
+publication cancellation and retained-provider retry ownership. Provider attempts now share one
+fresh run/resource-owner identity while captured source/context identities remain stable. Started
+Delta writes remain driven on their native runtime until joined; failed joins retain ownership.
+The supplement and STATUS record scoped native passes and the still-pending terminal full run.
+These repairs support P04/P05/P13 and do not complete their broader acceptance boundaries.
+
 The table below preserves historical implementation checks from 2026-09-09 through the diagnostic-detail slice. Current package execution evidence follows it and is detailed in §3.3/§6/§8 and STATUS. Counts overlap and are not a combined full-suite result.
 
 | Implemented slice | Recorded check | What it establishes / limit |
@@ -2751,10 +2760,11 @@ production acceptance above.
 
 ## 10. Package execution handoff
 
-**Stopped at the user's request on 2026-09-10, after implementation commit `722b57d4`.** The current
-provider executable invalidation task is concluded and passes installed acceptance. No next slice
-is started or scheduled. This handoff replaces the earlier P02/P03 next-step notes; resume only on
-a new instruction, preserving the canonical working tree and the selected §3.3 sequence.
+**Broader package delivery remains at the 2026-09-10 checkpoint `722b57d4`.** The provider executable
+invalidation task is concluded and passes installed acceptance. On 2026-09-11 the user authorized
+the workspace test remediation supplement linked in §9.1; those qualification and ownership fixes
+are now being implemented. No next P04 backlog slice is started or scheduled. After the repair
+handoff, the remaining product sequence below still requires a new implementation instruction.
 
 | Package boundary | Current implementation and acceptance | Remaining boundary |
 |---|---|---|

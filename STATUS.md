@@ -2,14 +2,18 @@
 
 Updated 2026-09-11 from the canonical `/home/paul/CodeFabric` working tree on `master`.
 The user authorized the workspace test remediation plan. R01–R04 are implemented and pass all
-19 focused cases; the R05 shutdown-admission correction passes four focused cases. The diagnostic
-rerun at `12d2ee0d` reproduced native publication cancellation and retained-provider retry defects.
-It was interrupted after a concurrent Cursor nextest run replaced the shared daemon binaries;
-it is not an attributable full-suite result. R05's corrected run/resource admission at `cbd7a241`
-passes 23 focused lifetime/publication checks. Revised fixture weights and sequence deadlines are
-checked in; the tooling consumer passes 232 tests and formatting/lint. Real native scenarios and
-the terminal full run are being qualified with isolated build artifacts. The original failed
-baseline below remains visible until a full run passes.
+19 focused cases. R05's corrected provider run/resource admission and native publication lifetime
+pass 23 focused checks. Real direct semantic admission, the mixed first-release corpus, mixed/Python
+publication interruption, client-timeout/reopen and ordinary shutdown ordering now pass. The final
+shutdown correction is `c96de52e`; it gives started native writes their finite publication allowance
+with separate supervisor headroom, preserving startup/query deadlines and failed-join ownership.
+Revised fixture scheduling and sequence limits are checked in; the tooling consumer passes 232
+tests and formatting/lint. All-target Clippy completes with existing warnings and featureless
+checking passes. The complete unfiltered run remains to be qualified using isolated build artifacts.
+The earlier run at `12d2ee0d` was interrupted after a concurrent Cursor run replaced shared daemon
+binaries and is not attributable full-suite evidence. The original failed baseline below remains
+visible until a full run passes. Durations are diagnostic observations; the user's priority is
+sound design and complete functionality, with representative performance work left to parent P14.
 Broader outcome implementation remains at the `722b57d4` P04 checkpoint.
 
 P01/P02 initial vertical exits and P03's first-release query boundary are delivered. P04 retained
@@ -41,9 +45,9 @@ full-suite acceptance. Retained-Pyrefly shutdown emits a warning in one passing 
 remains a traced follow-up, not a proved leak or a passing semantic-completion claim.
 
 Local logs are in `target/nextest-review/2026-09-11-workspace/`; the durable findings and full test
-inventory are in the new plan. The next repair is bounded native-fixture scheduling, followed by
-typed fixture/census updates, actual-read resource assertions, admitted-snapshot freshness and
-resolution of any remaining startup/timeout defects. A full unfiltered passing run is required
+inventory are in the new plan. Scheduling, typed fixture/census updates, actual-read resource
+assertions and admitted-snapshot freshness are implemented. Remaining work is real native
+shutdown qualification and resolution of any survivors in the terminal full run. An unfiltered passing run is required
 before this supplement closes. It supports the current outcomes plan and does not replace its
 backlog or declare P04/P05 complete. Repair progress and commits are in the supplement’s §0.
 
