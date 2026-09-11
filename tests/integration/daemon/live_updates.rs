@@ -1789,6 +1789,19 @@ fn assert_native_cpu_released_after_mixed_preparation(fixture: &ProductionFixtur
     );
 }
 
+pub(super) fn assert_native_context_overlap(fixture: &ProductionFixture) {
+    assert_native_cpu_released_after_mixed_preparation(fixture);
+    let cpu = native_preparation_costs(fixture)["native_cpu"].clone();
+    let capacity = cpu["capacity"].as_u64().unwrap();
+    if capacity >= 2 {
+        let width = (capacity / 2).clamp(1, 16);
+        assert!(
+            cpu["peak_allocated_slots"].as_u64().unwrap() >= 2 * width,
+            "independent Cargo contexts actually held simultaneous bounded shares: {cpu}"
+        );
+    }
+}
+
 #[test]
 fn mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen() {
     use std::os::unix::ffi::OsStrExt as _;

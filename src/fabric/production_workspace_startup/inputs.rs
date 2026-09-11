@@ -52,6 +52,16 @@ enum CaptureStore {
 }
 
 impl PreparedSourceInputs {
+    pub(super) fn provider_view(
+        &self,
+    ) -> Result<ProviderInputs<'_>, ProductionWorkspaceStartupError> {
+        Ok(ProviderInputs {
+            capture: self.capture()?,
+            inventory: &self.inventory,
+            budget: &self.budget,
+        })
+    }
+
     /// Source bytes and blob leases remain owned, but the operational writer is needed only
     /// while capturing or releasing them. Checker/compiler execution uses immutable inputs.
     pub(super) fn detach_writer(
@@ -84,6 +94,41 @@ impl PreparedSourceInputs {
         }
     }
 
+    pub fn budget(&self) -> &ResourceBudget {
+        &self.budget
+    }
+
+    pub fn capture(&self) -> Result<&InventoryCaptureBundle, ProductionWorkspaceStartupError> {
+        self.capture
+            .as_ref()
+            .ok_or_else(|| step("source-capture-ownership", "capture already released"))
+    }
+
+    pub fn release(mut self) -> Result<(), ProductionWorkspaceStartupError> {
+        if let Some(bundle) = self.capture.take() {
+            self.release_bundle(bundle)?;
+        }
+        Ok(())
+    }
+}
+
+/// Immutable provider view cannot access the capture writer or release source leases. The
+/// enclosing source operation owns those leases until all scoped context workers have joined.
+#[derive(Clone, Copy)]
+pub(super) struct ProviderInputs<'a> {
+    capture: &'a InventoryCaptureBundle,
+    pub inventory: &'a ChargedValue<ProviderSourceInventory>,
+    budget: &'a ResourceBudget,
+}
+
+impl ProviderInputs<'_> {
+    pub fn capture(&self) -> &InventoryCaptureBundle {
+        self.capture
+    }
+    pub fn budget(&self) -> &ResourceBudget {
+        self.budget
+    }
+
     pub fn inventory_for_language(
         &self,
         language: SourceLanguage,
@@ -92,10 +137,10 @@ impl PreparedSourceInputs {
             .inventory
             .memory_bytes()
             .map_err(|error| step("provider-selection-memory", error))?;
-        let mut charge = reserve_memory(&self.budget, bytes.saturating_mul(4).saturating_add(8192))
+        let mut charge = reserve_memory(self.budget, bytes.saturating_mul(4).saturating_add(8192))
             .map_err(|error| step("provider-selection-memory", error))?;
         let files = self
-            .capture()?
+            .capture()
             .images()
             .iter()
             .filter(|image| image.language == language)
@@ -114,10 +159,6 @@ impl PreparedSourceInputs {
         Ok(charge.into_charged_value(inventory))
     }
 
-    pub fn budget(&self) -> &ResourceBudget {
-        &self.budget
-    }
-
     /// Retained provider state can outlive an unsuccessful publication. Retrying identical
     /// inputs needs a distinct operation owner; stable provider/source IDs are not lifetimes.
     pub fn provider_operation_budget(
@@ -128,18 +169,6 @@ impl PreparedSourceInputs {
         self.budget
             .operation(attempt, self.budget.policy())
             .map_err(|error| step("provider-operation-owner", error))
-    }
-    pub fn capture(&self) -> Result<&InventoryCaptureBundle, ProductionWorkspaceStartupError> {
-        self.capture
-            .as_ref()
-            .ok_or_else(|| step("source-capture-ownership", "capture already released"))
-    }
-
-    pub fn release(mut self) -> Result<(), ProductionWorkspaceStartupError> {
-        if let Some(bundle) = self.capture.take() {
-            self.release_bundle(bundle)?;
-        }
-        Ok(())
     }
 }
 
@@ -907,7 +936,7 @@ mod tests {
         let prepare = || {
             super::super::pyrefly::prepare_job(
                 &release,
-                &first,
+                &first.provider_view().unwrap(),
                 &initial,
                 crate::relation_ipc::SourcePin(first.inventory.identity()),
                 1,

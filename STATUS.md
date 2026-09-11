@@ -222,6 +222,39 @@ qualification continues with context scheduling. Sidecar strict checks and all 4
 and its installed binary has been rebuilt. Root all-target Clippy completes with the existing
 warning backlog; featureless checking passes. No full suite, doctest or performance claim is made.
 
+**Independent context dispatch continuation (2026-09-11; validation in progress).** Provider
+execution now borrows immutable input/identity/budget views from the source owner. The operational
+writer and source-lease release remain inaccessible to those views, and scoped workers must join
+before the source owner can retire. Python runs alongside a bounded two-worker Rust target dispatcher;
+the finite discovered target list is its FIFO backlog. Actual native widths still use the shared
+CPU coordinator. Obsolete queued targets do not start compilation; completed results are restored
+to discovery order before canonical composition. Unique compiler task scopes isolate concurrent
+native owners. One failed target retains its own incomplete scope while independent targets can
+complete. Native phase timings are separate overlapping durations, not an additive execution total.
+
+Five focused concurrency/context checks pass in 0.055 s (run
+`062cf78a-f705-4471-ba89-808204591e9e`), and the real captured-input/job-admission test passes in
+0.151 s (`b36c9d39-603c-4d87-834f-e0c6726b9a62`). All-target checking passes; Clippy completes with
+its warning backlog. The first installed run (`3160f19f-8970-4ca8-9b72-83481914248d`) fails after
+83.904 s at sandbox availability, before compiler facts; the second selected case was not run.
+The new concurrency exposes parent-inheritable seccomp descriptors: overlapping launches inherit
+one another's duplicate, and the fixed shell fails when closing a multi-digit descriptor. A bounded
+standalone reproduction returns zero with only the intended descriptor and 127 with a second one.
+
+The selected correction uses native Rust `Stdio::from(File)` to transfer a sealed, independently
+compiled policy on child stdin. The fixed child shell moves it to descriptor 3 and restores stdin
+to `/dev/null` before bubblewrap consumes the filter. Parent descriptors retain CLOEXEC throughout.
+This avoids a process-wide inheritable window and introduces no custom unsafe post-fork hook.
+An alternative child-only `pre_exec`/fcntl implementation would also avoid the window, but standard
+Stdio already owns the required descriptor transfer. Real concurrent probes under descriptor pressure,
+complete contained process-tree cleanup, and the installed mixed/multi-target cases check this seam.
+No containment fallback or relaxed capability evidence is introduced. The concurrent probes under
+32 retained parent descriptors, actual contained process-tree cleanup and borrowed worker failure
+joins all pass: 3/3 in 0.166 s, run `7ae7d3d5-6200-4ec5-957c-8b720728e634`
+(`/tmp/codefabric-p04-context-descriptors-focused.log`). A direct child-transfer check also preserves
+policy bytes and null stdin. Installed mixed/multi-target qualification is being rerun in
+`/tmp/codefabric-p04-context-workers-installed-v2.log`; this continuation remains in validation.
+
 The resumed inclusion slice uses one capture/watch policy. Captured root `pyrefly.toml` and
 `[tool.pyrefly]` search/site-package candidates can select subtrees beneath normally pruned
 `.venv`/build directories, with ancestor observation, sibling pruning, no-follow source capture

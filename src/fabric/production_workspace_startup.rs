@@ -107,6 +107,7 @@ use crate::source_image::{SourceLanguage, advance_source_generation, current_sou
 use crate::workspace_registry::WorkspaceRecord;
 
 mod canonical;
+mod context_workers;
 mod costs;
 mod input_observations;
 mod inputs;
@@ -858,16 +859,53 @@ fn build_fresh_native_source(
     }
     let native_pin = native_source_pin(&native_runs, &sources);
     let requested_native = u64::try_from(native_runs.len()).unwrap_or(u64::MAX).max(1);
-    costs.start("pyrefly");
-    let pyrefly = pyrefly::run(
-        &workspace_root,
-        release,
-        &prepared_inputs,
-        &prepared_context,
-        &context_product.canonical_manifest,
-        cancellation.clone(),
-        work,
-    )?;
+    let provider_inputs = prepared_inputs.provider_view()?;
+    costs.start("semantic-contexts");
+    let run_python = || {
+        let started = Instant::now();
+        let result = pyrefly::run(
+            &workspace_root,
+            release,
+            &provider_inputs,
+            &prepared_context,
+            &context_product.canonical_manifest,
+            cancellation.clone(),
+            work,
+        );
+        (result, started.elapsed())
+    };
+    let run_rust = || {
+        let started = Instant::now();
+        let result = rustc::run(
+            &workspace_root,
+            release,
+            &provider_inputs,
+            record,
+            &cancellation,
+            work,
+        );
+        (result, started.elapsed())
+    };
+    let (python_result, rust_result) = if stage == PublicationStage::Semantic {
+        std::thread::scope(|scope| {
+            let python = context_workers::spawn(
+                scope,
+                workspace_resources.budget(),
+                "python-context",
+                run_python,
+            )?;
+            let rust = run_rust();
+            // Always join the borrowed Python worker before propagating either lane's failure.
+            let python = context_workers::join(python)?;
+            Ok::<_, ProductionWorkspaceStartupError>((python, rust))
+        })?
+    } else {
+        (run_python(), run_rust())
+    };
+    costs.record("pyrefly", python_result.1, python_result.0.is_ok());
+    costs.record("cargo-rustc", rust_result.1, rust_result.0.is_ok());
+    let pyrefly = python_result.0?;
+    let rustc = rust_result.0?;
     costs.pyrefly_cache(
         workspace_resources
             .pyrefly_cache()
@@ -875,15 +913,6 @@ fn build_fresh_native_source(
             .map_err(|error| step("pyrefly-cache-owner", error))?
             .observation(),
     );
-    costs.start("cargo-rustc");
-    let rustc = rustc::run(
-        &workspace_root,
-        release,
-        &prepared_inputs,
-        record,
-        &cancellation,
-        work,
-    )?;
     costs.rust_toolchain_cache(
         workspace_resources
             .rust_toolchain_cache()

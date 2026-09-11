@@ -48,7 +48,7 @@ use crate::source_image::{
 };
 use crate::workspace_registry::WorkspaceRecord;
 
-use super::inputs::PreparedSourceInputs;
+use super::inputs::ProviderInputs;
 use super::{CompiledSemanticRelease, ProductionWorkspaceStartupError, digest16, lower_hex, step};
 
 mod targets;
@@ -187,7 +187,7 @@ impl RustcOutcome {
 pub(super) fn run(
     root: &Path,
     release: &CompiledSemanticRelease,
-    inputs: &PreparedSourceInputs,
+    inputs: &ProviderInputs<'_>,
     record: &WorkspaceRecord,
     cancellation: &Cancellation,
     work: super::PublicationWork<'_>,
@@ -242,21 +242,42 @@ pub(super) fn run(
     }
     let mut contexts = Vec::new();
     let toolchain = OnceLock::new();
-    for target in targets {
-        let mut progress = RustTargetProgress::new(&target, "unavailable", "");
-        let available = prepare_and_run(
-            root,
-            release,
-            inputs,
-            record,
-            inventory.clone(),
-            &target,
-            &toolchain,
-            &mut outcome.unit_graphs,
-            resources,
-            scope,
-            cancellation.clone(),
-        );
+    let completed = super::context_workers::map(
+        &targets,
+        resources
+            .scheduler()
+            .native_cpu_observation()
+            .capacity
+            .min(2),
+        inputs.budget(),
+        |target| {
+            let mut graphs = Vec::new();
+            let available = if cancellation.is_cancelled() {
+                Err(step(
+                    "rust-context-cancelled",
+                    "obsolete context was not started",
+                ))
+            } else {
+                prepare_and_run(
+                    root,
+                    release,
+                    inputs,
+                    record,
+                    inventory.clone(),
+                    target,
+                    &toolchain,
+                    &mut graphs,
+                    resources,
+                    scope,
+                    cancellation.clone(),
+                )
+            };
+            (available, graphs)
+        },
+    )?;
+    for (target, (available, graphs)) in targets.iter().zip(completed) {
+        outcome.unit_graphs.extend(graphs);
+        let mut progress = RustTargetProgress::new(target, "unavailable", "");
         match available {
             Ok((context_pin, admitted, runs)) => {
                 progress.context_id = Some(admitted.job().context().analysis_context_id());
@@ -312,7 +333,7 @@ pub(super) fn run(
 fn prepare_and_run(
     root: &Path,
     release: &CompiledSemanticRelease,
-    inputs: &PreparedSourceInputs,
+    inputs: &ProviderInputs<'_>,
     record: &WorkspaceRecord,
     inventory: crate::resource_budget::ChargedValue<
         crate::provider_contracts::ProviderSourceInventory,
@@ -339,7 +360,15 @@ fn prepare_and_run(
         .row(ProviderTrustProfile::UntrustedSandboxed)
         .is_some_and(|row| row.available)
     {
-        return Err(step("rust-containment", "contained compiler unavailable"));
+        return Err(step(
+            "rust-containment",
+            format!(
+                "contained compiler unavailable: {:?}",
+                capabilities
+                    .row(ProviderTrustProfile::UntrustedSandboxed)
+                    .map(|row| &row.unmet_requirements),
+            ),
+        ));
     }
     // One immutable capture lease serves every target in this publication pass. The workspace
     // retains compatible captured inputs; Cargo and extractor outputs are still fresh per run.
@@ -402,7 +431,7 @@ fn prepare_and_run(
                 relative_path: b".".to_vec(),
             }],
             policy_identity: record.authorization_fingerprint,
-            universe: if inputs.capture()?.dispositions().iter().any(|entry| {
+            universe: if inputs.capture().dispositions().iter().any(|entry| {
                 !matches!(
                     entry.disposition(),
                     crate::source_image::InventoryCaptureDisposition::Captured { .. }
@@ -431,7 +460,7 @@ fn prepare_and_run(
         b"codefabric.rust-provider-run.v1\0",
         &[&inventory.identity(), &context_pin],
     );
-    let images = inputs.capture()?.images().iter().collect::<Vec<_>>();
+    let images = inputs.capture().images().iter().collect::<Vec<_>>();
     let view = publish_provider_workspace_view(
         root,
         &lower_hex(&view_id),
@@ -689,7 +718,7 @@ fn prepare_and_run(
         resource_profile_id: request.context.resource_profile_id.clone(),
     };
     let child = scope
-        .child("rust-compiler")
+        .child(&format!("rust-compiler-{}", lower_hex(&run_id)))
         .map_err(|error| step("rust-task-scope", error))?;
     tokio::runtime::Handle::current().block_on(async {
         let result = Box::pin(run_untrusted_rustc_provider_lifecycle(
@@ -1355,10 +1384,10 @@ fn initial_selection(
 }
 
 fn captured_files(
-    inputs: &PreparedSourceInputs,
+    inputs: &ProviderInputs<'_>,
 ) -> Result<Vec<ContextFileInput>, ProductionWorkspaceStartupError> {
     inputs
-        .capture()?
+        .capture()
         .images()
         .iter()
         .map(|image| {

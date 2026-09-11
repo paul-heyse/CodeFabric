@@ -20,7 +20,7 @@ use crate::resource_budget::ChargedValue;
 use crate::semantic_release::{PreparedProviderJob, ProviderJobInput};
 use crate::source_image::{DependencyInputBundle, SourceLanguage, publish_provider_workspace_view};
 
-use super::inputs::PreparedSourceInputs;
+use super::inputs::ProviderInputs;
 use super::{CompiledSemanticRelease, ProductionWorkspaceStartupError, lower_hex, step};
 
 pub(super) struct PyreflyOutcome {
@@ -55,7 +55,7 @@ pub(super) enum StartupPyreflyError {
 pub(super) fn run(
     workspace_root: &Path,
     release: &CompiledSemanticRelease,
-    inputs: &PreparedSourceInputs,
+    inputs: &ProviderInputs<'_>,
     context: &ChargedValue<ProviderContextBinding>,
     context_manifest: &[u8],
     cancellation: Cancellation,
@@ -65,7 +65,7 @@ pub(super) fn run(
         resources, stage, ..
     } = work;
     let images = inputs
-        .capture()?
+        .capture()
         .images()
         .iter()
         .filter(|image| image.language == SourceLanguage::Python)
@@ -262,7 +262,7 @@ pub(super) fn run(
 /// while source/context identities and the retained checker's compatibility stay unchanged.
 pub(super) fn prepare_job(
     release: &CompiledSemanticRelease,
-    inputs: &PreparedSourceInputs,
+    inputs: &ProviderInputs<'_>,
     context: &ChargedValue<ProviderContextBinding>,
     source_pin: SourcePin,
     requested_units: u64,

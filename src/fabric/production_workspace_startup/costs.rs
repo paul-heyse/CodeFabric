@@ -95,6 +95,19 @@ impl PreparationCosts {
         self.report.native_cpu = Some(observation);
     }
 
+    pub(super) fn record(
+        &mut self,
+        phase: &'static str,
+        elapsed: std::time::Duration,
+        finished: bool,
+    ) {
+        self.report.phases.push(PhaseCost {
+            phase,
+            elapsed_micros: u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
+            finished,
+        });
+    }
+
     pub(super) fn start(&mut self, phase: &'static str) {
         self.end(true);
         self.active = Some((phase, Instant::now()));

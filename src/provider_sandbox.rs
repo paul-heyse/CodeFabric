@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::os::fd::{AsRawFd as _, OwnedFd};
 use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
@@ -92,6 +91,11 @@ open_files="$3"
 file_blocks="$4"
 cgroup_procs="$5"
 shift 5
+# Rust Stdio transfers the sealed policy on stdin only in this child. Keep provider stdin null.
+if [ "$preserve" = "3" ]; then
+  exec 3<&0
+  exec 0</dev/null
+fi
 if [ -n "$cgroup_procs" ]; then
   printf '%s\n' "$$" > "$cgroup_procs" || exit 125
 fi
@@ -1404,7 +1408,7 @@ impl ProviderSandboxLauncher {
             return Err(SandboxError::ParsingOnly);
         }
         let mut confined = Vec::<String>::new();
-        let mut inherited_seccomp = None::<OwnedFd>;
+        let mut seccomp_stdin = None::<Stdio>;
         match profile.mechanism {
             SandboxMechanism::DarwinSeatbelt => {
                 if request.contained_executable != request.host_executable {
@@ -1432,18 +1436,16 @@ impl ProviderSandboxLauncher {
                 let ProviderSandboxLaunchMaterial::LinuxSeccomp(descriptor) = material else {
                     return Err(SandboxError::InvalidLaunch);
                 };
-                // `dup` deliberately clears close-on-exec so bubblewrap can consume the
-                // already-compiled seccomp program by descriptor number. The owned duplicate
-                // remains alive through `spawn` and is closed in the daemon immediately after.
+                // Native Stdio installs the policy as child stdin without clearing CLOEXEC
+                // in the daemon. The fixed launch shell moves it to child fd 3 before bwrap.
                 let policy = descriptor
                     .try_clone()
                     .map_err(|_| SandboxError::InvalidLaunch)?;
-                let inherited = rustix::io::dup(policy.descriptor())
-                    .map_err(|_| SandboxError::InvalidLaunch)?;
-                let inherited_fd = inherited.as_raw_fd().to_string();
-                inherited_seccomp = Some(inherited);
                 #[cfg(target_os = "linux")]
-                confined.extend(linux_sandbox_arguments(profile, &inherited_fd));
+                {
+                    seccomp_stdin = Some(policy.into_stdin());
+                    confined.extend(linux_sandbox_arguments(profile, "3"));
+                }
                 #[cfg(not(target_os = "linux"))]
                 return Err(SandboxError::SandboxUnavailable);
             }
@@ -1477,9 +1479,7 @@ impl ProviderSandboxLauncher {
         #[cfg(not(target_os = "linux"))]
         let cgroup_procs = String::new();
         let mut command = Command::new("/bin/sh");
-        let preserved_descriptor = inherited_seccomp
-            .as_ref()
-            .map_or_else(String::new, |descriptor| descriptor.as_raw_fd().to_string());
+        let preserved_descriptor = if seccomp_stdin.is_some() { "3" } else { "" };
         command
             .arg("-c")
             .arg(PROVIDER_LAUNCH_SHELL)
@@ -1494,7 +1494,7 @@ impl ProviderSandboxLauncher {
             .envs(&request.environment)
             .env("CODEFABRIC_SANDBOX_PROFILE_DIGEST", &profile.sha256_digest)
             .current_dir(&request.output_root)
-            .stdin(Stdio::null())
+            .stdin(seccomp_stdin.unwrap_or_else(Stdio::null))
             .stdout(if capture_stdout {
                 Stdio::piped()
             } else {
@@ -1505,7 +1505,6 @@ impl ProviderSandboxLauncher {
         // Cgroup memory.max accounts resident pages for the whole process tree.
         // Virtual mappings and reserved thread stacks are not charged as physical RAM.
         let child = command.spawn()?;
-        drop(inherited_seccomp);
         #[cfg(target_os = "linux")]
         {
             ProviderProcessGroupChild::new(

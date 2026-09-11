@@ -3478,6 +3478,7 @@ fn rust_semantics_publication(dependency: Option<RustFixtureDependency>, with_fa
             Some("unavailable")
         );
         assert_eq!(states.get("working").map(String::as_str), Some("processed"));
+        live_updates::assert_native_context_overlap(&fixture);
         assert_eq!(states.get("fixture").map(String::as_str), Some("processed"));
         assert_structured_rust_failure_diagnostics(&fixture);
         assert_rust_syntax_survives_compilation_failure(&fixture);

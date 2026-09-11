@@ -5,7 +5,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Seek as _, Write as _};
-use std::os::fd::AsRawFd as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -113,6 +112,10 @@ impl CompiledProviderSeccomp {
     pub(super) fn descriptor(&self) -> &File {
         &self.0
     }
+
+    pub(super) fn into_stdin(self) -> Stdio {
+        Stdio::from(self.0)
+    }
 }
 
 pub(super) fn probe_behavior(executable: &Path) -> BTreeMap<String, bool> {
@@ -140,14 +143,13 @@ pub(super) fn probe_behavior(executable: &Path) -> BTreeMap<String, bool> {
         let run = |program: &str, args: &[&str]| -> bool {
             // A fresh descriptor starts at offset zero for every bubblewrap invocation.
             let Ok(policy) = CompiledProviderSeccomp::compile() else { return false; };
-            let Ok(inherited) = rustix::io::dup(policy.descriptor()) else { return false; };
-            let fd = inherited.as_raw_fd().to_string();
+            let fd = "3";
             let inherited_probe = format!("exec 9<\"$1\"; shift\n{}", super::PROVIDER_LAUNCH_SHELL);
             Command::new("/bin/sh").args(["-c", &inherited_probe,
-                "provider-probe", &root.join("credential").to_string_lossy(), &fd, "10", "64", "2048", ""])
-                .args(super::linux_sandbox_arguments(&profile, &fd))
+                "provider-probe", &root.join("credential").to_string_lossy(), fd, "10", "64", "2048", ""])
+                .args(super::linux_sandbox_arguments(&profile, fd))
                 .arg(program).args(args).env_clear().env("PATH", "/usr/bin:/bin")
-                .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+                .stdin(policy.into_stdin()).stdout(Stdio::null()).stderr(Stdio::null())
                 .status().is_ok_and(|status| status.success())
         };
         let launch = executable == Path::new(super::LINUX_BUBBLEWRAP_PATH) && run("/bin/true", &[]);
@@ -180,6 +182,25 @@ pub(super) fn probe_behavior(executable: &Path) -> BTreeMap<String, bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn concurrent_host_probes_preserve_child_local_seccomp_descriptors() {
+        use super::super::{SandboxCapabilityMatrix, ProviderTrustProfile};
+        // Force descriptor numbers above the shell's single-digit redirection range. These
+        // ordinary parent descriptors must stay CLOEXEC during both concurrent launches.
+        let _parent_descriptors = (0..32)
+            .map(|_| File::open("/dev/null").unwrap()).collect::<Vec<_>>();
+        let ready = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            let workers = (0..2).map(|_| scope.spawn(|| {
+                ready.wait();
+                let matrix = SandboxCapabilityMatrix::probe_current_host();
+                let row = matrix.row(ProviderTrustProfile::UntrustedSandboxed).unwrap();
+                assert!(row.available, "concurrent native containment: {row:?}");
+            })).collect::<Vec<_>>();
+            for worker in workers { worker.join().unwrap(); }
+        });
+    }
+
     #[test]
     fn production_launcher_contains_threads_and_joins_the_whole_process_tree() {
         use super::super::{
