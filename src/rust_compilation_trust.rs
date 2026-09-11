@@ -5,6 +5,12 @@
 //! and records what the launcher must prove. Build scripts and procedural macros are therefore
 //! part of the launcher's untrusted-code boundary, not an incidental Cargo implementation detail.
 
+mod cargo_output;
+pub use cargo_output::{
+    CargoArtifactObservation, CargoArtifactTarget, CargoBuildScriptObservation,
+    CargoOutputObservation,
+};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::fs::File;
@@ -1469,6 +1475,41 @@ impl RustCompilationLaunchPlan {
         self.read_discovery_output(paths, receipt, RustLaunchPurpose::UnitGraph)
     }
 
+    /// Observe native Cargo artifacts only after the complete process group and captures join.
+    /// The resulting observations do not authorize any source, artifact, or retained facts.
+    ///
+    /// # Errors
+    /// Rejects a foreign/replaced capture, an unfinished operation, a contradictory Cargo
+    /// terminal, malformed native output or unavailable retained capacity.
+    pub(crate) fn read_cargo_output(
+        &self,
+        paths: &RustCompilationPrivatePaths,
+        receipt: &RustCompilationLauncherReceipt,
+        budget: &crate::resource_budget::ResourceBudget,
+    ) -> Result<
+        crate::resource_budget::ChargedValue<CargoOutputObservation>,
+        RustCompilationTrustError,
+    > {
+        let bytes = self.read_discovery_output(paths, receipt, RustLaunchPurpose::Compilation)?;
+        // Match the existing bounded native unit-graph parser envelope. This includes parse
+        // structures and temporary JSON allocations, rather than retaining an uncharged Value.
+        let capacity = budget.try_reserve(
+            crate::resource_budget::ResourceClass::Data,
+            crate::resource_budget::ResourceAmounts {
+                memory_bytes: (bytes.len() as u64)
+                    .saturating_mul(32)
+                    .saturating_add(1024 * 1024),
+                ..Default::default()
+            },
+        )?;
+        let observation = CargoOutputObservation::parse(
+            &bytes,
+            receipt.terminal.terminal_state == RustCompilationTerminalState::Succeeded,
+        )
+        .map_err(RustCompilationTrustError::InvalidCargoOutput)?;
+        Ok(capacity.into_charged_value(observation))
+    }
+
     fn read_discovery_output(
         &self,
         paths: &RustCompilationPrivatePaths,
@@ -1483,7 +1524,10 @@ impl RustCompilationLaunchPlan {
             || receipt.plan_digest != self.plan_digest
             || paths.run_root != self.output_root
             || !receipt.terminal.process_group_empty
-            || receipt.terminal.terminal_state != RustCompilationTerminalState::Succeeded
+            || !(receipt.terminal.terminal_state == RustCompilationTerminalState::Succeeded
+                || purpose == RustLaunchPurpose::Compilation
+                    && receipt.terminal.terminal_state
+                        == RustCompilationTerminalState::CompilerFailed)
         {
             return Err(RustCompilationTrustError::IncompleteContainedTerminalEvidence);
         }
@@ -1942,6 +1986,8 @@ fn compile_rust_launch_plan(
                 "-Z".into(),
                 "unstable-options".into(),
             ]);
+        } else {
+            contained_arguments.push("--message-format=json-render-diagnostics".into());
         }
     } else {
         contained_arguments.extend(["--format-version".into(), "1".into()]);
@@ -3418,6 +3464,10 @@ pub fn issue_rust_compilation_admission_proof(
 
 #[derive(Debug, Error)]
 pub enum RustCompilationTrustError {
+    #[error("invalid native Cargo output: {0}")]
+    InvalidCargoOutput(&'static str),
+    #[error(transparent)]
+    CargoOutputBudget(#[from] crate::resource_budget::ResourceBudgetError),
     #[error("selected Rust context differs from exact compilation inputs")]
     SelectedContextMismatch,
     #[error("selected Rust compilation preparation is unavailable: {0:?}")]
@@ -3977,7 +4027,8 @@ mod tests {
                 "--profile",
                 "release",
                 "--jobs",
-                "2"
+                "2",
+                "--message-format=json-render-diagnostics"
             ]
         );
         assert_eq!(

@@ -964,7 +964,7 @@ fn build_fresh_native_source(
         admitted_runs.push(admitted);
     }
     input_observations::install_rust_target_progress(&mut builder, generation, &rustc.progress)?;
-    rustc.install_unit_graphs(&mut builder, record.workspace_id, generation)?;
+    rustc.install_compilation_observations(&mut builder, record.workspace_id, generation)?;
     admitted_runs.extend(rustc.admitted);
     costs.start("rust-syntax");
     let rust_syntax_runs = rust_syntax::install(

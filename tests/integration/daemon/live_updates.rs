@@ -2182,6 +2182,107 @@ fn assert_cargo_invocation_census(
     }
 }
 
+fn assert_cargo_output_census(
+    fixture: &ProductionFixture,
+    selected: &PersistedActivationControlRow,
+    graph: &Value,
+) {
+    use arrow_array::{BinaryArray, BooleanArray};
+    let selections = selected_relation_batches(selected, "source.cargo_output_selection");
+    assert_eq!(
+        selections.iter().map(RecordBatch::num_rows).sum::<usize>(),
+        1
+    );
+    for batch in &selections {
+        for name in ["census_present", "cargo_succeeded"] {
+            let values = batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<BooleanArray>()
+                .unwrap();
+            assert!(values.iter().all(|value| value == Some(true)));
+        }
+    }
+    let read_json = |relation, column| {
+        selected_relation_batches(selected, relation)
+            .iter()
+            .flat_map(|batch| {
+                let values = batch
+                    .column_by_name(column)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<BinaryArray>()
+                    .unwrap();
+                (0..batch.num_rows())
+                    .map(|row| serde_json::from_slice::<Value>(values.value(row)).unwrap())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    let artifacts = read_json("source.cargo_artifact_observation", "native_artifact_json");
+    assert_eq!(artifacts.len(), 2);
+    for artifact in &artifacts {
+        assert_eq!(artifact["fresh"], false);
+        assert_eq!(artifact["manifest_path"], "/workspace/Cargo.toml");
+        let matches = graph["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|unit| {
+                unit["mode"] != "run-custom-build"
+                    && unit["pkg_id"] == artifact["package_id"]
+                    && unit["target"]["name"] == artifact["target"]["name"]
+                    && unit["target"]["src_path"] == artifact["target"]["src_path"]
+                    && unit["target"]["kind"] == artifact["target"]["kind"]
+                    && unit["features"] == artifact["features"]
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            matches.len(),
+            1,
+            "native artifact has one expected compiler unit: {artifact}"
+        );
+        assert!(
+            artifact["filenames"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|path| path.as_str().unwrap().starts_with("/output/target/"))
+        );
+    }
+    let scripts = read_json("source.cargo_build_script_output", "observed_output_json");
+    assert_eq!(scripts.len(), 1);
+    let script = &scripts[0];
+    let bytes =
+        fs::read(Path::new(&fixture.workspace.root_path_display).join("custom/configure.rs"))
+            .unwrap();
+    let selects = bytes
+        .windows(b"cargo::rustc-cfg=selected".len())
+        .any(|window| window == b"cargo::rustc-cfg=selected");
+    assert_eq!(
+        script["cfgs"],
+        if selects {
+            json!(["selected"])
+        } else {
+            json!([])
+        }
+    );
+    assert!(script.get("env").is_none());
+    let value = if selects {
+        b"selected".as_slice()
+    } else {
+        b"alternate"
+    };
+    assert_eq!(
+        script["environment_digests"],
+        json!([[
+            "BUILD_SELECTION",
+            format!("b3:{}", blake3::hash(value).to_hex())
+        ]])
+    );
+}
+
 fn cargo_build_unit_graph_observation(
     fixture: &ProductionFixture,
 ) -> (
@@ -2211,6 +2312,7 @@ fn cargo_build_unit_graph_observation(
     )
     .unwrap();
     assert_eq!(graph["version"], 1);
+    assert_cargo_output_census(fixture, &selected, &graph);
     let units = graph["units"].as_array().unwrap();
     assert_eq!(units.len(), 3);
     let library = units.iter().find(|unit| unit["mode"] == "check").unwrap();
@@ -2285,7 +2387,8 @@ fn custom_cargo_build_input_changes_context_and_matches_clean_public_results() {
     fs::write(root.join("src/lib.rs"), b"#[cfg(selected)]\npub fn selected() -> u32 { 1 }\n#[cfg(not(selected))]\npub fn alternate() -> u32 { 2 }\npub fn caller() -> u32 {\n    #[cfg(selected)] { selected() }\n    #[cfg(not(selected))] { alternate() }\n}\n").unwrap();
     let build_script = |selected: bool| {
         format!(
-            "fn main() {{ println!(\"cargo::rustc-check-cfg=cfg(selected)\"); {} }}\n",
+            "fn main() {{ println!(\"cargo::rustc-check-cfg=cfg(selected)\"); println!(\"cargo::rustc-env=BUILD_SELECTION={}\"); {} }}\n",
+            if selected { "selected" } else { "alternate" },
             if selected {
                 "println!(\"cargo::rustc-cfg=selected\");"
             } else {

@@ -346,6 +346,9 @@ pub struct TrustQualifiedRustcCompilation {
 pub struct RustcProviderRunResult {
     compilations: Vec<TrustQualifiedRustcCompilation>,
     result: ProviderRunResult,
+    cargo_output: Option<
+        crate::resource_budget::ChargedValue<crate::rust_compilation_trust::CargoOutputObservation>,
+    >,
 }
 
 fn diagnostic_capture_complete(
@@ -543,6 +546,7 @@ impl RustcProviderRunResult {
         Ok(Self {
             compilations,
             result,
+            cargo_output: None,
         })
     }
 
@@ -598,12 +602,23 @@ impl RustcProviderRunResult {
         Ok(Self {
             compilations: Vec::new(),
             result,
+            cargo_output: None,
         })
     }
 
     #[must_use]
     pub fn compilations(&self) -> &[TrustQualifiedRustcCompilation] {
         &self.compilations
+    }
+
+    pub(crate) fn cargo_output(
+        &self,
+    ) -> Option<
+        &crate::resource_budget::ChargedValue<
+            crate::rust_compilation_trust::CargoOutputObservation,
+        >,
+    > {
+        self.cargo_output.as_ref()
     }
 
     #[must_use]
@@ -1998,6 +2013,7 @@ pub(crate) async fn run_untrusted_rustc_provider_lifecycle(
         crate::provider_contracts::allocation::reserve_native_state(lifecycle.provider_job)?,
         lifecycle.cpu_lease,
     );
+    let cargo_budget = lifecycle.provider_job.resource_budget().clone();
     execute_prepared_rustc_lifecycle(
         lifecycle.provider_job.clone(),
         lifecycle.task_scope,
@@ -2011,14 +2027,22 @@ pub(crate) async fn run_untrusted_rustc_provider_lifecycle(
                 .spawn_blocking_owned("compiler-process", native_owner, move |scope_cancel| {
                     let cancellation = cancellation.with_scope_cancellation(scope_cancel);
                     let launcher = ProviderSandboxLauncher::new(capabilities);
-                    supervise_rust_compilation(
+                    let receipt = supervise_rust_compilation(
                         &plan,
                         &private_paths,
                         &launcher,
                         &profile,
                         launch_material.as_borrowed(),
                         &cancellation,
-                    )
+                    )?;
+                    let cargo_output = match plan.read_cargo_output(&private_paths, &receipt, &cargo_budget) {
+                        Ok(output) => Some(output),
+                        Err(error) => {
+                            tracing::debug!(%error, "Cargo artifact census is unavailable; it cannot authorize retained output");
+                            None
+                        }
+                    };
+                    Ok::<_, RustCompilationTrustError>(SupervisedRustcOperation { receipt, cargo_output })
                 })
                 .await
                 .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?
@@ -2034,6 +2058,23 @@ pub(crate) async fn run_untrusted_rustc_provider_lifecycle(
 struct CancelRustcLifecycle {
     scope: StructuredCancellationScope,
     process: RustCompilationCancellationSignal,
+}
+
+struct SupervisedRustcOperation {
+    receipt: RustCompilationLauncherReceipt,
+    cargo_output: Option<
+        crate::resource_budget::ChargedValue<crate::rust_compilation_trust::CargoOutputObservation>,
+    >,
+}
+
+#[cfg(test)]
+impl From<RustCompilationLauncherReceipt> for SupervisedRustcOperation {
+    fn from(receipt: RustCompilationLauncherReceipt) -> Self {
+        Self {
+            receipt,
+            cargo_output: None,
+        }
+    }
 }
 
 impl Drop for CancelRustcLifecycle {
@@ -2057,7 +2098,7 @@ async fn execute_prepared_rustc_lifecycle<F, Fut>(
 ) -> Result<RustcProviderRunResult, RustcProviderLifecycleError>
 where
     F: FnOnce(RustCompilationLaunchPlan, RustCompilationCancellationSignal) -> Fut,
-    Fut: Future<Output = Result<RustCompilationLauncherReceipt, RustcProviderLifecycleError>>,
+    Fut: Future<Output = Result<SupervisedRustcOperation, RustcProviderLifecycleError>>,
 {
     let binding = plan.protocol_binding()?;
     if provider_job.cancellation().is_cancelled() {
@@ -2157,7 +2198,7 @@ where
         .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?;
     let terminal_states = monitor.terminal_states().await;
     drop(monitor);
-    let mut accepted = collector
+    let accepted = collector
         .wait()
         .await
         .map_err(|error| RustcProviderLifecycleError::OwnedTask(error.to_string()))?;
@@ -2168,7 +2209,10 @@ where
             "rustc provider transport terminated before a valid application result",
         );
     }
-    let receipt = match receipt {
+    let SupervisedRustcOperation {
+        receipt,
+        cargo_output,
+    } = match receipt {
         Ok(receipt) => receipt,
         Err(
             error @ (RustcProviderLifecycleError::SupervisorTask(_)
@@ -2192,6 +2236,19 @@ where
         }
     };
 
+    let mut result =
+        qualify_compiler_results(&provider_job, &plan, &receipt, accepted, terminal_states)?;
+    result.cargo_output = cargo_output;
+    Ok(result)
+}
+
+fn qualify_compiler_results(
+    provider_job: &ProviderJob,
+    plan: &RustCompilationLaunchPlan,
+    receipt: &RustCompilationLauncherReceipt,
+    mut accepted: Vec<AcceptedRustcCompilation>,
+    terminal_states: BTreeMap<String, ProviderRunState>,
+) -> Result<RustcProviderRunResult, RustcProviderLifecycleError> {
     if terminal_states.is_empty() || accepted.is_empty() {
         let cause = if provider_job.cancellation().is_cancelled()
             || terminal_states
@@ -2208,7 +2265,7 @@ where
             ProviderUnknownCause::ProviderFailure
         };
         return RustcProviderRunResult::gap(
-            &provider_job,
+            provider_job,
             cause,
             "rustc provider produced no qualified compiler terminal",
         );
@@ -2222,7 +2279,7 @@ where
         })
     {
         return RustcProviderRunResult::gap(
-            &provider_job,
+            provider_job,
             ProviderUnknownCause::ProviderFailure,
             "rustc provider did not complete every compilation unit",
         );
@@ -2238,13 +2295,13 @@ where
     }) {
         return Err(RustcProviderLifecycleError::DuplicateCompilationUnit);
     }
-    let proof = issue_rust_compilation_admission_proof(&plan, &receipt)?;
+    let proof = issue_rust_compilation_admission_proof(plan, receipt)?;
     let compilations = accepted
         .into_iter()
         .map(|compilation| TrustQualifiedRustcCompilation::try_new(compilation, proof.clone()))
         .collect::<Result<Vec<_>, _>>()
         .map_err(RustcProviderLifecycleError::from)?;
-    RustcProviderRunResult::try_new(&provider_job, compilations)
+    RustcProviderRunResult::try_new(provider_job, compilations)
 }
 
 /// Closed lifecycle failures. No variant carries partially accepted semantic output.
@@ -3096,9 +3153,11 @@ mod tests {
                 }
                 if compilation_failed {
                     RustCompilationLauncherReceipt::test_only_contained_compiler_failed(&plan)
+                        .map(SupervisedRustcOperation::from)
                         .map_err(Into::into)
                 } else {
                     RustCompilationLauncherReceipt::test_only_contained_success(&plan)
+                        .map(SupervisedRustcOperation::from)
                         .map_err(Into::into)
                 }
             },
@@ -3473,6 +3532,7 @@ mod tests {
                 observed.store(true, Ordering::Release);
                 async move {
                     RustCompilationLauncherReceipt::test_only_contained_success(&plan)
+                        .map(SupervisedRustcOperation::from)
                         .map_err(Into::into)
                 }
             },
@@ -3795,6 +3855,7 @@ mod tests {
                 .expect("provider-job cancellation reaches the process-group supervisor");
                 supervisor_observation.store(true, Ordering::Release);
                 RustCompilationLauncherReceipt::test_only_contained_success(&plan)
+                    .map(SupervisedRustcOperation::from)
                     .map_err(Into::into)
             },
         )
@@ -3851,6 +3912,7 @@ mod tests {
                 observed_invocation.store(true, Ordering::Release);
                 async move {
                     RustCompilationLauncherReceipt::test_only_contained_success(&plan)
+                        .map(SupervisedRustcOperation::from)
                         .map_err(Into::into)
                 }
             },

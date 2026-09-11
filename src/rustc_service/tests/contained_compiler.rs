@@ -331,6 +331,12 @@ async fn contained_cargo_observations(compile_failure: bool) {
         result.result().gaps().first()
     );
     assert_native_diagnostic_details(&result, diagnostic_source, compile_failure);
+    let cargo = result
+        .cargo_output()
+        .expect("joined native Cargo JSON census");
+    assert_eq!(cargo.succeeded, !compile_failure);
+    assert!(cargo.artifacts.iter().all(|artifact| !artifact.fresh));
+    assert!(cargo.reservation().amounts().memory_bytes > 0);
     for compilation in result.compilations() {
         let census = compilation
             .accepted()
@@ -509,6 +515,73 @@ async fn contained_cargo_observations(compile_failure: bool) {
         "nested module owner must retain its captured file identity"
     );
     assert!(!harness.paths.extractor_socket_path.exists());
+    assert_fresh_cargo_does_not_admit_unobserved_facts(&harness).await;
+}
+
+async fn assert_fresh_cargo_does_not_admit_unobserved_facts(harness: &LifecycleHarness) {
+    let paths = RustCompilationPrivatePaths::prepare(
+        harness.paths.run_root.parent().unwrap(),
+        "fresh-census",
+    )
+    .unwrap();
+    // This fixture deliberately supplies retained target files. Production still uses fresh
+    // private targets; a cache hit cannot be enabled there until fact replay/admission exists.
+    assert!(
+        std::process::Command::new("cp")
+            .args(["-a", "--reflink=auto"])
+            .arg(harness.paths.target_root.join("."))
+            .arg(&paths.target_root)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let profile = GeneratedSandboxProfile::generate(
+        ProviderTrustProfile::UntrustedSandboxed,
+        SandboxMechanism::LinuxBubblewrap,
+        &harness.inputs.workspace_view,
+        &harness.inputs.dependency_view,
+        &paths.run_root,
+    )
+    .unwrap();
+    let mut policy = harness.protocol_policy.clone();
+    policy.sandbox_profile_digest = profile.sha256_digest.clone();
+    policy.provider_deadline_unix_ms = now_millis() + 120_000;
+    let job = provider_job(&policy, &harness.admission, &RustcRelation::ALL);
+    let seccomp = crate::provider_sandbox::CompiledProviderSeccomp::compile().unwrap();
+    let result = run_untrusted_rustc_provider_lifecycle(UntrustedRustcProviderLifecycle {
+        cpu_lease: None,
+        task_scope: task_scope(),
+        provider_job: &job,
+        trust_policy: &harness.trust_policy,
+        sandbox_capabilities: &harness.capabilities,
+        sandbox_profile: &profile,
+        compilation_inputs: &harness.inputs,
+        private_paths: &paths,
+        compilation_request: &harness.request,
+        protocol_policy: policy,
+        run_admission: harness.admission.clone(),
+        allowed_uid: harness.allowed_uid,
+        launch_material: ProviderSandboxLaunchMaterial::LinuxSeccomp(&seccomp),
+    })
+    .await
+    .unwrap();
+    let cargo = result
+        .cargo_output()
+        .expect("Fresh still has a native Cargo census");
+    assert!(cargo.succeeded);
+    assert!(!cargo.artifacts.is_empty());
+    assert!(cargo.artifacts.iter().all(|artifact| artifact.fresh));
+    assert!(
+        result.compilations().is_empty(),
+        "Fresh did not execute the wrapper"
+    );
+    assert!(
+        result
+            .result()
+            .coverage()
+            .iter()
+            .all(|coverage| matches!(coverage.state(), ProviderCoverageState::Unknown { .. }))
+    );
 }
 
 /// The compiler owner is the crate root, while this diagnostic points into another captured file.

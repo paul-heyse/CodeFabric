@@ -51,6 +51,7 @@ use crate::workspace_registry::WorkspaceRecord;
 use super::inputs::ProviderInputs;
 use super::{CompiledSemanticRelease, ProductionWorkspaceStartupError, digest16, lower_hex, step};
 
+mod cargo_outputs;
 mod invocations;
 mod targets;
 pub(in crate::fabric) mod toolchain_cache;
@@ -77,6 +78,7 @@ pub(super) struct RustcOutcome {
     unit_graphs: Vec<unit_graph::SelectedUnitGraph>,
     unselected_graphs: Vec<crate::resource_budget::ChargedValue<unit_graph::CapturedUnitGraph>>,
     runs: Vec<TrustQualifiedRustcCompilation>,
+    cargo_outputs: Vec<cargo_outputs::ObservedRun>,
     gap: ProviderLaneGap,
 }
 
@@ -130,6 +132,7 @@ impl RustcOutcome {
             unit_graphs: Vec::new(),
             unselected_graphs: Vec::new(),
             runs: Vec::new(),
+            cargo_outputs: Vec::new(),
             gap: ProviderLaneGap::RequiredInputAbsent,
         }
     }
@@ -169,7 +172,7 @@ impl RustcOutcome {
         }
     }
 
-    pub(super) fn install_unit_graphs(
+    pub(super) fn install_compilation_observations(
         &self,
         builder: &mut crate::fabric::programmatic_epoch::ProgrammaticFabricEpochBuilder,
         workspace: [u8; 16],
@@ -182,7 +185,8 @@ impl RustcOutcome {
             workspace,
             generation,
         )?;
-        invocations::install(builder, &self.runs)
+        invocations::install(builder, &self.runs)?;
+        cargo_outputs::install(builder, &self.cargo_outputs, workspace, generation)
     }
 }
 
@@ -281,7 +285,8 @@ pub(super) fn run(
         outcome.unit_graphs.extend(graphs);
         let mut progress = RustTargetProgress::new(target, "unavailable", "");
         match available {
-            Ok((context_pin, admitted, runs)) => {
+            Ok((context_pin, admitted, runs, cargo_output)) => {
+                outcome.cargo_outputs.push(cargo_output);
                 progress.context_id = Some(admitted.job().context().analysis_context_id());
                 progress.state = if runs.is_empty()
                     || runs.iter().any(|run| {
@@ -351,6 +356,7 @@ fn prepare_and_run(
         ContextPin,
         AdmittedProviderResult,
         Vec<TrustQualifiedRustcCompilation>,
+        cargo_outputs::ObservedRun,
     ),
     ProductionWorkspaceStartupError,
 > {
@@ -768,11 +774,18 @@ fn prepare_and_run(
             .map_err(|error| step("rust-process-join", error))?;
         let result = result.map_err(|error| step("rust-provider", error))?;
         let runs = result.compilations().to_vec();
+        let output = result.cargo_output().cloned();
         let admitted = release
             .providers()
             .admit(prepared, result.into_result())
             .map_err(|error| step("rust-result-admission", error))?;
-        Ok((ContextPin(context_pin), admitted, runs))
+        let cargo_output = cargo_outputs::ObservedRun {
+            context: admitted.job().context().analysis_context_id(),
+            run: run_id,
+            run_label: admitted.job().run().identity().as_str().to_owned(),
+            output,
+        };
+        Ok((ContextPin(context_pin), admitted, runs, cargo_output))
     })
 }
 

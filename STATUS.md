@@ -289,8 +289,8 @@ and delegated user-systemd scope. All-target Clippy completes in 3m25s with the 
 backlog (`/tmp/codefabric-p04-priority-clippy.{jsonl,stderr}`). These results precede the subsequent
 compiler invocation-census changes and do not qualify the full suite, doctests or performance.
 
-**Actual compiler invocation census (2026-09-11; native qualification delivered, full installed
-edit/reopen qualification pending).** The wrapper negotiates an optional census feature before
+**Actual compiler invocation census (2026-09-11; native qualification delivered, installed
+edit/reopen qualified by the Cargo artifact continuation below).** The wrapper negotiates an optional census feature before
 sending a new typed Protobuf field: stream checksums re-encode messages, so silently sending fields
 to an older Prost peer would not preserve stream integrity. Older senders retain explicit absent
 census scope. Native argument order/bytes, compiler path, working directory, source path/content
@@ -322,15 +322,44 @@ source-content identities, ordered arguments, selected cfg and produced facts, t
 later status read in **199.652 s**: a periodic rescan arrived after its query had returned CURRENT.
 The shared helper now keeps the query's own freshness assertion and checks that the later status
 generation never moves backward. A later status read may truthfully report new pending work.
-Complete edit/independent-clean/exact-reopen qualification remains pending this correction.
+The Cargo artifact continuation below passes complete edit/independent-clean/exact-reopen
+qualification with this correction.
 All-target Clippy completes in 2m05s with the existing warnings and census schema/helper length
 advisories (`/tmp/codefabric-p04-invocation-clippy.{jsonl,stderr}`). No full-suite result is claimed.
 
-Actual Cargo artifact/build-script-output observations and their joins to expected units/facts,
-retained private outputs, complete dependency/runtime validity, and safe replay/admission remain.
-Cargo's selected-nightly “External tools” reference distinguishes `compiler-artifact.fresh` from
-execution; `build-script-executed` can also report cached output. The next slice preserves those
-semantics and the joined capture/receipt boundary before considering retained output reuse.
+**Native Cargo artifacts and build-script outputs (2026-09-11; installed checkpoint).**
+Compilation now requests the selected nightly's native `json-render-diagnostics` stream. The joined
+supervisor verifies the exact private output path, regular no-follow file, bounded length and receipt
+digest before parsing typed artifacts, build-script outputs and the terminal result. Charged census
+ownership follows the completed operation. Missing or malformed census remains unknown and cannot
+admit retained state; independently qualified compiler facts retain their existing authority.
+Three `source.cargo_*` relations preserve current run/context selections, native artifact target,
+profile/features/filenames/`fresh`, and build-script cfg/link/output observations. Environment values
+become ordered digests before persistence. Native `fresh` means compilation may have been skipped;
+`build-script-executed` may describe cached output. Neither authorizes artifact paths or fact reuse.
+The selected-nightly Cargo reference, “External tools” → “Compiler artifacts”/“Build script output,”
+is the source for these distinctions.
+
+The installed build-script edit/independent-clean/exact-reopen case now passes in **588.013 s**,
+including expected native units, actual compiler arguments and source digests, produced relations,
+artifact joins, changed build cfg/environment and all public fact/source expectations. Log:
+`/tmp/codefabric-p04-cargo-output-installed-final.log`, nextest
+`d0a340bc-5774-4998-92ff-393769ed63d0`, isolated target with installed providers and delegated
+user-systemd scope. The prior run reached the final reopened source query but exhausted its
+600-second whole-case envelope without an assertion failure; the expanded case now has a finite
+900-second hang bound. Product query deadlines are unchanged.
+
+The focused selection passed **50/51** cases; its stale exact-argv expectation omitted the new
+Cargo output flag and was corrected. The subsequent four focused cases all pass, including that
+expectation, malformed/contradictory census, failed compilation and a real second Cargo run over a
+private copied target. That second run reports all artifacts fresh, no wrapper compilations and
+explicit unknown fact coverage. Production targets remain fresh pending safe retention/admission.
+Logs: `/tmp/codefabric-p04-cargo-output-focused.log` and
+`/tmp/codefabric-p04-cargo-output-installed.log`. All-target checking passes in 1m24s; all-target
+Clippy completes in 1m30s with the existing warnings and schema/helper advisories; featureless
+checking passes. This qualifies the compiler/artifact census through edit and reopen, including the
+corrected status helper above. It does not complete runtime/dependency validity, retained outputs,
+owned replay, full P04/P05, the workspace suite or doctests.
 
 **Recursive inclusion continuation (2026-09-11).** The existing capture and watch walks now observe
 configuration in every admitted directory before enumerating its children. Native gix submodule
@@ -2700,7 +2729,7 @@ Current execution order:
 
 1. Continue **P04**: complete captured source/Git/external inclusion and recovery topology; complete
    positive/negative/tool/sysroot/linker/runtime dependency validity and owner manifests; establish
-   actual Cargo invocation/fact census before retaining target outputs; finish priority/backlog
+   safe retained Cargo target/fact admission using the delivered native census; finish priority/backlog
    integration around the delivered shared CPU allocations and concurrent context workers; extend
    nonempty owner reuse and remaining retention ownership. Native unit-graph capture, recursive
    admitted-root inclusion and immutable input publication ownership are already implemented.
