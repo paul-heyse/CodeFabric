@@ -3,7 +3,7 @@
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
@@ -30,6 +30,9 @@ pub(crate) struct NativeCpuPool {
     budget: ResourceBudget,
     admissions: AtomicU64,
     peak_slots: AtomicUsize,
+    waiters: AtomicUsize,
+    wait_micros: AtomicU64,
+    longest_wait_micros: AtomicU64,
 }
 
 #[derive(Clone, Copy, serde::Serialize)]
@@ -38,6 +41,9 @@ pub(crate) struct NativeCpuObservation {
     pub allocated_slots: usize,
     pub peak_allocated_slots: usize,
     pub admissions: u64,
+    pub waiting_contexts: usize,
+    pub admission_wait_micros: u64,
+    pub longest_admission_wait_micros: u64,
 }
 
 impl NativeCpuPool {
@@ -48,6 +54,9 @@ impl NativeCpuPool {
             budget,
             admissions: AtomicU64::new(0),
             peak_slots: AtomicUsize::new(0),
+            waiters: AtomicUsize::new(0),
+            wait_micros: AtomicU64::new(0),
+            longest_wait_micros: AtomicU64::new(0),
         }
     }
 
@@ -70,6 +79,11 @@ impl NativeCpuPool {
                 ..ResourceAmounts::default()
             },
         )?;
+        self.waiters.fetch_add(1, Ordering::Relaxed);
+        let waiting = AdmissionWait {
+            pool: self,
+            started: Instant::now(),
+        };
         let workers = preferred.get().min(self.capacity);
         let acquire = Arc::clone(&self.slots)
             .acquire_many_owned(workers.try_into().expect("bounded native slot count"));
@@ -88,6 +102,7 @@ impl NativeCpuPool {
         if cancellation.is_cancelled() {
             return Err(NativeCpuError::Cancelled);
         }
+        drop(waiting);
         self.admissions.fetch_add(1, Ordering::Relaxed);
         self.peak_slots.fetch_max(
             self.capacity - self.slots.available_permits(),
@@ -105,7 +120,33 @@ impl NativeCpuPool {
             allocated_slots: self.capacity - self.slots.available_permits(),
             peak_allocated_slots: self.peak_slots.load(Ordering::Relaxed),
             admissions: self.admissions.load(Ordering::Relaxed),
+            waiting_contexts: self.waiters.load(Ordering::Relaxed),
+            admission_wait_micros: self.wait_micros.load(Ordering::Relaxed),
+            longest_admission_wait_micros: self.longest_wait_micros.load(Ordering::Relaxed),
         }
+    }
+}
+
+/// Includes admitted, cancelled, timed-out and dropped wait futures. There is no detached
+/// observer task and no interval in which losing an RPC forgets a queued context's ownership.
+struct AdmissionWait<'a> {
+    pool: &'a NativeCpuPool,
+    started: Instant,
+}
+
+impl Drop for AdmissionWait<'_> {
+    fn drop(&mut self) {
+        let micros = u64::try_from(self.started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        self.pool.waiters.fetch_sub(1, Ordering::Relaxed);
+        let _ =
+            self.pool
+                .wait_micros
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |previous| {
+                    Some(previous.saturating_add(micros))
+                });
+        self.pool
+            .longest_wait_micros
+            .fetch_max(micros, Ordering::Relaxed);
     }
 }
 
@@ -212,5 +253,41 @@ mod tests {
         drop((second, retry));
         assert_eq!(pool.observation().allocated_slots, 0);
         assert_eq!(pool.observation().peak_allocated_slots, 3);
+        assert_eq!(pool.observation().waiting_contexts, 0);
+        assert!(
+            pool.observation().admission_wait_micros
+                >= pool.observation().longest_admission_wait_micros
+        );
+    }
+
+    #[tokio::test]
+    async fn older_contexts_cannot_be_overtaken_and_dropped_waiters_release_the_queue() {
+        let budget = crate::fabric::workspace_resources::test_workspace_budget();
+        let pool = NativeCpuPool::new(NonZeroUsize::new(3).unwrap(), budget.clone());
+        let cancellation = Cancellation::default();
+        let width = NonZeroUsize::new(2).unwrap();
+        let active = pool
+            .admit(width, &cancellation, Duration::from_secs(1))
+            .await
+            .unwrap();
+        let mut older = Box::pin(pool.admit(width, &cancellation, Duration::from_secs(1)));
+        assert!(futures::poll!(&mut older).is_pending());
+        let mut later = Box::pin(pool.admit(
+            NonZeroUsize::new(1).unwrap(),
+            &cancellation,
+            Duration::from_secs(1),
+        ));
+        assert!(
+            futures::poll!(&mut later).is_pending(),
+            "a narrower later job cannot overtake the oldest context"
+        );
+        assert_eq!(pool.observation().waiting_contexts, 2);
+        drop(older);
+        let next = later.await.unwrap();
+        assert_eq!(pool.observation().waiting_contexts, 0);
+        assert_eq!(budget.observation().used.queued_jobs, 0);
+        assert_eq!(pool.observation().allocated_slots, 3);
+        drop((active, next));
+        assert_eq!(pool.observation().allocated_slots, 0);
     }
 }

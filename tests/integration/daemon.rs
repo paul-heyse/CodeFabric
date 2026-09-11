@@ -4150,9 +4150,9 @@ fn assert_mixed_public_declaration_facts(
     empty["scope"]["languages"] = json!(["python"]);
     empty["queries"][0]["about"] =
         json!([{"entity_id": "entity:function:01010101010101010101010101010101"}]);
-    let mut literal = request.clone();
-    literal["semantic_request_id"] = json!("request:declaration-literal");
-    literal["queries"][0]["about"] = json!(["answer"]);
+    let mut unresolved = request.clone();
+    unresolved["semantic_request_id"] = json!("request:declaration-unresolved");
+    unresolved["queries"][0]["about"] = json!(["answer"]);
     let scenario = modern_client_scenario(
         fixture,
         stack,
@@ -4163,8 +4163,7 @@ fn assert_mixed_public_declaration_facts(
             {"id": "page", "operation": "read_resource", "uri": {"$ref": "facts.structured_content.pages.0.uri"}},
             {"id": "empty", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": empty, "delivery": "resource"}},
             {"id": "empty_page", "operation": "read_resource", "uri": {"$ref": "empty.structured_content.pages.0.uri"}},
-            {"id": "literal", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": literal, "delivery": "resource"}},
-            {"id": "literal_page", "operation": "read_resource", "uri": {"$ref": "literal.structured_content.pages.0.uri"}}
+            {"id": "unresolved", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": unresolved, "delivery": "resource"}}
         ]),
     );
     let path = write_modern_client_scenario(fixture, "canonical-facts", &scenario);
@@ -4247,28 +4246,17 @@ fn assert_mixed_public_declaration_facts(
     let empty = modern_structured(modern_step(&report, "empty"));
     assert_eq!(empty["processing"][0]["remaining_partitions"], 0);
     assert_eq!(empty["processing"][0]["additional_rows"], false);
-    let literal = modern_structured(modern_step(&report, "literal"));
-    assert_eq!(literal["execution_state"], "SUCCEEDED", "{literal}");
-    let literal_batches = batches("literal_page");
+    // A well-shaped request retains block-local unresolved scope. Explicit typed literals
+    // have their own public corpus; this deliberately unsupported bare phrase has no facts.
+    let unresolved = modern_structured(modern_step(&report, "unresolved"));
+    assert_eq!(unresolved["outcome"], "accepted");
+    assert_eq!(unresolved["query_results"][0]["execution_state"], "FAILED");
     assert_eq!(
-        literal_batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
-        1
+        unresolved["query_results"][0]["errors"][0]["code"],
+        "SEMANTIC_REFERENCE_UNAVAILABLE"
     );
-    for batch in literal_batches {
-        let text = |name| {
-            batch
-                .column_by_name(name)
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap()
-        };
-        for row in 0..batch.num_rows() {
-            assert_eq!(text("language").value(row), "python");
-            assert_eq!(text("name").value(row), "answer");
-            assert!(subjects.contains(text("public_entity_id").value(row)));
-        }
-    }
+    assert!(unresolved["pages"].as_array().unwrap().is_empty());
+    assert_eq!(unresolved["total_rows"], 0);
     {
         let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
         WorkspaceRegistry::new(&mut store)
@@ -4522,11 +4510,11 @@ fn assert_public_call_queries(
         steps.push(json!({"id": id, "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": selected, "delivery": "resource"}}));
         steps.push(json!({"id": format!("{id}_page"), "operation": "read_resource", "uri": {"$ref": format!("{id}.structured_content.pages.0.uri")}}));
     }
-    let mut unsupported = request;
-    unsupported["semantic_request_id"] =
-        json!(format!("request:calls-{phase}-unsupported-distance"));
-    unsupported["queries"][0]["distance"] = json!("nine steps");
-    steps.push(json!({"id": "unsupported", "operation": "call_tool", "name": "validate_code_graph_query", "arguments": {"request": unsupported}}));
+    let mut multistep = request;
+    multistep["semantic_request_id"] =
+        json!(format!("request:calls-{phase}-two-step-validation"));
+    multistep["queries"][0]["distance"] = json!("two steps");
+    steps.push(json!({"id": "distance_validation", "operation": "call_tool", "name": "validate_code_graph_query", "arguments": {"request": multistep}}));
     let scenario = modern_client_scenario(fixture, stack, "policy-one", json!([]), json!(steps));
     let path = write_modern_client_scenario(fixture, "canonical-calls", &scenario);
     let report = modern_client_report(&run_modern_client(stack, &path));
@@ -4680,8 +4668,8 @@ fn assert_public_call_queries(
     }
     assert_eq!(coverage["processing"][0]["additional_rows"], false);
     assert_eq!(
-        modern_structured(modern_step(&report, "unsupported"))["valid"],
-        false
+        modern_structured(modern_step(&report, "distance_validation"))["valid"],
+        true
     );
 }
 

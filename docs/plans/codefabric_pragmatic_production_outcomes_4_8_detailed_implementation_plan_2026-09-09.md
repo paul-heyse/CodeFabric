@@ -1979,7 +1979,7 @@ qualification continues with context scheduling. Sidecar strict checks and all 4
 and its installed binary has been rebuilt. Root all-target Clippy completes with the existing
 warning backlog; featureless checking passes. No full suite, doctest or performance claim is made.
 
-**Independent context dispatch continuation (2026-09-11; validation in progress).** Provider
+**Independent context dispatch continuation (2026-09-11; installed qualification delivered).** Provider
 execution now borrows immutable input/identity/budget views from the source owner. The operational
 writer and source-lease release remain inaccessible to those views, and scoped workers must join
 before the source owner can retire. Python runs alongside a bounded two-worker Rust target dispatcher;
@@ -2021,7 +2021,28 @@ run outputs and no leaked stages. The multi-target scenario now has a finite 600
 Its next run completes native work (peak 30 allocated slots, zero remaining), then reaches the
 separate 120-second semantic fixture wait during Delta publication. That fixture now explicitly
 waits up to 360 seconds for the durable semantic successor, preserving ordinary readiness/query
-deadlines. Current installed qualification is `/tmp/codefabric-p04-context-reuse-installed.log`.
+deadlines. The final installed multi-target qualification passes as recorded below.
+
+**Coalescing and FIFO continuation (2026-09-11).** The coordinator prioritizes cancellation and
+completed owned semantic work before another coalesced census; periodic recovery precedes watcher
+hints. Independent final input/activation fences still reject stale successors. The existing
+single-slot hint queue and loss watermark collapse repeated requests without adding job state;
+Tokio's owned FIFO semaphore prevents narrower new contexts from overtaking older waiters. Admission
+observations include queued contexts and cumulative/longest wait, including cancellation, timeout
+and dropped futures. Source/control/query owners remain separate from the finite native context
+backlog. Interactive family-specific scheduling and broader owner retention remain open.
+
+At `4e83f7cf` plus the FIFO/helper/priority changes, the complete installed multi-target case and two
+CPU lifetime/FIFO tests pass **3/3 in 228.833 s** (multi-target 228.826 s), run
+`f18e9419-8862-42f8-b42f-721877830a35`, `/tmp/codefabric-p04-context-fifo-final.log`.
+The shared query helper now asserts block-local unresolved-subject failure and supported two-step
+validation. Successful targets survive a broken target through all four public forms. This case
+does not itself reopen. The source-current/edit/stale-completion/restart case separately passes
+**790.208 s**, run `3a48b91a-2f5c-4ae9-bb06-d4bc8567c017`,
+`/tmp/codefabric-p04-priority-source-race.log`. Both use the isolated root target, installed providers
+and delegated user-systemd scope. All-target Clippy completes in 3m25s with the existing warning
+backlog (`/tmp/codefabric-p04-priority-clippy.{jsonl,stderr}`). These results precede the subsequent
+compiler invocation-census changes and do not qualify the full suite, doctests or performance.
 
 **Remaining implementation progression (E02/E04/E05/E12/E21/E22; P04).**
 
@@ -2048,8 +2069,8 @@ deadlines. Current installed qualification is `/tmp/codefabric-p04-context-reuse
    facts remain incomplete until valid retained-fact admission or owned compiler replay is proved.
    Schedule independent contexts using allocated CPU slots; account Cargo/rustc parallelism and
    Pyrefly's pool together. Explicit deterministic shared allocations and actual process-owned
-   leases and independent dispatch are now implemented above; complete installed multi-target
-   qualification and the broader priority/backlog integration remain.
+   leases and independent dispatch now pass installed multi-target qualification above. Broader
+   interactive family scheduling and owner retention remain.
 4. Extend the current coalescing coordinator with bounded priority classes for source/status/control,
    interactive required families and background convergence. Bound maximum coalescing delay and age
    lower-priority jobs so repeated interactive requests do not starve background completion. Coalesce
@@ -3056,8 +3077,8 @@ The remaining **P04** progression is:
    Current immutable toolchain capture reuse is already delivered (§4A/§6C/E01/E02).
 4. Schedule independent contexts using the now implemented shared native CPU allocations. Cargo
    and Pyrefly receive deterministic explicit widths with actual process-owned leases; Python and
-   bounded Rust target workers now run concurrently. Complete installed multi-target qualification
-   after the atomic input-view publication correction. Add bounded fair coalescing/backlog with aging and
+   bounded Rust target workers now run concurrently. Installed multi-target and source race/restart
+   qualification pass. FIFO admission and completed-work priority are delivered; extend
    interactive/source/control responsiveness, preserving useful workstation defaults (§6C/E12).
 5. Extend exact nonempty unchanged input/owner reuse and consumer-based persistence. Integrate
    remaining owner retention and measured eviction with P12 early enough to avoid full-ontology

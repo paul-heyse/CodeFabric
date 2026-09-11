@@ -92,13 +92,14 @@ impl SourceUpdateOwner {
         let mut needs_recovery = false;
         loop {
             tokio::select! {
+                biased;
                 () = scope.cancelled() => break,
-                hint = receiver.recv() => if hint.is_none() { break; },
                 _ = periodic.tick() => {
                     // Rebuild directory registrations as well as source state after lost hints.
                     watch.reinstall();
                     observation.request(true);
                 }
+                hint = receiver.recv() => if hint.is_none() { break; },
             }
             match Box::pin(self.reconcile(&observation, &mut receiver, &scope, &mut needs_recovery))
                 .await
@@ -396,8 +397,12 @@ impl SourceUpdateOwner {
         periodic.tick().await;
         loop {
             tokio::select! {
-                result = &mut build => return result.map(Some),
+                // Cancellation and completed owned work precede another coalesced census.
+                // A stream of source-current requests cannot postpone a ready successor;
+                // reconcile still performs its independent final input/activation fence.
+                biased;
                 () = scope.cancelled() => { build_scope.cancel(); let _ = build.await; return Ok(None); },
+                result = &mut build => return result.map(Some),
                 _ = periodic.tick() => { observation.request(true); },
                 _ = receiver.recv() => {
                     if observation.event_revision() != observed.events {

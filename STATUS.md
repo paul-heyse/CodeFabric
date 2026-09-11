@@ -224,7 +224,7 @@ qualification continues with context scheduling. Sidecar strict checks and all 4
 and its installed binary has been rebuilt. Root all-target Clippy completes with the existing
 warning backlog; featureless checking passes. No full suite, doctest or performance claim is made.
 
-**Independent context dispatch continuation (2026-09-11; validation in progress).** Provider
+**Independent context dispatch continuation (2026-09-11; installed qualification delivered).** Provider
 execution now borrows immutable input/identity/budget views from the source owner. The operational
 writer and source-lease release remain inaccessible to those views, and scoped workers must join
 before the source owner can retire. Python runs alongside a bounded two-worker Rust target dispatcher;
@@ -266,7 +266,28 @@ run outputs and no leaked stages. The multi-target scenario now has a finite 600
 Its next run completes native work (peak 30 allocated slots, zero remaining), then reaches the
 separate 120-second semantic fixture wait during Delta publication. That fixture now explicitly
 waits up to 360 seconds for the durable semantic successor, preserving ordinary readiness/query
-deadlines. Current installed qualification is `/tmp/codefabric-p04-context-reuse-installed.log`.
+deadlines. The final installed multi-target qualification passes as recorded below.
+
+**Coalescing and FIFO continuation (2026-09-11).** The coordinator prioritizes cancellation and
+completed owned semantic work before another coalesced census; periodic recovery precedes watcher
+hints. Independent final input/activation fences still reject stale successors. The existing
+single-slot hint queue and loss watermark collapse repeated requests without adding job state;
+Tokio's owned FIFO semaphore prevents narrower new contexts from overtaking older waiters. Admission
+observations include queued contexts and cumulative/longest wait, including cancellation, timeout
+and dropped futures. Source/control/query owners remain separate from the finite native context
+backlog. Interactive family-specific scheduling and broader owner retention remain open.
+
+At `4e83f7cf` plus the FIFO/helper/priority changes, the complete installed multi-target case and two
+CPU lifetime/FIFO tests pass **3/3 in 228.833 s** (multi-target 228.826 s), run
+`f18e9419-8862-42f8-b42f-721877830a35`, `/tmp/codefabric-p04-context-fifo-final.log`.
+The shared query helper now asserts block-local unresolved-subject failure and supported two-step
+validation. Successful targets survive a broken target through all four public forms. This case
+does not itself reopen. The source-current/edit/stale-completion/restart case separately passes
+**790.208 s**, run `3a48b91a-2f5c-4ae9-bb06-d4bc8567c017`,
+`/tmp/codefabric-p04-priority-source-race.log`. Both use the isolated root target, installed providers
+and delegated user-systemd scope. All-target Clippy completes in 3m25s with the existing warning
+backlog (`/tmp/codefabric-p04-priority-clippy.{jsonl,stderr}`). These results precede the subsequent
+compiler invocation-census changes and do not qualify the full suite, doctests or performance.
 
 **Recursive inclusion continuation (2026-09-11).** The existing capture and watch walks now observe
 configuration in every admitted directory before enumerating its children. Native gix submodule
@@ -310,14 +331,14 @@ That run completes multi-target publication, retains the independent successful 
 the broken target; it then fails an obsolete shared-helper expectation that an unresolved semantic
 subject rejects the whole request. The correct current contract is an accepted request with a failed
 query block and no rows/pages for that block. A diagnostic follow-up confirms exactly that behavior;
-the helper correction and complete multi-target query scenario are being qualified separately.
+the corrected helper and complete multi-target scenario subsequently pass as recorded above.
 Two-step call validation also replaces the retired unsupported-distance expectation.
 
 All-target Clippy completes in 3m13s with the existing warning backlog
 (`/tmp/codefabric-p04-input-owners-clippy.{jsonl,stderr}`); its two changed-line documentation/length
 findings were corrected without behavior changes. Featureless checking passes in 0.14 s
 (`/tmp/codefabric-p04-input-owners-featureless.log`). Both handoff documents pass navigation. Focused
-spelling flags only the pre-existing escaped Latin-1 `caf\\xe9` test bytes in `live_updates.rs`.
+spelling flags only the pre-existing Latin-1 café byte escapes in `live_updates.rs`.
 No full-suite, doctest or representative-performance result is claimed.
 
 The resumed inclusion slice uses one capture/watch policy. Captured root `pyrefly.toml` and
