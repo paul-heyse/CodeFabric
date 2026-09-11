@@ -27,7 +27,7 @@ qualification remains the separately scoped representative-workload work in pare
 | R02 | Implemented in `599db1ad`: census follows the closed current native relation sets and checks member-observation schema semantics; MIR fixtures supply coherent typed raw/display paths. All four original failures and the exhaustive census pass |
 | R03 | Implemented in `599db1ad`: the obsolete sealing-time assertion is replaced by `derived_composition_enforces_output_bound_on_read_without_preexecution`; installed composition must fail on its actual read. It and the existing stream-bound/repeated-read test pass |
 | R04 | Implemented in `fc4f0fa4`: execution accepts only freshness carried by its admitted snapshot; service and test backends use the same interface. Direct preparation retains guarded input behavior, then semantic-current admission precedes positive rows. Direct execution passes in 103.849 s; old-epoch lease coverage passes |
-| R05 | Shutdown admission race correction is implemented in `96e6d165` and passes all four focused cases. Publication drain/retry ownership correction passes 23 focused cases. Direct semantic admission and the mixed first-release corpus pass at `cbd7a241`; mixed/Python interruption and `c96de52e`'s client-timeout/reopen plus ordinary signal ordering pass. Functional fixes are implemented; aggregate startup/timeout survivor review remains part of the terminal run |
+| R05 | Implemented through `00f90066`: typed shutdown cancellation, fresh provider run/resource ownership, joined native reads/writes and background publication independent of request deadlines. Direct semantic admission, mixed first-release queries, all three publication-shutdown variants, signal ordering, activation readback and full retained processing pagination pass. The latest 48-case native/processing selection passes; aggregate survivor review remains part of the terminal run |
 | R06 | Scoped checks, default/CI group inspection and original-identity reconciliation pass. The complete unfiltered workspace run and its final handoff remain pending |
 
 The first focused selection passes **19/19** in 103.855 s (build 2m31s), run
@@ -121,6 +121,48 @@ publication-function length warning (`r05-shutdown-clippy.jsonl`, 2,078 diagnost
 duplicate test-build warnings); featureless all-target checking passes. Both default and CI
 group inspection preserve the original startup/timeout cases. These are scoped checks, not
 terminal qualification.
+
+The ownership review then found the same disposable-future policy at activation-history creation
+and activation append. Both production Delta entry points now select the draining mutation mode,
+alongside candidate publication; cancellation still reports unknown append outcomes for exact
+readback/recovery. Generic abortable upload helpers remain only in their assurance tests. This
+is a lifecycle consistency correction, not a performance change. The early `8d15cbdb` full run
+was deliberately interrupted to include it before final qualification: 1,171 passed, one 10,000-file
+capture received SIGINT, 67 cases had not started and two remained ignored (138.613 s;
+`full-2.log`). There were no ordinary failures or timeouts in that interrupted run. Activation
+readback and native lifetime qualification pass **13/13** in 38.530 s, run
+`1cdcd811-0e77-414c-a84c-444454ae18ef`; the cutover is `da6c97ef`.
+
+The bounded processing-page reader had the same runtime dependency. `c27be78e` gives it a draining
+read boundary and consumes the started page to completion after cancellation/validation/retention
+failure, releasing the partial response and preserving the first error. Twelve focused scope,
+ownership and page-drain cases pass. The installed 131-file pagination case fails before paging
+at its initial public query: background semantic publication reaches its independent 120-second
+deadline and is abandoned (`r05-processing-drain-focused.log`, 206.849 s). No native executor panic
+or failed join is reported. This exposes an inappropriate background work deadline, not a page
+contract regression or a performance acceptance target.
+
+The follow-up makes the native deadline optional: bounded workspace publication has no independent
+wall-clock cutoff, while caller/control work retains its explicit deadlines. The finite relation
+set, write concurrency, resource budgets, invalidation cancellation and bounded joined shutdown
+remain authoritative. Cancellation still discards the candidate result. The kernel dependency
+regression now covers scope cancellation without a deadline as well as an explicit deadline.
+The pagination fixture waits for initial and newer repaired semantic generations before its
+public-query/page assertions, keeping those requests' ordinary freshness contracts. Its generous
+whole-scenario hang bound and product wrapper cover both complete 131-file publications and
+restart; they are not latency targets. The tooling consumer passes 232 tests and lint/formatting.
+The independent Cursor run has ended; fresh aggregate qualification still remains to run.
+
+The final background/reader correction is `00f90066`. **48/48** selected checks pass in 402.639 s,
+run `5ed8cc3b-277c-4589-9ada-dec64debda42` (`r05-background-publication-focused.log`). The installed
+131-file case passes all current repair, exact reopen and historical 130-entry pagination
+assertions in 402.595 s. The remaining cases include real Delta/kernel reads and writes, optional
+and explicit deadlines, cancellation, failed cleanup ownership and resource isolation. No executor
+panic or unexpected cleanup deadline is reported. All-target Clippy completes with zero errors
+and the existing warning backlog (2,078 diagnostics); featureless checking passes. Tooling passes
+232 tests plus formatting/lint. Final inventory is **1,242 total / 1,240 selected / two ignored**;
+all 71 original failures map, and both default/CI groups include the original 66 startup/timeout
+identities (`r06-identity-reconciliation.json`). This is the candidate for the fresh terminal run.
 
 ## 1. Result and scope
 

@@ -2609,6 +2609,8 @@ stale schema/composition/freshness assertions, bounds native fixture overlap and
 publication cancellation and retained-provider retry ownership. Provider attempts now share one
 fresh run/resource-owner identity while captured source/context identities remain stable. Started
 Delta writes remain driven on their native runtime until joined; failed joins retain ownership.
+The same boundary drains retained processing pages. Bounded background publication can finish
+independently of request deadlines, retaining resource limits, invalidation and bounded shutdown.
 The supplement and STATUS record scoped native passes and the still-pending terminal full run.
 These repairs support P04/P05/P13 and do not complete their broader acceptance boundaries.
 

@@ -5,7 +5,7 @@ The user authorized the workspace test remediation plan. R01–R04 are implement
 19 focused cases. R05's corrected provider run/resource admission and native publication lifetime
 pass 23 focused checks. Real direct semantic admission, the mixed first-release corpus, mixed/Python
 publication interruption, client-timeout/reopen and ordinary shutdown ordering now pass. The final
-shutdown correction is `c96de52e`; it gives started native writes their finite publication allowance
+shutdown correction is `c96de52e`; it gives started native writes a finite joined shutdown allowance
 with separate supervisor headroom, preserving startup/query deadlines and failed-join ownership.
 Revised fixture scheduling and sequence limits are checked in; the tooling consumer passes 232
 tests and formatting/lint. All-target Clippy completes with existing warnings and featureless
@@ -14,6 +14,13 @@ The earlier run at `12d2ee0d` was interrupted after a concurrent Cursor run repl
 binaries and is not attributable full-suite evidence. The original failed baseline below remains
 visible until a full run passes. Durations are diagnostic observations; the user's priority is
 sound design and complete functionality, with representative performance work left to parent P14.
+The subsequent ownership audit (`da6c97ef`, `c27be78e`) covers activation writes and bounded retained
+processing reads. `00f90066` removes the independent timer that abandoned valid background
+publication, preserving caller/control deadlines, resource bounds, invalidation and bounded
+shutdown. All 48 focused checks pass, including the full 131-file repair/reopen/retained-page case
+and actual Delta, cancellation and cleanup cases. Activation/readback separately passes 13 cases.
+The final inventory has 1,240 selected tests plus the same two intentional ignores; all 71 original
+unsuccessful identities map to selected cases, with only the documented R03 assertion replacement.
 Broader outcome implementation remains at the `722b57d4` P04 checkpoint.
 
 P01/P02 initial vertical exits and P03's first-release query boundary are delivered. P04 retained
@@ -41,13 +48,14 @@ per-user inotify instance capacity; 13 stop at startup readiness deadlines. The 
 are a stale provider census, three stale Binary-field fixtures and an obsolete seal-time execution
 expectation. Three tests hit nextest's 120-second bound. Five sequential diagnostics produce four
 passes and expose a stale direct-backend freshness argument behind one timeout; they do not replace
-full-suite acceptance. Retained-Pyrefly shutdown emits a warning in one passing readiness case and
-remains a traced follow-up, not a proved leak or a passing semantic-completion claim.
+full-suite acceptance. The original passing readiness case also emitted a retained-Pyrefly shutdown
+warning; the subsequent typed cancellation and ownership corrections are recorded above and in §0
+of the supplement. These counts describe the original review baseline.
 
 Local logs are in `target/nextest-review/2026-09-11-workspace/`; the durable findings and full test
 inventory are in the new plan. Scheduling, typed fixture/census updates, actual-read resource
-assertions and admitted-snapshot freshness are implemented. Remaining work is real native
-shutdown qualification and resolution of any survivors in the terminal full run. An unfiltered passing run is required
+assertions, admitted-snapshot freshness and native lifetime fixes are implemented. Remaining work is
+the terminal full run and resolution of any functional survivors. An unfiltered passing run is required
 before this supplement closes. It supports the current outcomes plan and does not replace its
 backlog or declare P04/P05 complete. Repair progress and commits are in the supplement’s §0.
 
