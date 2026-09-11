@@ -226,6 +226,11 @@ measurement; `just cache-stats` reports advanced statistics. A cumulative hit pe
 alone is not performance evidence. `tooling/rust-tool-versions.env` is the single exact
 workstation/CI CLI manifest; `just tools-doctor` checks it and `just setup-tools`
 idempotently reconciles only missing or mismatched tools.
+uv is an exception: local commands use the installed executable on `PATH`, and the
+doctor checks availability without requiring a particular uv version. CI also prefers
+an installed uv; when absent it installs the default release through `setup-uv`.
+The adapter's Python selection, dependency lock and `uv_build` build dependency remain
+separate from the uv CLI version.
 
 Nothing host-specific belongs in that file — no `-C target-cpu=native`, no absolute paths,
 no one machine's linker.

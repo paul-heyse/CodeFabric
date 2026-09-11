@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Check or install the exact repository CLI contract without reinstalling matching tools.
+# Check or install pinned tools; require the system uv without selecting its version.
 
 set -euo pipefail
 
@@ -118,12 +118,11 @@ while IFS='|' read -r binary command_name package expected; do
 done < <(tool_rows)
 
 uv_actual="$(command -v uv >/dev/null 2>&1 && uv --version 2>/dev/null | awk 'NR==1 {print $2}' || true)"
-if [ "$uv_actual" != "$UV_VERSION" ]; then
-  printf 'uv: expected %s, found %s; install the exact uv release before retrying\n' \
-    "$UV_VERSION" "${uv_actual:-missing}" >&2
+if [ -z "$uv_actual" ]; then
+  printf 'uv: no working executable on PATH; install uv before retrying\n' >&2
   failures=$((failures + 1))
 elif [ "$mode" = report ]; then
-  printf '%-16s %s\n' uv "$uv_actual"
+  printf '%-16s %s (system, unpinned)\n' uv "$uv_actual"
 fi
 
 ensure_rustup_contract || failures=$((failures + 1))

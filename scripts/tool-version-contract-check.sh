@@ -26,7 +26,6 @@ fi
 grep -Fq "toolchain: $CODEFABRIC_STABLE_TOOLCHAIN" "$repo_root/.github/workflows/ci.yml"
 grep -Fq "toolchain: $CODEFABRIC_ASSURANCE_TOOLCHAIN" "$repo_root/.github/workflows/ci.yml"
 grep -Fq "version: \"v$SCCACHE_VERSION\"" "$repo_root/.github/workflows/ci.yml"
-grep -Fq "version: \"$UV_VERSION\"" "$repo_root/.github/workflows/ci.yml"
 grep -Fq "bacon $BACON_VERSION" "$repo_root/bacon.toml"
 
 printf 'tool version configuration contract passed\n'
