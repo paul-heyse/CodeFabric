@@ -3114,6 +3114,18 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
     assert_eq!(submodule_observation(&fixture), (false, false));
     fs::create_dir_all(root.join("target/vendor")).unwrap();
     gix::init(root.join("target/vendor")).unwrap();
+    fs::create_dir_all(root.join("target/vendor/target/deep")).unwrap();
+    gix::init(root.join("target/vendor/target/deep")).unwrap();
+    fs::write(
+        root.join("target/vendor/.gitmodules"),
+        "[submodule \"deep\"]\npath = target/deep\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("target/vendor/target/deep/nested.py"),
+        "def nested_polled():\n    return 3\n",
+    )
+    .unwrap();
     fs::write(
         root.join("target/vendor/added.py"),
         "def polled():\n    return 2\n",
@@ -3128,22 +3140,34 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
             .max_by_key(|row| row.row().ordinal.get())
             .unwrap();
         let captured = selected_relation_batches(&selected, "source.exact_source_bytes");
-        let added = captured.iter().any(|batch| {
-            let binary = |name| {
-                batch
-                    .column_by_name(name)
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<arrow::array::BinaryArray>()
-                    .unwrap()
-            };
-            binary("relative_path")
-                .iter()
-                .zip(binary("source_bytes").iter())
-                .any(|(path, bytes)| {
-                    path == Some(b"target/vendor/added.py".as_slice())
-                        && bytes == Some(b"def polled():\n    return 2\n".as_slice())
-                })
+        let added = [
+            (
+                b"target/vendor/added.py".as_slice(),
+                b"def polled():\n    return 2\n".as_slice(),
+            ),
+            (
+                b"target/vendor/target/deep/nested.py".as_slice(),
+                b"def nested_polled():\n    return 3\n".as_slice(),
+            ),
+        ]
+        .iter()
+        .all(|(expected_path, expected_bytes)| {
+            captured.iter().any(|batch| {
+                let binary = |name| {
+                    batch
+                        .column_by_name(name)
+                        .unwrap()
+                        .as_any()
+                        .downcast_ref::<arrow::array::BinaryArray>()
+                        .unwrap()
+                };
+                binary("relative_path")
+                    .iter()
+                    .zip(binary("source_bytes").iter())
+                    .any(|(path, bytes)| {
+                        path == Some(*expected_path) && bytes == Some(*expected_bytes)
+                    })
+            })
         });
         if added {
             break;
@@ -3162,10 +3186,18 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
     );
     let updated_path_pin = metadata_pin("source.git_path_context");
     assert_eq!(submodule_observation(&fixture), (true, true));
+    assert_eq!(
+        submodule_observation_for(&fixture, b"target/vendor/target/deep", b"deep"),
+        (true, true)
+    );
     let boundary_pin = metadata_pin("source.git_submodule_boundary");
     assert_eq!(
         names,
-        BTreeSet::from(["original".to_owned(), "polled".to_owned()])
+        BTreeSet::from([
+            "original".to_owned(),
+            "polled".to_owned(),
+            "nested_polled".to_owned()
+        ])
     );
     assert!(
         updated["source_generation"].as_u64().unwrap()
@@ -3216,7 +3248,11 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
     );
     assert_eq!(
         names,
-        BTreeSet::from(["original".to_owned(), "polled".to_owned()])
+        BTreeSet::from([
+            "original".to_owned(),
+            "polled".to_owned(),
+            "nested_polled".to_owned()
+        ])
     );
     assert!(
         metadata_updated["source_generation"].as_u64().unwrap()
@@ -3227,7 +3263,11 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
     let (reopened, names) = query("poll-reopened");
     assert_eq!(
         names,
-        BTreeSet::from(["original".to_owned(), "polled".to_owned()])
+        BTreeSet::from([
+            "original".to_owned(),
+            "polled".to_owned(),
+            "nested_polled".to_owned()
+        ])
     );
     assert_eq!(
         reopened["source_generation"],
@@ -3235,39 +3275,64 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
     );
     assert!(selected_attribute());
     assert_eq!(submodule_observation(&fixture), (true, true));
+    assert_eq!(
+        submodule_observation_for(&fixture, b"target/vendor/target/deep", b"deep"),
+        (true, true)
+    );
     assert_eq!(boundary_pin, metadata_pin("source.git_submodule_boundary"));
     assert_eq!(initial_stage_pin, metadata_pin("source.git_index_stage"));
     supervisor.stop();
 }
 
 fn submodule_observation(fixture: &ProductionFixture) -> (bool, bool) {
+    submodule_observation_for(fixture, b"target/vendor", b"vendor")
+}
+
+fn submodule_observation_for(
+    fixture: &ProductionFixture,
+    path: &[u8],
+    name: &[u8],
+) -> (bool, bool) {
     let selected = all_activation_control_rows(fixture)
         .into_iter()
         .max_by_key(|row| row.row().ordinal.get())
         .unwrap();
     let batches = selected_relation_batches(&selected, "source.git_submodule_boundary");
-    assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
-    let batch = batches.iter().find(|batch| batch.num_rows() > 0).unwrap();
-    let bytes = |name| {
-        batch
-            .column_by_name(name)
-            .unwrap()
-            .as_any()
-            .downcast_ref::<arrow_array::BinaryArray>()
-            .unwrap()
-    };
-    assert_eq!(bytes("relative_path").value(0), b"target/vendor");
-    assert_eq!(bytes("name").value(0), b"vendor");
-    let flag = |name| {
-        batch
-            .column_by_name(name)
-            .unwrap()
-            .as_any()
-            .downcast_ref::<arrow_array::BooleanArray>()
-            .unwrap()
-            .value(0)
-    };
-    (flag("captured_sources"), flag("repository_observed"))
+    let mut found = Vec::new();
+    for batch in &batches {
+        let bytes = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow_array::BinaryArray>()
+                .unwrap()
+        };
+        let flag = |name, row| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow_array::BooleanArray>()
+                .unwrap()
+                .value(row)
+        };
+        for (row, value) in bytes("relative_path").iter().enumerate() {
+            if value == Some(path) {
+                assert_eq!(bytes("name").value(row), name);
+                found.push((
+                    flag("captured_sources", row),
+                    flag("repository_observed", row),
+                ));
+            }
+        }
+    }
+    assert_eq!(
+        found.len(),
+        1,
+        "one unambiguous selected submodule boundary for {path:?}"
+    );
+    found[0]
 }
 
 fn install_separate_git_metadata(fixture: &ProductionFixture) {

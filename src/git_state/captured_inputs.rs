@@ -71,6 +71,7 @@ pub(crate) fn relation_digest<T: Serialize>(
 pub(crate) fn capture(
     root: &Path,
     records: &[SourceInventoryRecord],
+    policy: &crate::source_inclusion::SourceInclusionPolicy,
     limits: InventoryLimits,
     budget: &ResourceBudget,
     cancellation: &Cancellation,
@@ -101,7 +102,6 @@ pub(crate) fn capture(
             repositories.insert(directory.clone());
         }
     }
-    let policy = crate::source_inclusion::SourceInclusionPolicy::capture_watch(root);
     let mut submodules = Vec::new();
     let mut groups = BTreeMap::<Vec<u8>, Vec<&SourceInventoryRecord>>::new();
     for record in records {
@@ -154,7 +154,7 @@ pub(crate) fn capture(
             index.map(|index| -> &gix::index::State { index }),
             &directories,
             &repositories,
-            &policy,
+            policy,
             cancellation,
         );
         check_progress(started, limits, cancellation)?;

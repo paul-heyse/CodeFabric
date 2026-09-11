@@ -271,10 +271,38 @@ pub struct StableFileRead {
 pub fn read_control_artifact(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, StableReadError> {
     let descriptor = open(
         path,
-        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
         Mode::empty(),
     )
     .map_err(|_| SecurePathError::SourceAccessDenied)?;
+    read_control_descriptor(descriptor, maximum_bytes)
+}
+
+/// Watch configuration follows no symlink at any path component and cannot wait on a FIFO.
+/// This remains an observation boundary; only `SecureRoot` authorizes source ingress.
+pub(crate) fn read_control_artifact_nofollow(
+    path: &Path,
+    maximum_bytes: u64,
+) -> Result<Vec<u8>, StableReadError> {
+    let directory =
+        open_absolute_directory_once(path.parent().ok_or(SecurePathError::SourceAccessDenied)?)?;
+    let name = path
+        .file_name()
+        .ok_or(SecurePathError::SourceAccessDenied)?;
+    let descriptor = openat(
+        &directory,
+        name,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .map_err(|_| SecurePathError::SourceAccessDenied)?;
+    read_control_descriptor(descriptor, maximum_bytes)
+}
+
+fn read_control_descriptor(
+    descriptor: OwnedFd,
+    maximum_bytes: u64,
+) -> Result<Vec<u8>, StableReadError> {
     let file_stat = fstat(&descriptor).map_err(|_| SecurePathError::OperatingSystem)?;
     if !FileType::from_raw_mode(file_stat.st_mode).is_file() {
         return Err(SecurePathError::SourceAccessDenied.into());
@@ -795,7 +823,7 @@ impl SecureRoot {
         match openat2(
             &self.descriptor,
             relative,
-            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
             Mode::empty(),
             ResolveFlags::BENEATH
                 | ResolveFlags::NO_MAGICLINKS
@@ -842,14 +870,14 @@ impl SecureRoot {
             openat(
                 directory,
                 OsStr::from_bytes(final_component),
-                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
                 Mode::empty(),
             )
         } else {
             openat(
                 &self.descriptor,
                 OsStr::from_bytes(final_component),
-                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
                 Mode::empty(),
             )
         }
@@ -1162,6 +1190,33 @@ mod tests {
     }
 
     #[test]
+    fn configuration_fifo_cannot_block_source_or_fallback_open() {
+        let (_directory, mut store, record, root_path) = registered_root();
+        rustix::fs::mknodat(
+            rustix::fs::CWD,
+            root_path.join("pyrefly.toml"),
+            FileType::Fifo,
+            Mode::RUSR | Mode::WUSR,
+            0,
+        )
+        .unwrap();
+        let root = open_workspace_root(&mut store, record.workspace_id).unwrap();
+        let path =
+            PlatformPath::from_raw_relative_bytes(root.platform_code(), b"pyrefly.toml".to_vec())
+                .unwrap();
+        assert!(matches!(
+            root.read_stable_file(&path, 1024),
+            Err(StableReadError::Secure(SecurePathError::SourceAccessDenied))
+        ));
+        // Exercise the portable component-walk opener as well as Linux openat2 above.
+        let descriptor = root.open_component_walk(&path).unwrap();
+        assert_eq!(
+            FileType::from_raw_mode(fstat(&descriptor).unwrap().st_mode),
+            FileType::Fifo
+        );
+    }
+
+    #[test]
     fn pinned_blob_read_rejects_oversize_links_and_nonregular_files() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().canonicalize().unwrap();
@@ -1189,6 +1244,13 @@ mod tests {
         )
         .unwrap();
         assert!(read_pinned_blob(&fifo, 9).is_err());
+        assert!(read_control_artifact(&fifo, 9).is_err());
+        assert!(read_control_artifact_nofollow(&fifo, 9).is_err());
+        assert_eq!(
+            read_control_artifact_nofollow(&blob, 9).unwrap(),
+            b"immutable"
+        );
+        assert!(read_control_artifact_nofollow(&parent_link.join("blob"), 9).is_err());
     }
 
     #[test]

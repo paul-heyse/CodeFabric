@@ -412,11 +412,11 @@ impl InventoryWalker {
         require_source_generation(store, root.workspace_id(), source_generation)?;
         let started = Instant::now();
         #[cfg(feature = "daemon")]
-        let inclusion = crate::source_inclusion::SourceInclusionPolicy::capture_secure(root);
+        let mut inclusion = crate::source_inclusion::SourceInclusionPolicy::capture_secure(root);
         #[cfg(not(feature = "daemon"))]
         let inclusion = crate::source_inclusion::SourceInclusionPolicy::default();
         #[cfg(feature = "daemon")]
-        let _policy_charge = reserve_memory(&self.budget, inclusion.retained_bytes())?;
+        let mut policy_charge = reserve_memory(&self.budget, inclusion.retained_bytes())?;
         let mut retained = reserve_memory(&self.budget, 0)?;
         let mut traversal = reserve_memory(&self.budget, 256)?;
         let mut records = Vec::new();
@@ -431,6 +431,16 @@ impl InventoryWalker {
                 return Err(InventoryError::BoundExceeded("directory-count"));
             }
             let raw = join_components(&components);
+            #[cfg(feature = "daemon")]
+            {
+                let before = inclusion.retained_bytes();
+                inclusion.observe_secure_directory(root, &raw);
+                policy_charge.try_grow(ResourceAmounts {
+                    memory_bytes: inclusion.retained_bytes().saturating_sub(before),
+                    ..ResourceAmounts::default()
+                })?;
+            }
+
             let platform_path = if components.is_empty() {
                 None
             } else {
@@ -514,10 +524,6 @@ impl InventoryWalker {
                 }
             }
         }
-        #[cfg(feature = "daemon")]
-        if inclusion != crate::source_inclusion::SourceInclusionPolicy::capture_secure(root) {
-            return Err(InventoryError::SourceChanged);
-        }
         records.sort_unstable_by(|left, right| {
             left.path
                 .raw_relative_path_bytes
@@ -527,6 +533,7 @@ impl InventoryWalker {
         let git_context = crate::git_state::captured_inputs::capture(
             &root.git_metadata_location(),
             &records,
+            &inclusion,
             InventoryLimits {
                 maximum_duration: self
                     .limits
@@ -576,6 +583,10 @@ impl InventoryWalker {
             }
         }
         let _merkle = reserve_memory(&self.budget, merkle_memory_bound(&records)?)?;
+        #[cfg(feature = "daemon")]
+        if !inclusion.unchanged_secure(root) {
+            return Err(InventoryError::SourceChanged);
+        }
         let digest = merkle_inventory_digest(&records);
         self.metrics.duration_micros =
             u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
@@ -1556,6 +1567,77 @@ mod tests {
             "declaration removal retracts the pruned source subtree"
         );
         assert_ne!(first.git_context_digest(), removed.git_context_digest());
+    }
+
+    #[test]
+    #[cfg(feature = "daemon")]
+    fn recursive_configuration_captures_raw_nested_roots_and_retracts_descendants() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let (_directory, mut store, workspace, path) = fixture();
+        let nested = path.join(std::ffi::OsStr::from_bytes(b"nested-\xff"));
+        let dependency = nested.join("target/dependency");
+        let deep = dependency.join("node_modules/deep");
+        fs::create_dir_all(&deep).unwrap();
+        fs::create_dir_all(dependency.join("node_modules/unselected")).unwrap();
+        gix::init(&nested).unwrap();
+        gix::init(&dependency).unwrap();
+        fs::write(
+            nested.join(".gitmodules"),
+            "[submodule \"dependency\"]\npath = target/dependency\n",
+        )
+        .unwrap();
+        fs::write(
+            dependency.join(".gitmodules"),
+            "[submodule \"deep\"]\npath = node_modules/deep\n",
+        )
+        .unwrap();
+        fs::write(dependency.join("local.py"), "local = 1\n").unwrap();
+        fs::write(deep.join("selected.py"), "selected = 2\n").unwrap();
+        fs::write(
+            dependency.join("node_modules/unselected/ignored.py"),
+            "ignored = 3\n",
+        )
+        .unwrap();
+        let root = open_workspace_root(&mut store, workspace).unwrap();
+        let mut walker = InventoryWalker::new(InventoryLimits::default());
+        let first = walker
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
+            .unwrap();
+        let paths = first
+            .records
+            .iter()
+            .map(|record| record.path.raw_relative_path_bytes.as_slice())
+            .collect::<BTreeSet<_>>();
+        assert!(paths.contains(b"nested-\xff/target/dependency/local.py".as_slice()));
+        assert!(
+            paths.contains(
+                b"nested-\xff/target/dependency/node_modules/deep/selected.py".as_slice()
+            )
+        );
+        assert!(!paths.contains(
+            b"nested-\xff/target/dependency/node_modules/unselected/ignored.py".as_slice()
+        ));
+        let boundaries = &first.git_context.as_ref().unwrap().submodules;
+        assert_eq!(boundaries.len(), 2);
+        let deep_boundary = boundaries
+            .iter()
+            .find(|boundary| boundary.name.as_deref() == Some(b"deep"))
+            .unwrap();
+        assert_eq!(
+            deep_boundary.path.as_deref(),
+            Some(b"nested-\xff/target/dependency/node_modules/deep".as_slice())
+        );
+        assert!(deep_boundary.captured_sources);
+        assert!(!deep_boundary.repository_observed);
+        fs::remove_file(nested.join(".gitmodules")).unwrap();
+        let after = walker
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
+            .unwrap();
+        assert!(
+            after.records.is_empty(),
+            "removing a parent declaration withdraws the entire pruned chain"
+        );
+        assert_ne!(first.digest, after.digest);
     }
 
     #[test]

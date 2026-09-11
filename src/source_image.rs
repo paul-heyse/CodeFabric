@@ -362,13 +362,13 @@ pub fn publish_provider_workspace_view(
             fs::File::open(&stage)
                 .and_then(|file| file.sync_all())
                 .map_err(|_| SourceImageError::ProviderWorkspaceView)?;
-            fs::rename(&stage, &final_root).map_err(|_| SourceImageError::ProviderWorkspaceView)?;
+            publish_staged_provider_view(&stage, &final_root, &manifest_bytes)?;
             fs::File::open(&views_root)
                 .and_then(|file| file.sync_all())
                 .map_err(|_| SourceImageError::ProviderWorkspaceView)
         })();
         if result.is_err() {
-            let _ = fs::remove_dir_all(&stage);
+            let _ = remove_staged_provider_view(&stage);
         }
         result?;
     }
@@ -410,6 +410,52 @@ pub fn publish_provider_workspace_view(
         dependency_manifest_digest: dependencies.manifest_digest,
         entries: manifest_entries,
     })
+}
+
+/// The manifest addresses an immutable input view, not a native run. Independent contexts
+/// can therefore finish equivalent private stages concurrently. Accept only an atomically
+/// published winner with the same manifest; the caller verifies all of its input bytes.
+fn publish_staged_provider_view(
+    stage: &Path,
+    final_root: &Path,
+    manifest: &[u8],
+) -> Result<(), SourceImageError> {
+    match fs::rename(stage, final_root) {
+        Ok(()) => Ok(()),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::DirectoryNotEmpty
+            ) =>
+        {
+            if fs::read(final_root.join("manifest.json"))
+                .map_err(|_| SourceImageError::ProviderWorkspaceView)?
+                != manifest
+            {
+                return Err(SourceImageError::ProviderWorkspaceView);
+            }
+            remove_staged_provider_view(stage)
+        }
+        Err(_) => Err(SourceImageError::ProviderWorkspaceView),
+    }
+}
+
+/// Only private staging directories become writable. Files may share cache inodes and
+/// must retain their immutable permissions even when a redundant stage is discarded.
+fn remove_staged_provider_view(stage: &Path) -> Result<(), SourceImageError> {
+    fn writable_directories(root: &Path) -> std::io::Result<()> {
+        let metadata = fs::symlink_metadata(root)?;
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            fs::set_permissions(root, fs::Permissions::from_mode(0o700))?;
+            for entry in fs::read_dir(root)? {
+                writable_directories(&entry?.path())?;
+            }
+        }
+        Ok(())
+    }
+    writable_directories(stage)
+        .and_then(|()| fs::remove_dir_all(stage))
+        .map_err(|_| SourceImageError::ProviderWorkspaceView)
 }
 
 /// Explicit capability evidence for a source image that cannot be admitted.
@@ -2277,6 +2323,68 @@ mod tests {
         assert_eq!(metrics.reclaimed_blobs, 2);
         assert_eq!((metrics.live_holders, metrics.orphan_holders), (0, 0));
         assert!(metrics.capture_duration_micros > 0);
+    }
+
+    #[test]
+    fn concurrent_contexts_share_verified_views_without_retaining_losing_stages() {
+        use std::os::unix::fs::MetadataExt as _;
+
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("provider-state");
+        let bytes: Arc<[u8]> = vec![7; 2 * 1024 * 1024].into();
+        let dependencies = DependencyInputBundle::pin(vec![DependencyInput {
+            raw_relative_path_bytes: b"sysroot/library".to_vec(),
+            digest: crate::integrity::digest_bytes(&bytes),
+            bytes,
+            mode: 0o400,
+        }])
+        .unwrap();
+        let barrier = std::sync::Barrier::new(8);
+        let views = std::thread::scope(|scope| {
+            let handles = (0..8)
+                .map(|ordinal| {
+                    let root = &root;
+                    let dependencies = &dependencies;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        publish_provider_workspace_view(
+                            root,
+                            &format!("context-{ordinal}"),
+                            [1; 16],
+                            1,
+                            &[],
+                            dependencies,
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap().unwrap())
+                .collect::<Vec<_>>()
+        });
+        for pair in views.windows(2) {
+            assert_eq!(pair[0].workspace_root, pair[1].workspace_root);
+            assert_ne!(pair[0].output_root, pair[1].output_root);
+        }
+        assert_eq!(
+            fs::read_dir(root.join("provider-views")).unwrap().count(),
+            1
+        );
+        assert_eq!(
+            fs::read_dir(root.join("provider-dependency-blobs"))
+                .unwrap()
+                .count(),
+            1
+        );
+        let linked = fs::metadata(views[0].dependency_root.join("sysroot/library")).unwrap();
+        assert_eq!(
+            linked.nlink(),
+            2,
+            "only cache and winning view retain the inode"
+        );
+        assert_eq!(linked.permissions().mode() & 0o777, 0o400);
     }
 
     #[test]

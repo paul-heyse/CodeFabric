@@ -11,6 +11,16 @@
 fail-fast = true
 slow-timeout = { period = "60s", terminate-after = 2 }
 
+# Independent Cargo targets include source/semantic publication and installed public queries.
+# Keep a finite scenario hang bound without imposing a two-minute performance requirement.
+[[profile.default.overrides]]
+filter = 'test(pragmatic_rust_target_failure_retains_other_targets)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
+[[profile.ci.overrides]]
+filter = 'test(pragmatic_rust_target_failure_retains_other_targets)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
 [[profile.default.overrides]]
 filter = 'test(live_mixed_function_definitions_and_bodies_equal_exact_clean_source)'
 slow-timeout = { period = "60s", terminate-after = 20 }

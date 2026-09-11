@@ -398,9 +398,8 @@ impl WorkspaceObservation {
                             git.topology_relevant(path)
                                 || git_marker(root, path, inclusion)
                                 || path.strip_prefix(root).is_ok_and(|relative| {
-                                    SourceInclusionPolicy::CONFIGURATIONS
-                                        .iter()
-                                        .any(|name| relative == Path::new(name))
+                                    inclusion
+                                        .configuration_path(relative.as_os_str().as_encoded_bytes())
                                 })
                         }) || matches!(
                             event.kind,
@@ -429,6 +428,7 @@ impl WorkspaceObservation {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // Setup, registered topology and callback publication share one coherence boundary.
     fn watch(
         &self,
         root: &Path,
@@ -442,7 +442,7 @@ impl WorkspaceObservation {
         let initial_git =
             SelectedGitWatchInputs::from_topologies(&[GitWatchTopology::resolve(root)]);
         let selected_git = Arc::new(OnceLock::<SelectedGitWatchInputs>::new());
-        let inclusion = SourceInclusionPolicy::capture_watch(root);
+        let mut inclusion = SourceInclusionPolicy::capture_watch(root);
         let retained = budget
             .try_reserve(
                 crate::resource_budget::ResourceClass::Control,
@@ -453,12 +453,36 @@ impl WorkspaceObservation {
             )
             .map_err(|error| error.to_string())?;
         let metadata = Arc::clone(&selected_git);
-        let callback_policy = inclusion.clone();
-        let handler = move |events| {
+        let selected_policy = Arc::new(OnceLock::<SourceInclusionPolicy>::new());
+        let callback_policy = Arc::clone(&selected_policy);
+        let handler = move |events: DebounceEventResult| {
+            let Some(policy) = callback_policy.get() else {
+                // Installation can discover new selected descendants. Retain events until the
+                // complete immutable callback policy is published, including topology repair.
+                match events {
+                    Err(errors) => observed.observe_events(
+                        &selected_root,
+                        metadata.get().unwrap_or(&initial_git),
+                        &SourceInclusionPolicy::default(),
+                        profile,
+                        Err(errors),
+                    ),
+                    Ok(events)
+                        if events
+                            .iter()
+                            .any(|event| !matches!(event.kind, EventKind::Access(_))) =>
+                    {
+                        observed.topology_revision.fetch_add(1, Ordering::AcqRel);
+                        observed.event(true);
+                    }
+                    Ok(_) => {}
+                }
+                return;
+            };
             observed.observe_events(
                 &selected_root,
                 metadata.get().unwrap_or(&initial_git),
-                &callback_policy,
+                policy,
                 profile,
                 events,
             );
@@ -498,7 +522,7 @@ impl WorkspaceObservation {
             registered_directories: 0,
             excluded_directories: 0,
         };
-        watch.install(root, &inclusion, cancellation)?;
+        watch.install(root, &mut inclusion, cancellation)?;
         let git = watch.resolve_git_inputs(started, cancellation)?;
         let selection = SelectedGitWatchInputs::from_topologies(&git);
         watch
@@ -522,10 +546,11 @@ impl WorkspaceObservation {
         let coherent = git == checked_git
             && selection.directories()
                 == SelectedGitWatchInputs::from_topologies(&checked_git).directories()
-            && inclusion == SourceInclusionPolicy::capture_watch(root);
+            && inclusion.unchanged_watch(root);
         // The installer publishes once. Later changes replace the complete owned watcher;
         // callbacks neither lock a mutable repository map nor perform discovery.
         let _ = selected_git.set(selection);
+        let _ = selected_policy.set(inclusion);
         if !coherent {
             self.topology_revision.fetch_add(1, Ordering::AcqRel);
         }
@@ -672,7 +697,7 @@ impl WorkspaceWatch {
     fn install(
         &mut self,
         root: &Path,
-        inclusion: &SourceInclusionPolicy,
+        inclusion: &mut SourceInclusionPolicy,
         cancellation: &crate::cancellation::Cancellation,
     ) -> Result<(), WorkspaceWatchError> {
         let limits = crate::inventory::InventoryLimits::default();
@@ -701,6 +726,18 @@ impl WorkspaceWatch {
             // Registration precedes child enumeration. Events only request secure recapture;
             // lexical watch paths never authorize source reads or establish content identity.
             self.register(&directory)?;
+            let relative = directory
+                .strip_prefix(root)
+                .map_err(|error| error.to_string())?;
+            let before = inclusion.retained_bytes();
+            inclusion.observe_watch_directory(root, relative.as_os_str().as_encoded_bytes());
+            self.retained
+                .try_grow(crate::resource_budget::ResourceAmounts {
+                    memory_bytes: 2 * inclusion.retained_bytes().saturating_sub(before),
+                    ..crate::resource_budget::ResourceAmounts::default()
+                })
+                .map_err(|error| error.to_string())?;
+
             for (index, entry) in std::fs::read_dir(&directory)
                 .map_err(|error| error.to_string())?
                 .enumerate()
@@ -969,6 +1006,28 @@ mod tests {
         .await;
     }
 
+    #[tokio::test]
+    async fn recursive_submodule_native_topology_reselects_nested_configuration() {
+        selected_root_topology(
+            "nested/.gitmodules",
+            "[submodule \"dependency\"]\npath = .venv/lib/site-packages\n",
+            "",
+            SourceWatchProfile::Native,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn recursive_submodule_poll_topology_reselects_nested_configuration() {
+        selected_root_topology(
+            "nested/.gitmodules",
+            "[submodule \"dependency\"]\npath = .venv/lib/site-packages\n",
+            "",
+            SourceWatchProfile::Poll,
+        )
+        .await;
+    }
+
     async fn selected_root_topology(
         config_name: &str,
         initial: &str,
@@ -978,9 +1037,10 @@ mod tests {
         use std::fs;
         let fixture = tempfile::tempdir().unwrap();
         let root = fixture.path().join("source");
-        fs::create_dir_all(root.join(".venv/lib/site-packages/pkg")).unwrap();
-        fs::create_dir_all(root.join(".venv/bin")).unwrap();
         let config = root.join(config_name);
+        let context_root = config.parent().unwrap();
+        fs::create_dir_all(context_root.join(".venv/lib/site-packages/pkg")).unwrap();
+        fs::create_dir_all(context_root.join(".venv/bin")).unwrap();
         fs::write(&config, initial).unwrap();
         let (observed, mut receiver) = WorkspaceObservation::new();
         let budget = crate::provider_types::source_fixture_budget([2; 16]);
@@ -995,13 +1055,17 @@ mod tests {
         assert!(
             watch
                 .registered_paths
-                .contains(&root.join(".venv/lib/site-packages/pkg"))
+                .contains(&context_root.join(".venv/lib/site-packages/pkg"))
         );
-        assert!(!watch.registered_paths.contains(&root.join(".venv/bin")));
+        assert!(
+            !watch
+                .registered_paths
+                .contains(&context_root.join(".venv/bin"))
+        );
         receiver.recv().await.unwrap();
         let revision = observed.event_revision();
         fs::write(
-            root.join(".venv/lib/site-packages/pkg/__init__.pyi"),
+            context_root.join(".venv/lib/site-packages/pkg/__init__.pyi"),
             "def changed() -> int: ...\n",
         )
         .unwrap();
@@ -1030,7 +1094,11 @@ mod tests {
                 profile,
             )
             .unwrap();
-        assert!(!replacement.registered_paths.contains(&root.join(".venv")));
+        assert!(
+            !replacement
+                .registered_paths
+                .contains(&context_root.join(".venv"))
+        );
         replacement.stop();
     }
 

@@ -3409,6 +3409,9 @@ fn rust_semantics_publication(dependency: Option<RustFixtureDependency>, with_fa
         || fixture.start_supervisor(),
         |stack| fixture.start_supervisor_with(&stack.codefabric),
     );
+    // This multi-context fixture waits for durable semantic publication after native work.
+    // Its whole-scenario hang bound is separate from source readiness and query deadlines.
+    wait_for_semantic_activation_with_timeout(&fixture, Duration::from_secs(360));
     let entities = canonical_entity_names(&fixture);
     if with_dependency && !entities.iter().any(|(language, _)| language == "rust") {
         live_updates::print_cargo_failure(&fixture);
@@ -4147,9 +4150,9 @@ fn assert_mixed_public_declaration_facts(
     empty["scope"]["languages"] = json!(["python"]);
     empty["queries"][0]["about"] =
         json!([{"entity_id": "entity:function:01010101010101010101010101010101"}]);
-    let mut unresolved = request.clone();
-    unresolved["semantic_request_id"] = json!("request:declaration-unresolved");
-    unresolved["queries"][0]["about"] = json!(["answer"]);
+    let mut literal = request.clone();
+    literal["semantic_request_id"] = json!("request:declaration-literal");
+    literal["queries"][0]["about"] = json!(["answer"]);
     let scenario = modern_client_scenario(
         fixture,
         stack,
@@ -4160,7 +4163,8 @@ fn assert_mixed_public_declaration_facts(
             {"id": "page", "operation": "read_resource", "uri": {"$ref": "facts.structured_content.pages.0.uri"}},
             {"id": "empty", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": empty, "delivery": "resource"}},
             {"id": "empty_page", "operation": "read_resource", "uri": {"$ref": "empty.structured_content.pages.0.uri"}},
-            {"id": "unresolved", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": unresolved, "delivery": "resource"}}
+            {"id": "literal", "operation": "call_tool", "name": "query_code_graph", "arguments": {"request": literal, "delivery": "resource"}},
+            {"id": "literal_page", "operation": "read_resource", "uri": {"$ref": "literal.structured_content.pages.0.uri"}}
         ]),
     );
     let path = write_modern_client_scenario(fixture, "canonical-facts", &scenario);
@@ -4243,13 +4247,28 @@ fn assert_mixed_public_declaration_facts(
     let empty = modern_structured(modern_step(&report, "empty"));
     assert_eq!(empty["processing"][0]["remaining_partitions"], 0);
     assert_eq!(empty["processing"][0]["additional_rows"], false);
-    let unresolved = modern_structured(modern_step(&report, "unresolved"));
-    assert_eq!(unresolved["outcome"], "validation_rejection");
-    assert_eq!(unresolved["error"]["code"], "VALIDATION_REJECTED");
+    let literal = modern_structured(modern_step(&report, "literal"));
+    assert_eq!(literal["execution_state"], "SUCCEEDED", "{literal}");
+    let literal_batches = batches("literal_page");
     assert_eq!(
-        unresolved["issues"][0]["presentation_key"],
-        "query.validation.semantic_reference_unavailable"
+        literal_batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
+        1
     );
+    for batch in literal_batches {
+        let text = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+        };
+        for row in 0..batch.num_rows() {
+            assert_eq!(text("language").value(row), "python");
+            assert_eq!(text("name").value(row), "answer");
+            assert!(subjects.contains(text("public_entity_id").value(row)));
+        }
+    }
     {
         let mut store = OperationalStore::open(&fixture.state.join("operational.sqlite3")).unwrap();
         WorkspaceRegistry::new(&mut store)
@@ -4506,7 +4525,7 @@ fn assert_public_call_queries(
     let mut unsupported = request;
     unsupported["semantic_request_id"] =
         json!(format!("request:calls-{phase}-unsupported-distance"));
-    unsupported["queries"][0]["distance"] = json!("two steps");
+    unsupported["queries"][0]["distance"] = json!("nine steps");
     steps.push(json!({"id": "unsupported", "operation": "call_tool", "name": "validate_code_graph_query", "arguments": {"request": unsupported}}));
     let scenario = modern_client_scenario(fixture, stack, "policy-one", json!([]), json!(steps));
     let path = write_modern_client_scenario(fixture, "canonical-calls", &scenario);
@@ -4660,9 +4679,9 @@ fn assert_public_call_queries(
         );
     }
     assert_eq!(coverage["processing"][0]["additional_rows"], false);
-    assert_ne!(
-        modern_structured(modern_step(&report, "unsupported"))["execution_state"],
-        "SUCCEEDED"
+    assert_eq!(
+        modern_structured(modern_step(&report, "unsupported"))["valid"],
+        false
     );
 }
 
