@@ -52,6 +52,9 @@ use super::inputs::PreparedSourceInputs;
 use super::{CompiledSemanticRelease, ProductionWorkspaceStartupError, digest16, lower_hex, step};
 
 mod targets;
+pub(in crate::fabric) mod toolchain_cache;
+
+use toolchain_cache::{FileWitness, ToolchainSelectionKey};
 
 const TOOLCHAIN_IDENTITY: &[u8] =
     include_bytes!("../../../rustc-extractor/toolchain-identity.json");
@@ -105,6 +108,26 @@ impl RustTargetProgress {
 }
 
 impl RustcOutcome {
+    fn pending_targets(mut self, targets: Vec<targets::CargoTarget>) -> Self {
+        self.gap = ProviderLaneGap::Pending;
+        self.progress = targets
+            .into_iter()
+            .map(|target| RustTargetProgress::new(&target, "pending", "semantic_work_pending"))
+            .collect();
+        self
+    }
+
+    fn empty(source_pin: SourcePin, context_pin: ContextPin) -> Self {
+        Self {
+            source_pin,
+            context_pin,
+            admitted: Vec::new(),
+            progress: Vec::new(),
+            runs: Vec::new(),
+            gap: ProviderLaneGap::RequiredInputAbsent,
+        }
+    }
+
     pub fn observed_relations(
         &self,
     ) -> impl Iterator<Item = crate::rustc_relation_schema::RustcRelation> + '_ {
@@ -149,17 +172,23 @@ pub(super) fn run(
     cancellation: &Cancellation,
     work: super::PublicationWork<'_>,
 ) -> Result<RustcOutcome, ProductionWorkspaceStartupError> {
-    let super::PublicationWork { scope, stage, .. } = work;
+    let super::PublicationWork {
+        scope,
+        stage,
+        resources,
+        ..
+    } = work;
     let inventory = inputs.inventory_for_language(SourceLanguage::Rust)?;
-    let mut outcome = RustcOutcome {
-        source_pin: SourcePin(inventory.identity()),
-        context_pin: ContextPin(record.context_fingerprint),
-        admitted: Vec::new(),
-        progress: Vec::new(),
-        runs: Vec::new(),
-        gap: ProviderLaneGap::RequiredInputAbsent,
-    };
+    let mut outcome = RustcOutcome::empty(
+        SourcePin(inventory.identity()),
+        ContextPin(record.context_fingerprint),
+    );
     if inventory.selected_files().next().is_none() {
+        resources
+            .rust_toolchain_cache()
+            .lock()
+            .map_err(|error| step("rust-toolchain-cache-owner", error))?
+            .clear();
         return Ok(outcome);
     }
     if !cfg!(target_os = "linux") {
@@ -179,12 +208,7 @@ pub(super) fn run(
         Err(_) => targets, // Preserve requested scope; each semantic preparation reports its failure.
     };
     if stage == super::PublicationStage::Source {
-        outcome.gap = ProviderLaneGap::Pending;
-        outcome.progress = targets
-            .into_iter()
-            .map(|target| RustTargetProgress::new(&target, "pending", "semantic_work_pending"))
-            .collect();
-        return Ok(outcome);
+        return Ok(outcome.pending_targets(targets));
     }
     let mut contexts = Vec::new();
     let toolchain = OnceLock::new();
@@ -198,6 +222,7 @@ pub(super) fn run(
             inventory.clone(),
             &target,
             &toolchain,
+            resources,
             scope,
             cancellation.clone(),
         );
@@ -258,6 +283,7 @@ fn prepare_and_run(
     >,
     target: &targets::CargoTarget,
     shared_toolchain: &SharedToolchain,
+    resources: &crate::fabric::workspace_resources::ProductionWorkspaceResources,
     scope: &StructuredCancellationScope,
     cancellation: Cancellation,
 ) -> Result<
@@ -278,10 +304,17 @@ fn prepare_and_run(
     {
         return Err(step("rust-containment", "contained compiler unavailable"));
     }
-    // One immutable capture and capacity owner serve every target in this publication pass.
+    // One immutable capture lease serves every target in this publication pass. The workspace
+    // retains compatible captured inputs; Cargo and extractor outputs are still fresh per run.
     // A failed capture is also shared, so each requested target keeps its own failure scope.
     let toolchain = shared_toolchain
-        .get_or_init(|| capture_toolchain(inputs.budget(), &cancellation))
+        .get_or_init(|| {
+            resources
+                .rust_toolchain_cache()
+                .lock()
+                .map_err(|error| step("rust-toolchain-cache-owner", error))?
+                .acquire(&cancellation)
+        })
         .as_ref()
         .map_err(|error| step("rust-toolchain", error))?;
     let mut dependencies = toolchain.dependencies.entries.clone();
@@ -655,17 +688,32 @@ struct ToolchainInputs {
     dependencies: DependencyInputBundle,
     host: String,
     runtime_artifacts: Vec<ContextArtifactInput>,
+    selection: ToolchainSelectionKey,
+    witnesses: Vec<FileWitness>,
+}
+
+struct SelectedToolchainInputs {
+    key: ToolchainSelectionKey,
+    linker: Vec<DependencyInput>,
+    runtime_artifacts: Vec<ContextArtifactInput>,
 }
 
 fn capture_toolchain(
     budget: &crate::resource_budget::ResourceBudget,
     cancellation: &Cancellation,
+    selection: SelectedToolchainInputs,
 ) -> Result<crate::resource_budget::ChargedValue<ToolchainInputs>, ProductionWorkspaceStartupError>
 {
     let started = Instant::now();
     let mut capacity = crate::inventory::reserve_memory(budget, MAX_TOOLCHAIN_BYTES * 2)
         .map_err(|error| step("rust-toolchain-memory", error))?;
-    let toolchain = toolchain_inputs(cancellation)?;
+    let toolchain = toolchain_inputs(cancellation, selection)?;
+    if !toolchain.unchanged(cancellation)? {
+        return Err(step(
+            "rust-toolchain-file",
+            "installed toolchain changed during capture",
+        ));
+    }
     let retained = toolchain.memory_bytes()?;
     capacity
         .shrink(crate::resource_budget::ResourceAmounts {
@@ -686,13 +734,40 @@ fn capture_toolchain(
 }
 
 impl ToolchainInputs {
+    fn unchanged(
+        &self,
+        cancellation: &Cancellation,
+    ) -> Result<bool, ProductionWorkspaceStartupError> {
+        for witness in &self.witnesses {
+            if cancellation.is_cancelled() {
+                return Err(step(
+                    "rust-toolchain-cancelled",
+                    "cancelled during deployment validation",
+                ));
+            }
+            if !witness.unchanged() {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     fn memory_bytes(&self) -> Result<u64, ProductionWorkspaceStartupError> {
         let mut bytes = std::mem::size_of::<Self>() as u64
             + self.host.capacity() as u64
             + self.dependencies.entries.capacity() as u64
                 * std::mem::size_of::<DependencyInput>() as u64
             + self.runtime_artifacts.capacity() as u64
-                * std::mem::size_of::<ContextArtifactInput>() as u64;
+                * std::mem::size_of::<ContextArtifactInput>() as u64
+            + self.witnesses.capacity() as u64 * std::mem::size_of::<FileWitness>() as u64
+            + self
+                .witnesses
+                .iter()
+                .map(FileWitness::memory_bytes)
+                .sum::<u64>()
+            + (self.selection.root.capacity()
+                + self.selection.extractor.capacity()
+                + self.selection.host.capacity()) as u64;
         for entry in &self.dependencies.entries {
             bytes = bytes
                 .checked_add(entry.bytes.len() as u64)
@@ -758,31 +833,18 @@ fn selected_toolchain() -> Result<(PathBuf, String), ProductionWorkspaceStartupE
     Ok((root, host))
 }
 
-fn toolchain_inputs(
+fn select_toolchain_inputs(
     cancellation: &Cancellation,
-) -> Result<ToolchainInputs, ProductionWorkspaceStartupError> {
-    let (root, host) = selected_toolchain()?;
-    let mut entries = Vec::new();
-    entries.push(dependency(
-        "cargo-home/config.toml",
-        b"[net]\noffline = true\n".to_vec(),
-        false,
-    ));
-    entries.push(dependency(
-        "rustup-home/selected-toolchain",
-        RUSTC_TOOLCHAIN.as_bytes().to_vec(),
-        false,
-    ));
-    let mut bytes = 0;
-    for path in ["bin/cargo", "bin/rustc", "lib"] {
-        collect_toolchain(
-            &root,
-            &root.join(path),
-            &mut entries,
-            &mut bytes,
-            cancellation,
-        )?;
+) -> Result<SelectedToolchainInputs, ProductionWorkspaceStartupError> {
+    if cancellation.is_cancelled() {
+        return Err(step(
+            "rust-toolchain-cancelled",
+            "cancelled before deployment selection",
+        ));
     }
+    let (root, host) = selected_toolchain()?;
+    let root =
+        std::fs::canonicalize(root).map_err(|error| step("rust-toolchain-location", error))?;
     let extractor = std::env::var_os("CODEFABRIC_RUSTC_EXTRACTOR_BIN")
         .map(PathBuf::from)
         .or_else(|| {
@@ -797,25 +859,65 @@ fn toolchain_inputs(
                 "extractor executable unavailable",
             )
         })?;
-    let mut executable = Vec::new();
-    std::fs::File::open(&extractor)
-        .map_err(|error| step("rust-extractor-location", error))?
-        .take(MAX_TOOLCHAIN_BYTES.saturating_sub(bytes) + 1)
-        .read_to_end(&mut executable)
-        .map_err(|error| step("rust-extractor-location", error))?;
-    if executable.len() as u64 > MAX_TOOLCHAIN_BYTES.saturating_sub(bytes) {
-        return Err(step(
-            "rust-extractor-size",
-            "extractor exceeds the toolchain input budget",
-        ));
+    let mut linker = Vec::new();
+    let runtime_artifacts = host_c_compiler_inputs(&mut linker, cancellation)?;
+    let linker =
+        DependencyInputBundle::pin(linker).map_err(|error| step("rust-host-linker", error))?;
+    Ok(SelectedToolchainInputs {
+        key: ToolchainSelectionKey {
+            root,
+            host,
+            extractor,
+            linker_manifest: linker.manifest_digest,
+        },
+        linker: linker.entries,
+        runtime_artifacts,
+    })
+}
+
+fn toolchain_inputs(
+    cancellation: &Cancellation,
+    selected: SelectedToolchainInputs,
+) -> Result<ToolchainInputs, ProductionWorkspaceStartupError> {
+    let root = &selected.key.root;
+    let mut entries = Vec::new();
+    entries.push(dependency(
+        "cargo-home/config.toml",
+        b"[net]\noffline = true\n".to_vec(),
+        false,
+    ));
+    entries.push(dependency(
+        "rustup-home/selected-toolchain",
+        RUSTC_TOOLCHAIN.as_bytes().to_vec(),
+        false,
+    ));
+    let mut bytes = 0;
+    let mut witnesses = Vec::new();
+    for path in ["bin/cargo", "bin/rustc", "lib"] {
+        collect_toolchain(
+            root,
+            &root.join(path),
+            &mut entries,
+            &mut bytes,
+            cancellation,
+            &mut witnesses,
+        )?;
     }
+    let witness = FileWitness::read(&selected.key.extractor)?;
+    let executable = capture_file(
+        &selected.key.extractor,
+        &witness,
+        MAX_TOOLCHAIN_BYTES.saturating_sub(bytes),
+        cancellation,
+    )?;
+    witnesses.push(witness);
     entries.push(dependency(
         "extractor/codefabric-rustc-extractor",
         executable,
         true,
     ));
     entries.push(dependency("toolchain/bin/codefabric-rustc-extractor", b"#!/bin/sh\nexport LD_LIBRARY_PATH=/dependencies/toolchain/lib\nexec /dependencies/extractor/codefabric-rustc-extractor \"$@\"\n".to_vec(), true));
-    let runtime_artifacts = host_c_compiler_inputs(&mut entries)?;
+    entries.extend(selected.linker);
     let input_bytes = entries
         .iter()
         .map(|entry| entry.bytes.len() as u64)
@@ -829,13 +931,16 @@ fn toolchain_inputs(
     Ok(ToolchainInputs {
         dependencies: DependencyInputBundle::pin(entries)
             .map_err(|error| step("rust-toolchain-bundle", error))?,
-        host,
-        runtime_artifacts,
+        host: selected.key.host.clone(),
+        runtime_artifacts: selected.runtime_artifacts,
+        selection: selected.key,
+        witnesses,
     })
 }
 
 fn host_c_compiler_inputs(
     entries: &mut Vec<DependencyInput>,
+    cancellation: &Cancellation,
 ) -> Result<Vec<ContextArtifactInput>, ProductionWorkspaceStartupError> {
     let mut artifacts = Vec::new();
     // /usr is the selected read-only runtime image, but Debian's cc alias crosses
@@ -847,18 +952,8 @@ fn host_c_compiler_inputs(
                 "system compiler escapes the selected runtime image",
             ));
         }
-        let mut captured = Vec::new();
-        std::fs::File::open(&compiler)
-            .map_err(|error| step("rust-host-linker", error))?
-            .take(32 * 1024 * 1024 + 1)
-            .read_to_end(&mut captured)
-            .map_err(|error| step("rust-host-linker", error))?;
-        if captured.len() > 32 * 1024 * 1024 {
-            return Err(step(
-                "rust-host-linker",
-                "system compiler exceeds its input bound",
-            ));
-        }
+        let witness = FileWitness::read(Path::new("/usr/bin/cc"))?;
+        let captured = capture_file(&compiler, &witness, 32 * 1024 * 1024, cancellation)?;
         artifacts.push(ContextArtifactInput {
             file_id: "toolchain:host-c-compiler".to_owned(),
             digest: digest_bytes(&captured),
@@ -903,6 +998,12 @@ fn host_c_compiler_inputs(
         });
         entries.push(dependency("toolchain/bin/cc-driver", captured, true));
         entries.push(dependency("toolchain/bin/cc", wrapper, true));
+        if !witness.unchanged() || cancellation.is_cancelled() {
+            return Err(step(
+                "rust-host-linker",
+                "system compiler changed or selection was cancelled",
+            ));
+        }
     }
     Ok(artifacts)
 }
@@ -913,6 +1014,7 @@ fn collect_toolchain(
     entries: &mut Vec<DependencyInput>,
     bytes: &mut u64,
     cancellation: &Cancellation,
+    witnesses: &mut Vec<FileWitness>,
 ) -> Result<(), ProductionWorkspaceStartupError> {
     if cancellation.is_cancelled() {
         return Err(step(
@@ -928,6 +1030,20 @@ fn collect_toolchain(
         ));
     }
     let metadata = std::fs::metadata(&exact).map_err(|error| step("rust-toolchain-file", error))?;
+    if witnesses.len() >= 100_000 {
+        return Err(step(
+            "rust-toolchain-size",
+            "toolchain entry budget exceeded",
+        ));
+    }
+    let witness = FileWitness::read(path)?;
+    if !witness.matches_metadata(&metadata) {
+        return Err(step(
+            "rust-toolchain-file",
+            "toolchain changed before capture",
+        ));
+    }
+    witnesses.push(witness.clone());
     if metadata.is_dir() {
         if path
             .components()
@@ -951,6 +1067,7 @@ fn collect_toolchain(
                 entries,
                 bytes,
                 cancellation,
+                witnesses,
             )?;
         }
     } else if metadata.is_file() {
@@ -965,12 +1082,12 @@ fn collect_toolchain(
             .map_err(|error| step("rust-toolchain-path", error))?
             .to_str()
             .ok_or_else(|| step("rust-toolchain-path", "non-UTF-8 toolchain path"))?;
-        let mut captured = Vec::new();
-        std::fs::File::open(&exact)
-            .map_err(|error| step("rust-toolchain-file", error))?
-            .take(MAX_TOOLCHAIN_BYTES.saturating_sub(*bytes) + 1)
-            .read_to_end(&mut captured)
-            .map_err(|error| step("rust-toolchain-file", error))?;
+        let captured = capture_file(
+            &exact,
+            &witness,
+            MAX_TOOLCHAIN_BYTES.saturating_sub(*bytes),
+            cancellation,
+        )?;
         *bytes = bytes.saturating_add(captured.len() as u64);
         if *bytes > MAX_TOOLCHAIN_BYTES || captured.len() as u64 != metadata.len() {
             return Err(step(
@@ -990,6 +1107,55 @@ fn collect_toolchain(
         ));
     }
     Ok(())
+}
+
+fn capture_file(
+    path: &Path,
+    witness: &FileWitness,
+    maximum_bytes: u64,
+    cancellation: &Cancellation,
+) -> Result<Vec<u8>, ProductionWorkspaceStartupError> {
+    let mut file = std::fs::File::open(path).map_err(|error| step("rust-toolchain-file", error))?;
+    if !file
+        .metadata()
+        .is_ok_and(|value| value.is_file() && value.len() <= maximum_bytes)
+        || !witness.matches_file(&file)
+    {
+        return Err(step(
+            "rust-toolchain-file",
+            "toolchain file changed or exceeds its bound",
+        ));
+    }
+    let mut bytes = Vec::new();
+    let mut chunk = vec![0_u8; 64 * 1024];
+    loop {
+        if cancellation.is_cancelled() {
+            return Err(step(
+                "rust-toolchain-cancelled",
+                "cancelled during toolchain read",
+            ));
+        }
+        let count = file
+            .read(&mut chunk)
+            .map_err(|error| step("rust-toolchain-file", error))?;
+        if count == 0 {
+            break;
+        }
+        if bytes.len() as u64 + count as u64 > maximum_bytes {
+            return Err(step(
+                "rust-toolchain-file",
+                "toolchain read exceeds its bound",
+            ));
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+    }
+    if !witness.matches_file(&file) || !witness.unchanged() {
+        return Err(step(
+            "rust-toolchain-file",
+            "toolchain changed during bounded capture",
+        ));
+    }
+    Ok(bytes)
 }
 
 fn initial_selection(
@@ -1119,18 +1285,27 @@ mod tests {
 
     fn captured_toolchain(root: &Path) -> ToolchainInputs {
         let mut entries = Vec::new();
+        let mut witnesses = Vec::new();
         collect_toolchain(
             root,
             &root.join("lib"),
             &mut entries,
             &mut 0,
             &Cancellation::default(),
+            &mut witnesses,
         )
         .unwrap();
         ToolchainInputs {
             dependencies: DependencyInputBundle::pin(entries).unwrap(),
             host: "x86_64-unknown-linux-gnu".to_owned(),
             runtime_artifacts: Vec::new(),
+            selection: ToolchainSelectionKey {
+                root: root.to_owned(),
+                host: "x86_64-unknown-linux-gnu".to_owned(),
+                extractor: root.join("extractor"),
+                linker_manifest: [0; 32],
+            },
+            witnesses,
         }
     }
 

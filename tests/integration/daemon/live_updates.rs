@@ -1395,11 +1395,17 @@ fn function_source_observation(
 }
 
 fn wait_for_function_sources(fixture: &ProductionFixture) {
+    wait_for_selected_sources(fixture, &["sample.py", "src/lib.rs"]);
+}
+
+fn wait_for_selected_sources(fixture: &ProductionFixture, paths: &[&str]) {
     // Expanded semantic families currently take longer to publish than one adapter call's
     // timeout. Wait for the exact edited inputs, not an older ready semantic activation.
     let root = Path::new(&fixture.workspace.root_path_display);
-    let expected = ["sample.py", "src/lib.rs"]
-        .map(|path| (path.as_bytes().to_vec(), fs::read(root.join(path)).unwrap()));
+    let expected = paths
+        .iter()
+        .map(|path| (path.as_bytes().to_vec(), fs::read(root.join(path)).unwrap()))
+        .collect::<Vec<_>>();
     let deadline = Instant::now() + Duration::from_secs(180);
     loop {
         let selected = wait_for_semantic_activation_with_timeout(
@@ -1738,6 +1744,19 @@ fn source_line_windows_and_hard_limits_survive_public_delivery_and_reopen() {
     supervisor.stop();
 }
 
+fn rust_toolchain_costs(fixture: &ProductionFixture) -> Value {
+    let costs: Value = serde_json::from_slice(
+        &fs::read(
+            fixture
+                .fabric_workspace_root()
+                .join("semantic-preparation-costs.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    costs["workspace_rust_toolchain_cache"].clone()
+}
+
 #[test]
 fn mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen() {
     use std::os::unix::ffi::OsStrExt as _;
@@ -1782,13 +1801,35 @@ fn mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen() {
         "fixture::rust_caller",
     ];
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);
+    wait_for_selected_sources(&fixture, &["sample.py", "src/café.rs"]);
     four_forms(&fixture, &stack, "rust-raw-initial", &expected);
+    assert_eq!(rust_toolchain_costs(&fixture)["captures"], 1);
     fs::write(
         root.join(std::ffi::OsStr::from_bytes(b"dir-\xff/marker.py")),
         b"marker = 2\n",
     )
     .unwrap();
+    fs::write(
+        root.join("src/café.rs"),
+        b"pub fn rust_new() -> u32 { 2 }\npub fn rust_caller() -> u32 { rust_new() }\n",
+    )
+    .unwrap();
+    let expected = [
+        "py_leaf",
+        "py_caller",
+        "fixture::rust_new",
+        "fixture::rust_caller",
+    ];
+    wait_for_selected_sources(&fixture, &["sample.py", "src/café.rs"]);
     let live = four_forms(&fixture, &stack, "rust-raw-edited", &expected);
+    let reused = rust_toolchain_costs(&fixture);
+    assert_eq!(
+        reused["captures"], 1,
+        "warm source edits retain the compatible immutable sysroot"
+    );
+    assert!(reused["reuses"].as_u64().unwrap() >= 1);
+    assert_eq!(reused["retained_entries"], 1);
+    assert!(reused["retained_bytes"].as_u64().unwrap() > 0);
     for row in &live[3].rows {
         if row["language"] == "rust" {
             assert_eq!(row["relative_path"], "7372632f636166c3a92e7273");
@@ -1796,10 +1837,13 @@ fn mixed_raw_path_inventory_keeps_rust_calls_across_updates_and_clean_reopen() {
     }
     let clean = clean_fixture(&fixture, &registration, &stack);
     let clean_supervisor = clean.start_supervisor_with(&stack.codefabric);
+    wait_for_selected_sources(&clean, &["sample.py", "src/café.rs"]);
     assert_eq!(
         live,
         four_forms(&clean, &stack, "rust-raw-clean", &expected)
     );
+    assert_eq!(rust_toolchain_costs(&clean)["captures"], 1);
+    assert_eq!(rust_toolchain_costs(&clean)["reuses"], 0);
     clean_supervisor.stop();
     supervisor.stop();
     let supervisor = fixture.start_supervisor_with(&stack.codefabric);

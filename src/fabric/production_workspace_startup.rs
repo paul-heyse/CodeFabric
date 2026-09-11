@@ -114,7 +114,7 @@ mod processing;
 mod pyrefly;
 pub(super) mod pyrefly_cache;
 mod rust_syntax;
-mod rustc;
+pub(super) mod rustc;
 mod source_context;
 pub(super) mod syntax_cache;
 mod updates;
@@ -865,6 +865,13 @@ fn build_fresh_native_source(
         &cancellation,
         work,
     )?;
+    costs.rust_toolchain_cache(
+        workspace_resources
+            .rust_toolchain_cache()
+            .lock()
+            .map_err(|error| step("rust-toolchain-cache-owner", error))?
+            .observation(),
+    );
     costs.start("provider-composition");
     let authority = ProductionProviderAuthority::try_new(
         ExactProviderLaneAuthority::try_new(

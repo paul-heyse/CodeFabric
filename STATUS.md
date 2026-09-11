@@ -200,6 +200,48 @@ All nine focused watcher/configuration/failure-drain cases pass in 10.142 s
 product-harness cases pass in 0.76 s (`/tmp/codefabric-p04-watch-harness-final.log`); focused Python
 lint/format and documentation checks pass. No full CI/doctest or performance claim is made.
 
+## P04 retained Rust deployment inputs — integration in progress
+
+The pruned native/poll watcher and bounded exact-write checkpoint is committed in `2e71be9e`.
+The next slice retains one immutable captured Rust toolchain bundle under the existing workspace
+resource owner. Every semantic pass resolves the dated compiler/host and extractor and freshly
+captures the host C driver/search selection. Reuse additionally checks canonical targets, inode,
+size, mode and modification/change times for every captured file and directory. A changed selection,
+missing input, directory transition or failed validation discards the cache entry. These metadata
+observations detect ordinary deployment changes; context identity still derives from captured bytes.
+
+Bounded capture now checks file-descriptor metadata before/after reads, checks cancellation in 64 KiB
+chunks and validates the complete directory/file observation set before retaining the bundle. A
+charged immutable lease spans each active compiler pass, so idle/headroom eviction cannot release
+its capacity early. The existing census worker performs opportunistic idle eviction without waiting
+behind capture. Last-Rust-file removal clears retention. Compact preparation reports record captures,
+reuse, eviction, retained entries and charged bytes. This is toolchain-input reuse; private Cargo
+output and extractor fact production remain fresh for each requested run. Automatic tool-change
+invalidation without another semantic pass and compatible Cargo-unit output retention remain open.
+
+The first four focused cache/context tests pass in 0.020 s
+(`/tmp/codefabric-p04-toolchain-cache-focused.log`). The final five focused cases pass in
+`/tmp/codefabric-p04-toolchain-cache-native-final.log`. Its installed scenario fails after 167.724 s
+at the first adapter query timeout: Cargo/toolchain preparation completes in 26.579 s, followed by
+98.182 s of still-running relational execution/writes. The captured bundle retains 1,693,175,554
+charged bytes. This is a failed invocation, not a performance or product acceptance result.
+
+Shutdown after that timeout also produces native `buoyant_kernel_engine` executor cancellation
+panics and exhausts the daemon's two-second structured-task cleanup allowance, leaving writer
+retirement unproved. This failure remains open. The native executor's blocking-return task is
+cancelled during private-runtime destruction; no dependency/runtime changes have been made for
+that path. Resolve real publication cancellation/drain behavior before claiming sustained recovery.
+
+The fixture now waits for the exact selected source bytes in a semantic activation before issuing
+its public comparison; it reuses the existing 180-second bounded input-readiness helper. The rerun
+(`/tmp/codefabric-p04-toolchain-cache-native-v2.log`) has passed all five focused cases and is running
+the installed mixed raw-path/Rust-call edit, retained-capture counter, independent clean-query and
+exact-reopen scenario. Final default/featureless root checks pass (`/tmp/codefabric-p04-toolchain-cache-root-v3.log`).
+Affected Clippy is clean (`/tmp/codefabric-p04-toolchain-cache-clippy-v3.jsonl`), including modified
+function headers after extracting pending-target setup and the test cost reader. The read buffer
+is bounded on the heap and pointer assertions are explicit. This slice is not yet an accepted
+product checkpoint. P04 and P05–P14 remain open.
+
 ## P03 first-release query boundary delivered
 
 The plan corpus is committed in `47b0c225`; the shared native schema-identity correction is

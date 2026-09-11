@@ -28,6 +28,11 @@ pub(crate) struct ProductionWorkspaceResources {
         Arc<std::sync::Mutex<super::production_workspace_startup::syntax_cache::SyntaxCache>>,
     pyrefly_cache:
         Arc<std::sync::Mutex<super::production_workspace_startup::pyrefly_cache::PyreflyCache>>,
+    rust_toolchain_cache: Arc<
+        std::sync::Mutex<
+            super::production_workspace_startup::rustc::toolchain_cache::ToolchainCache,
+        >,
+    >,
     native: WorkspaceFabricResources,
     scheduler: WorkspaceResourceCoordinator,
     config: ProductionActiveWorkspaceConfig,
@@ -129,6 +134,11 @@ impl ProductionWorkspaceResources {
                     budget.clone(),
                 ),
             )),
+            rust_toolchain_cache: Arc::new(std::sync::Mutex::new(
+                super::production_workspace_startup::rustc::toolchain_cache::ToolchainCache::new(
+                    budget.clone(),
+                ),
+            )),
             budget,
             native,
             scheduler,
@@ -153,6 +163,17 @@ impl ProductionWorkspaceResources {
     ) -> &Arc<std::sync::Mutex<super::production_workspace_startup::pyrefly_cache::PyreflyCache>>
     {
         &self.pyrefly_cache
+    }
+
+    /// Immutable deployment captures share one owner across compiler targets and generations.
+    pub(in crate::fabric) fn rust_toolchain_cache(
+        &self,
+    ) -> &Arc<
+        std::sync::Mutex<
+            super::production_workspace_startup::rustc::toolchain_cache::ToolchainCache,
+        >,
+    > {
+        &self.rust_toolchain_cache
     }
 
     /// Serializes short operational writes; provider computation never retains this gate.

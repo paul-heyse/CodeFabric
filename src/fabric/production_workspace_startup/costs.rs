@@ -29,6 +29,8 @@ struct Report {
     reused_relation_versions: usize,
     workspace_syntax_cache: Option<super::syntax_cache::SyntaxCacheObservation>,
     workspace_pyrefly_cache: Option<super::pyrefly_cache::PyreflyCacheObservation>,
+    workspace_rust_toolchain_cache:
+        Option<super::rustc::toolchain_cache::ToolchainCacheObservation>,
     finished: bool,
     phases: Vec<PhaseCost>,
 }
@@ -57,6 +59,7 @@ impl PreparationCosts {
                 reused_relation_versions: 0,
                 workspace_syntax_cache: None,
                 workspace_pyrefly_cache: None,
+                workspace_rust_toolchain_cache: None,
                 finished: false,
                 phases: Vec::with_capacity(12),
             },
@@ -86,6 +89,13 @@ impl PreparationCosts {
     pub(super) fn start(&mut self, phase: &'static str) {
         self.end(true);
         self.active = Some((phase, Instant::now()));
+    }
+
+    pub(super) fn rust_toolchain_cache(
+        &mut self,
+        observation: super::rustc::toolchain_cache::ToolchainCacheObservation,
+    ) {
+        self.report.workspace_rust_toolchain_cache = Some(observation);
     }
 
     fn end(&mut self, finished: bool) {
