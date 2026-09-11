@@ -132,6 +132,8 @@ where
                 budget,
                 class: ResourceClass::Data,
                 deadline: Instant::now() + duration,
+                cancellation_mode:
+                    crate::fabric::native_execution_lane::NativeCancellationMode::DropFuture,
             },
             move |_| async move {
                 if mutation {

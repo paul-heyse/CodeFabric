@@ -32,11 +32,11 @@ filter = 'test(live_python_raw_paths_and_root_initializer_keep_exact_source_iden
 slow-timeout = { period = "60s", terminate-after = 5 }
 
 [[profile.default.overrides]]
-filter = 'test(live_python_search_paths_preserve_all_sources_and_equal_independent_clean_queries)'
+filter = 'test(live_python_search_paths_preserve_all_sources_and_equal_independent_clean_queries) | test(captured_python_site_packages_survive_public_queries_and_reopen)'
 slow-timeout = { period = "60s", terminate-after = 5 }
 
 [[profile.ci.overrides]]
-filter = 'test(live_python_search_paths_preserve_all_sources_and_equal_independent_clean_queries)'
+filter = 'test(live_python_search_paths_preserve_all_sources_and_equal_independent_clean_queries) | test(captured_python_site_packages_survive_public_queries_and_reopen)'
 slow-timeout = { period = "60s", terminate-after = 5 }
 
 [[profile.default.overrides]]
@@ -102,6 +102,15 @@ test-group = 'native-workspaces'
 # A complete durable capture uses both slots to avoid concurrent daemon startup I/O.
 [[profile.default.overrides]]
 filter = 'test(rt_cpg_wp79_complete_ten_thousand_file_governed_capture)'
+threads-required = 2
+
+# Live/clean comparisons keep two complete daemons alive inside one test. The first
+# aggregate admitted four daemons together and interrupted the final clean comparison
+# at 900s. The full first-release corpus also exhausted publication time while overlapping
+# another native corpus. Give these scenarios the complete fixture allowance; ordinary
+# watcher checks and single-workspace scenarios still share the group where admitted.
+[[profile.default.overrides]]
+filter = 'test(integration::daemon::live_updates::) | test(integration::daemon::first_release::)'
 threads-required = 2
 
 # Repeated public blocks include provider convergence, installed clients and exact reopen.

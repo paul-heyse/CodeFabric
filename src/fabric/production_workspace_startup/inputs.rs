@@ -117,6 +117,18 @@ impl PreparedSourceInputs {
     pub fn budget(&self) -> &ResourceBudget {
         &self.budget
     }
+
+    /// Retained provider state can outlive an unsuccessful publication. Retrying identical
+    /// inputs needs a distinct operation owner; stable provider/source IDs are not lifetimes.
+    pub fn provider_operation_budget(
+        &self,
+    ) -> Result<ResourceBudget, ProductionWorkspaceStartupError> {
+        let attempt = crate::identity::random_registration_nonce()
+            .map_err(|error| step("provider-operation-identity", error))?;
+        self.budget
+            .operation(attempt, self.budget.policy())
+            .map_err(|error| step("provider-operation-owner", error))
+    }
     pub fn capture(&self) -> Result<&InventoryCaptureBundle, ProductionWorkspaceStartupError> {
         self.capture
             .as_ref()
@@ -859,6 +871,25 @@ mod tests {
             database.clone(),
             std::sync::Arc::new(std::sync::Mutex::new(())),
         );
+        // A retained checker may still own the first attempt when the same captured inputs
+        // are retried after publication failure. Both attempts remain charged independently.
+        let retained_attempt = first.provider_operation_budget().unwrap();
+        let retained = retained_attempt
+            .try_reserve(
+                crate::resource_budget::ResourceClass::Data,
+                crate::resource_budget::ResourceAmounts {
+                    memory_bytes: 1024,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let retry = first.provider_operation_budget().unwrap();
+        assert!(!retained_attempt.same_scope(&retry));
+        assert_eq!(retained_attempt.observation().used.memory_bytes, 1024);
+        drop(retry);
+        assert_eq!(retained_attempt.observation().used.memory_bytes, 1024);
+        drop(retained);
+        drop(retained_attempt);
         let concurrent_writer = OperationalStore::open(&database).unwrap();
         let reader = concurrent_writer.reader_factory().open().unwrap();
         let leases = || {

@@ -2,9 +2,12 @@
 
 Updated 2026-09-11 from the canonical `/home/paul/CodeFabric` working tree on `master`.
 The user authorized the workspace test remediation plan. R01–R04 are implemented and pass all
-19 focused cases; the R05 shutdown-admission correction passes four focused cases. All-target
-Clippy completes with the existing warning backlog and no changed-line diagnostics. The full
-workspace rerun is next; the original failed baseline below remains visible until it passes.
+19 focused cases; the R05 shutdown-admission correction passes four focused cases. The unfiltered
+rerun at `12d2ee0d` is in progress and has reproduced native publication cancellation and retained
+provider retry ownership defects. Their R05 correction passes 23 focused lifetime/publication
+checks; all-target Clippy completes with the existing warning backlog. Multi-daemon comparisons
+and the full first-release corpus now consume the complete native-fixture allowance, pending
+aggregate qualification. The original failed baseline below remains visible until a full run passes.
 Broader outcome implementation remains at the `722b57d4` P04 checkpoint.
 
 P01/P02 initial vertical exits and P03's first-release query boundary are delivered. P04 retained

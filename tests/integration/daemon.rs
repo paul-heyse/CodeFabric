@@ -377,6 +377,7 @@ maintenance_schedule = "daily-idle"
             child,
             discovery: self.supervisor_discovery(),
             codefabric: codefabric.to_owned(),
+            preparation_root: self.fabric_workspace_root(),
         };
         running.wait_ready();
         running
@@ -387,6 +388,7 @@ struct RunningSupervisor {
     child: Child,
     discovery: PathBuf,
     codefabric: PathBuf,
+    preparation_root: PathBuf,
 }
 
 impl RunningSupervisor {
@@ -475,6 +477,7 @@ impl RunningSupervisor {
 impl Drop for RunningSupervisor {
     fn drop(&mut self) {
         if self.child.try_wait().ok().flatten().is_some() {
+            self.report_failed_preparation();
             return;
         }
         if let Some(pid) = i32::try_from(self.child.id())
@@ -488,6 +491,7 @@ impl Drop for RunningSupervisor {
         let deadline = Instant::now() + Duration::from_secs(45);
         while Instant::now() < deadline {
             if self.child.try_wait().ok().flatten().is_some() {
+                self.report_failed_preparation();
                 return;
             }
             thread::sleep(Duration::from_millis(25));
@@ -498,6 +502,28 @@ impl Drop for RunningSupervisor {
         );
         let _ = self.child.kill();
         let _ = self.child.wait();
+        self.report_failed_preparation();
+    }
+}
+
+impl RunningSupervisor {
+    fn report_failed_preparation(&self) {
+        if !thread::panicking() {
+            return;
+        }
+        // Preserve the existing bounded phase reports before the temporary fixture disappears.
+        // They contain timings/counts/cache observations, not source text or launch secrets.
+        for stage in ["source", "semantic"] {
+            let path = self
+                .preparation_root
+                .join(format!("{stage}-preparation-costs.json"));
+            if let Ok(file) = fs::File::open(path) {
+                let mut report = String::new();
+                if file.take(16 * 1024).read_to_string(&mut report).is_ok() {
+                    eprintln!("failed-fixture {stage} preparation: {report}");
+                }
+            }
+        }
     }
 }
 

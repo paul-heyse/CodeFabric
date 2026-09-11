@@ -571,10 +571,7 @@ fn prepare_and_run(
                 deadline: Instant::now() + Duration::from_secs(120),
                 cancellation: CancellationProbe::from_cancellation(cancellation, 1024)
                     .map_err(|error| step("rust-cancellation", error))?,
-                resource_budget: inputs
-                    .budget()
-                    .operation(run_id, inputs.budget().policy())
-                    .map_err(|error| step("rust-budget", error))?,
+                resource_budget: inputs.provider_operation_budget()?,
             },
         )
         .map_err(|error| step("rust-provider-job", error))?;

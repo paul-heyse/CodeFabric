@@ -21,7 +21,7 @@ broader outcome delivery remains in the parent plan.
 | R02 | Implemented in `599db1ad`: census follows the closed current native relation sets and checks member-observation schema semantics; MIR fixtures supply coherent typed raw/display paths. All four original failures and the exhaustive census pass |
 | R03 | Implemented in `599db1ad`: the obsolete sealing-time assertion is replaced by `derived_composition_enforces_output_bound_on_read_without_preexecution`; installed composition must fail on its actual read. It and the existing stream-bound/repeated-read test pass |
 | R04 | Implemented in `fc4f0fa4`: execution accepts only freshness carried by its admitted snapshot; service and test backends use the same interface. Direct preparation retains guarded input behavior, then semantic-current admission precedes positive rows. Direct execution passes in 103.849 s; old-epoch lease coverage passes |
-| R05 | Shutdown admission race correction is implemented in `96e6d165` and passes all four focused cases. A closed scope rejects new Pyrefly work as cancellation; actual join failures keep their original failure path. Remaining aggregate startup/timeout qualification is pending |
+| R05 | Shutdown admission race correction is implemented in `96e6d165` and passes all four focused cases. The subsequent publication drain/retry ownership correction passes 23 focused cases. Actual join failures keep their original failure path. The first aggregate exposed further lifetime and timeout failures; revised scheduling and real daemon qualification remain pending |
 | R06 | Pending the complete unfiltered workspace run, final configuration/identity reconciliation and handoff |
 
 The first focused selection passes **19/19** in 103.855 s (build 2m31s), run
@@ -33,6 +33,44 @@ including real supervisor readiness (38.146 s) without the prior closed-scope wa
 default and CI group inspection include all 66 original startup/timeout identities. Nextest lists
 1,238 total cases: 1,236 selected plus the same two intentional ignores; R03 renames one test and
 R05 adds one cancellation regression. This is not yet a green full-suite claim.
+
+### Aggregate follow-up — in progress
+
+The unfiltered rerun started at clean revision `12d2ee0d`, run
+`3bd06a71-7199-4b82-ad8c-002ceb44189f`, with the qualified default group and the same deployed
+providers. `full-1.log` is collecting all results without fail-fast. It has reproduced the earlier
+Delta lifetime risk: a candidate publication deadline destroys the runtime while the kernel's
+blocking receiver still depends on an async task on that runtime. Subsequent attempts also reuse
+a provider resource identity retained by the checker, failing with `DuplicateOwner` before reuse
+or retirement can run. These are production ownership defects, not obsolete corpus expectations.
+
+The R05 working change adds an explicit draining mutation mode. Deadline/cancellation signals its
+probe; publication stops admitting relation writes and observes every started write while the
+private runtime remains alive. It discards a cancelled result, then runs the existing cleanup,
+runtime join and physical-store reconciliation. Other native operations retain their existing
+drop-future cancellation mode. This uses the resolved Tokio/Delta ownership boundaries without a
+library patch or a detached cleanup task. Native lane regressions reproduce the kernel's blocking
+receive/async-send dependency for both cancellation and deadline; bounded-write regression checks
+that an unstarted sibling is never admitted after cancellation.
+
+Provider resource attempts receive fresh operation identities independently of stable provider,
+source and context identities. Live-owner uniqueness and charging remain enforced. The capture
+fixture checks that a retry has its own owner while the prior retained reservation remains charged.
+Failed supervisor fixtures retain their existing source/semantic preparation reports in test
+output before temporary cleanup. The site-packages scenario reached successful semantic writes
+and reopen queries at its old 120-second outer timeout; it now has the same finite five-minute
+envelope as the analogous search-path/reopen scenario. Aggregate scheduling and all these changes
+remain subject to real daemon and full-run qualification. The 23 focused lifetime/publication
+checks pass in 1.023 s, run `1b62bcf2-5652-427b-bc9c-4e4a28b4fddc`, recorded in
+`r05-lifetime-focused-2.log`. They include the existing actual Delta write/exact kernel read test.
+They use a separate build target to preserve the original binaries used by the active aggregate.
+
+The first aggregate also reached the final independent clean rebuild in the mixed function-source
+case before its 900-second outer limit. Live inspection confirmed four simultaneous daemon
+processes owned by the two admitted comparison fixtures. The revised default/CI group gives
+`integration::daemon::live_updates::` and the full first-release corpus both slots, preserving the
+ordinary watcher/single-workspace admission and all longer timeout overrides. Production worker
+budgets and deadlines are unchanged. This refinement still requires the terminal full run.
 
 ## 1. Result and scope
 

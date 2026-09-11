@@ -1084,11 +1084,11 @@ async fn build_fresh_candidate(
     let publication = workspace_resources
         .native_execution(task_scope)
         .map_err(|error| step("candidate-publish-executor", error))?
-        .run_mutation(
+        .run_draining_mutation(
             "candidate-publish",
             crate::resource_budget::ResourceClass::Data,
             Instant::now() + Duration::from_secs(120),
-            move |_, _| async move {
+            move |cancellation, _| async move {
                 publish_fresh_candidate(
                     source,
                     &publish_record,
@@ -1096,6 +1096,7 @@ async fn build_fresh_candidate(
                     fence,
                     &publish_resources,
                     selected,
+                    &cancellation,
                 )
                 .await
             },
@@ -1156,6 +1157,7 @@ async fn publish_fresh_candidate(
     fence: super::command::WriterFence,
     workspace_resources: &ProductionWorkspaceResources,
     selected: Option<super::programmatic_relation_delta::ProgrammaticRelationDeltaPublication>,
+    cancellation: &crate::cancellation::Cancellation,
 ) -> Result<FreshCandidatePublication, ProductionWorkspaceStartupError> {
     let workspace_id = WorkspaceId::from_bytes(record.workspace_id);
     let FreshNativeSource {
@@ -1212,7 +1214,7 @@ async fn publish_fresh_candidate(
     costs.start("relational-execution-and-delta-write");
     let candidate = Arc::new(
         builder
-            .seal(
+            .seal_cancellable(
                 ProgrammaticObservationWriteIdentity::new(
                     epoch_id,
                     activation_operation,
@@ -1221,6 +1223,7 @@ async fn publish_fresh_candidate(
                 ),
                 targets,
                 preparation,
+                cancellation,
             )
             .await
             .map_err(|error| step("epoch-seal", error))?,

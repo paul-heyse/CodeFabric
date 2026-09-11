@@ -510,6 +510,13 @@ impl ProgrammaticRelationDeltaPublication {
 }
 
 /// Materialize every non-observation relation from one sealed session into exact Delta versions.
+///
+/// The caller keeps its runtime alive until this future resolves, including after signalling
+/// cancellation. Cancellation closes new write admission and drains the writes already started.
+///
+/// # Errors
+/// Returns cancellation after draining, or the first schema, planning, persistence or exact-pin
+/// validation failure. An uncertain write retains the existing controlled-write outcome.
 pub async fn persist_programmatic_relation_snapshots(
     sealed: &SealedProgrammaticSchemaAssembly,
     epoch_id: EpochId,
@@ -517,7 +524,11 @@ pub async fn persist_programmatic_relation_snapshots(
     writer_generation: WriterGeneration,
     transaction: TransactionRef,
     preparation: ProgrammaticRelationDeltaPreparation,
+    cancellation: &crate::cancellation::Cancellation,
 ) -> Result<ProgrammaticRelationDeltaPublication, ProgrammaticRelationDeltaError> {
+    if cancellation.is_cancelled() {
+        return Err(ProgrammaticRelationDeltaError::Cancelled);
+    }
     let specs = sealed
         .relations()
         .filter(|(relation_id, _)| is_semantic_snapshot_relation(relation_id))
@@ -553,7 +564,12 @@ pub async fn persist_programmatic_relation_snapshots(
         let prepared = targets.targets.remove(&spec.relation_id);
         writer.persist(spec, prepared)
     });
-    let completed = collect_bounded_writes(work, 4).await?;
+    let completed = collect_bounded_writes(work, 4, || {
+        cancellation
+            .is_cancelled()
+            .then_some(ProgrammaticRelationDeltaError::Cancelled)
+    })
+    .await?;
     if !targets.targets.is_empty() {
         return Err(ProgrammaticRelationDeltaError::RelationSetMismatch);
     }
@@ -571,6 +587,7 @@ pub async fn persist_programmatic_relation_snapshots(
 async fn collect_bounded_writes<F, T, E>(
     mut work: impl Iterator<Item = F>,
     concurrency: usize,
+    cancellation: impl Fn() -> Option<E>,
 ) -> Result<Vec<T>, E>
 where
     F: std::future::Future<Output = Result<T, E>>,
@@ -580,6 +597,9 @@ where
     let mut results = Vec::new();
     let mut failure = None;
     loop {
+        if failure.is_none() {
+            failure = cancellation();
+        }
         while failure.is_none() && pending.len() < concurrency {
             let Some(next) = work.next() else {
                 break;
@@ -987,6 +1007,8 @@ fn hex(bytes: &[u8]) -> String {
 /// Fail-closed exact relation-snapshot errors.
 #[derive(Debug, Error)]
 pub enum ProgrammaticRelationDeltaError {
+    #[error("relation publication cancelled; all started writes have completed")]
+    Cancelled,
     #[error("programmatic relation snapshot layout root is invalid: {0}")]
     InvalidLayoutRoot(Url),
     #[error("cannot derive a relation root for {relation_id:?} below {root}: {source}")]
@@ -1079,7 +1101,7 @@ mod tests {
                     finish.await.unwrap()
                 }
             });
-        let mut operation = tokio::spawn(super::collect_bounded_writes(work, 2));
+        let mut operation = tokio::spawn(super::collect_bounded_writes(work, 2, || None));
         let started = [
             observed.recv().await.unwrap(),
             observed.recv().await.unwrap(),
@@ -1104,6 +1126,51 @@ mod tests {
             finish_third.send(Ok(2)).is_err(),
             "unstarted work is discarded"
         );
+    }
+
+    #[tokio::test]
+    async fn bounded_snapshot_cancellation_drains_started_writes_without_admitting_more() {
+        let cancellation = crate::cancellation::Cancellation::with_check_interval(1);
+        let probe = cancellation.clone();
+        let (started, mut observed) = tokio::sync::mpsc::unbounded_channel();
+        let (finish_first, first) = tokio::sync::oneshot::channel();
+        let (finish_second, second) = tokio::sync::oneshot::channel();
+        let (finish_third, third) = tokio::sync::oneshot::channel();
+        let work = [first, second, third]
+            .into_iter()
+            .enumerate()
+            .map(move |(index, finish)| {
+                let started = started.clone();
+                async move {
+                    started.send(index).unwrap();
+                    finish.await.unwrap()
+                }
+            });
+        let mut operation = tokio::spawn(super::collect_bounded_writes(work, 2, move || {
+            probe.is_cancelled().then_some("cancelled")
+        }));
+        let started = [
+            observed.recv().await.unwrap(),
+            observed.recv().await.unwrap(),
+        ];
+        assert_eq!(
+            std::collections::BTreeSet::from(started),
+            std::collections::BTreeSet::from([0, 1])
+        );
+        cancellation.cancel();
+        finish_first.send(Ok(0)).unwrap();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), &mut operation)
+                .await
+                .is_err()
+        );
+        assert!(
+            observed.try_recv().is_err(),
+            "cancellation closes new write admission"
+        );
+        finish_second.send(Ok(1)).unwrap();
+        assert_eq!(operation.await.unwrap(), Err("cancelled"));
+        assert!(finish_third.send(Ok(2)).is_err());
     }
 
     #[test]

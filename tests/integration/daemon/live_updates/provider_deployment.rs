@@ -65,6 +65,7 @@ fn start_private_providers(
         child,
         discovery: fixture.supervisor_discovery(),
         codefabric: stack.codefabric.clone(),
+        preparation_root: fixture.fabric_workspace_root(),
     };
     supervisor.wait_ready();
     supervisor

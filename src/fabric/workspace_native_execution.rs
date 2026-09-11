@@ -17,8 +17,8 @@ use crate::resource_budget::{
 };
 
 use super::native_execution_lane::{
-    NativeAdmissionFailure, NativeExecutionLane, NativeLaneAdmission, NativeLaneCleanup,
-    NativeLaneEnvelope, NativeLaneError, NativeLaneOutput,
+    NativeAdmissionFailure, NativeCancellationMode, NativeExecutionLane, NativeLaneAdmission,
+    NativeLaneCleanup, NativeLaneEnvelope, NativeLaneError, NativeLaneOutput,
 };
 use super::owned_local_store::{OwnedLocalMutation, OwnedLocalStore, OwnedLocalStoreError};
 
@@ -48,6 +48,7 @@ struct WorkspaceNativeRequest<'a> {
     class: ResourceClass,
     deadline: Instant,
     mutation: bool,
+    cancellation_mode: NativeCancellationMode,
 }
 
 impl WorkspaceNativeExecution {
@@ -135,6 +136,7 @@ impl WorkspaceNativeExecution {
                 class,
                 deadline,
                 mutation: false,
+                cancellation_mode: NativeCancellationMode::DropFuture,
             },
             operation,
             classify,
@@ -181,9 +183,39 @@ impl WorkspaceNativeExecution {
                 class,
                 deadline,
                 mutation: true,
+                cancellation_mode: NativeCancellationMode::DropFuture,
             },
             operation,
             classify,
+        )
+        .await
+    }
+
+    /// The callback observes cancellation between bounded writes and joins every started
+    /// write. Its runtime stays alive through that drain, including after the caller leaves.
+    pub(crate) async fn run_draining_mutation<T, E, F, O>(
+        &self,
+        name: &str,
+        class: ResourceClass,
+        deadline: Instant,
+        operation: O,
+    ) -> Result<T, NativeLaneError>
+    where
+        T: NativeLaneOutput,
+        E: Display,
+        F: Future<Output = Result<T, E>>,
+        O: FnOnce(Cancellation, Arc<OwnedLocalStore>) -> F + Send + 'static,
+    {
+        self.run(
+            WorkspaceNativeRequest {
+                name,
+                class,
+                deadline,
+                mutation: true,
+                cancellation_mode: NativeCancellationMode::DrainFuture,
+            },
+            operation,
+            |error| NativeLaneError::operation(&error),
         )
         .await
     }
@@ -228,6 +260,7 @@ impl WorkspaceNativeExecution {
                 budget: &self.owner.budget,
                 class: request.class,
                 deadline: request.deadline,
+                cancellation_mode: request.cancellation_mode,
             },
             move |cancellation| async move {
                 if request.mutation {

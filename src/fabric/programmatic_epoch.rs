@@ -341,11 +341,28 @@ impl ProgrammaticFabricEpochBuilder {
     /// Build all transformations, append the candidate's five observation
     /// relations to their stable Delta histories, rebind the exact committed
     /// versions in this same session, and validate schema and dependency consistency.
+    #[allow(clippy::result_large_err)] // Preserve the existing typed publication errors in this forwarding method.
     pub(crate) async fn seal(
         self,
         write_identity: ProgrammaticObservationWriteIdentity,
         targets: ProgrammaticObservationDeltaTargets,
         relation_preparation: ProgrammaticRelationDeltaPreparation,
+    ) -> Result<ProgrammaticFabricEpoch, ProgrammaticFabricEpochError> {
+        self.seal_cancellable(
+            write_identity,
+            targets,
+            relation_preparation,
+            &crate::cancellation::Cancellation::default(),
+        )
+        .await
+    }
+
+    pub(crate) async fn seal_cancellable(
+        self,
+        write_identity: ProgrammaticObservationWriteIdentity,
+        targets: ProgrammaticObservationDeltaTargets,
+        relation_preparation: ProgrammaticRelationDeltaPreparation,
+        cancellation: &crate::cancellation::Cancellation,
     ) -> Result<ProgrammaticFabricEpoch, ProgrammaticFabricEpochError> {
         if write_identity.epoch_id() != self.identity {
             return Err(
@@ -370,6 +387,7 @@ impl ProgrammaticFabricEpochBuilder {
             write_identity.writer_generation(),
             write_identity.observation_set_id(),
             relation_preparation,
+            cancellation,
         )
         .await?;
         let table_versions =

@@ -151,6 +151,15 @@ pub(crate) struct NativeLaneAdmission<'a> {
     pub budget: &'a ResourceBudget,
     pub class: ResourceClass,
     pub deadline: Instant,
+    pub cancellation_mode: NativeCancellationMode,
+}
+
+/// A Delta mutation may have blocking kernel calls waiting on this runtime. Its owner
+/// must stop admitting writes on the probe and drain started writes before returning.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NativeCancellationMode {
+    DropFuture,
+    DrainFuture,
 }
 
 /// Evidence minted only after destruction of this exact native runtime joined its workers.
@@ -398,73 +407,94 @@ impl NativeExecutionLane {
         let scope = admission.scope.clone();
         let output_budget = admission.budget.clone();
         let deadline = admission.deadline;
+        let cancellation_mode = admission.cancellation_mode;
         let envelope = self.envelope;
-        Ok(admission.scope.spawn_blocking_owned(admission.name, reservation, move |probe| {
-            if IN_NATIVE_LANE.get() {
-                return Err(NativeAdmissionFailure::NestedLane.into());
-            }
-            let _native_context = NativeThreadContext::enter();
-            let runtime = Builder::new_multi_thread()
-                .worker_threads(envelope.worker_threads.get())
-                .max_blocking_threads(envelope.blocking_threads.get())
-                .thread_stack_size(envelope.thread_stack_bytes.get())
-                .thread_name("cf-native-lane")
-                .on_thread_start(|| IN_NATIVE_LANE.set(true))
-                .on_thread_stop(|| IN_NATIVE_LANE.set(false))
-                .enable_all().build()?;
-            let operation_result = catch_unwind(AssertUnwindSafe(|| runtime.block_on(async {
-                if probe.is_cancelled() {
-                    return Err(NativeLaneError::Cancelled);
+        Ok(admission
+            .scope
+            .spawn_blocking_owned(admission.name, reservation, move |probe| {
+                if IN_NATIVE_LANE.get() {
+                    return Err(NativeAdmissionFailure::NestedLane.into());
                 }
-                if Instant::now() >= deadline {
-                    return Err(NativeLaneError::Deadline);
-                }
-                // The future is constructed inside the private runtime, including libraries
-                // that capture Handle::current while creating a table, engine or stream.
-                tokio::select! {
-                    biased;
-                    () = scope.cancelled() => Err(NativeLaneError::Cancelled),
-                    () = tokio::time::sleep_until(deadline.into()) => Err(NativeLaneError::Deadline),
-                    result = operation(probe) => {
+                let _native_context = NativeThreadContext::enter();
+                let runtime = Builder::new_multi_thread()
+                    .worker_threads(envelope.worker_threads.get())
+                    .max_blocking_threads(envelope.blocking_threads.get())
+                    .thread_stack_size(envelope.thread_stack_bytes.get())
+                    .thread_name("cf-native-lane")
+                    .on_thread_start(|| IN_NATIVE_LANE.set(true))
+                    .on_thread_stop(|| IN_NATIVE_LANE.set(false))
+                    .enable_all()
+                    .build()?;
+                let operation_result = catch_unwind(AssertUnwindSafe(|| {
+                    runtime.block_on(async {
+                        if probe.is_cancelled() {
+                            return Err(NativeLaneError::Cancelled);
+                        }
+                        if Instant::now() >= deadline {
+                            return Err(NativeLaneError::Deadline);
+                        }
+                        // The future is constructed inside the private runtime, including libraries
+                        // that capture Handle::current while creating a table, engine or stream.
+                        let future = operation(probe.clone());
+                        tokio::pin!(future);
+                        let interrupted = tokio::select! {
+                            biased;
+                            () = scope.cancelled() => NativeLaneError::Cancelled,
+                            () = tokio::time::sleep_until(deadline.into()) => NativeLaneError::Deadline,
+                            result = &mut future => {
                                 let value = result.map_err(NativeLaneError::into_owned_failure)?;
-                        value.validate_retained_owner(&output_budget)?;
-                        Ok(value)
-                    },
-                }
-                // select drops the operation future here before any cleanup callback runs.
-            })));
-            let result = match operation_result {
-                Ok(result) => result,
-                Err(payload) => {
-                    // A panic payload can own native objects whose Drop uses Handle::current.
-                    // Dispose it inside the still-live lane, so resulting work joins below.
+                                value.validate_retained_owner(&output_budget)?;
+                                return Ok(value);
+                            },
+                        };
+                        probe.cancel();
+                        if cancellation_mode == NativeCancellationMode::DrainFuture {
+                            // Keep the runtime driving kernel async tasks until the mutation has
+                            // observed every started write. Cancellation never publishes its result.
+                            drop(future.await.map_err(NativeLaneError::into_owned_failure));
+                        }
+                        Err(interrupted)
+                    })
+                }));
+                let result = match operation_result {
+                    Ok(result) => result,
+                    Err(payload) => {
+                        // A panic payload can own native objects whose Drop uses Handle::current.
+                        // Dispose it inside the still-live lane, so resulting work joins below.
+                        let _entered = runtime.enter();
+                        drop(payload);
+                        Err(NativeLaneError::Panicked)
+                    }
+                };
+                let cleanup_outcome = catch_unwind(AssertUnwindSafe(|| {
+                    runtime.block_on(async {
+                        (cleanup.before_join)()
+                            .await
+                            .map_err(|error| diagnostic(&error))
+                    })
+                }));
+                let before_join = {
                     let _entered = runtime.enter();
-                    drop(payload);
-                    Err(NativeLaneError::Panicked)
+                    cleanup_result(cleanup_outcome)
+                };
+                // No deadline can bypass this barrier. A worker that ignores cancellation remains
+                // admitted and visible to the outer structured registry until it actually exits.
+                let runtime_id = runtime.handle().id();
+                drop(runtime);
+                let joined = NativeLaneJoined { runtime_id };
+                let after_join = cleanup_result(catch_unwind(AssertUnwindSafe(|| {
+                    (cleanup.after_join)(joined).map_err(|error| diagnostic(&error))
+                })));
+                if before_join.is_some() || after_join.is_some() {
+                    return Err(NativeLaneError::Cleanup {
+                        before_join,
+                        after_join,
+                        operation: result.err().map(Box::new),
+                    });
                 }
-            };
-            let cleanup_outcome = catch_unwind(AssertUnwindSafe(|| {
-                runtime.block_on(async { (cleanup.before_join)().await.map_err(|error| diagnostic(&error)) })
-            }));
-            let before_join = {
-                let _entered = runtime.enter();
-                cleanup_result(cleanup_outcome)
-            };
-            // No deadline can bypass this barrier. A worker that ignores cancellation remains
-            // admitted and visible to the outer structured registry until it actually exits.
-            let runtime_id = runtime.handle().id();
-            drop(runtime);
-            let joined = NativeLaneJoined { runtime_id };
-            let after_join = cleanup_result(catch_unwind(AssertUnwindSafe(|| {
-                (cleanup.after_join)(joined).map_err(|error| diagnostic(&error))
-            })));
-            if before_join.is_some() || after_join.is_some() {
-                return Err(NativeLaneError::Cleanup {
-                    before_join, after_join, operation: result.err().map(Box::new),
-                });
-            }
-            result
-        }).await?)
+                result
+            })
+            .await?)
     }
 }
 
@@ -581,6 +611,7 @@ mod tests {
             budget,
             class,
             deadline: Instant::now() + Duration::from_secs(10),
+            cancellation_mode: NativeCancellationMode::DropFuture,
         }
     }
 
@@ -690,6 +721,78 @@ mod tests {
         assert!(after_join.load(Ordering::Acquire));
         assert_eq!(budget.observation().used.running_jobs, 0);
         assert_eq!(budget.observation().used.memory_bytes, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn draining_native_cancellation_keeps_kernel_async_dependency_alive() {
+        draining_kernel_dependency(false).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn draining_native_deadline_keeps_kernel_async_dependency_alive() {
+        draining_kernel_dependency(true).await;
+    }
+
+    async fn draining_kernel_dependency(deadline: bool) {
+        let lane = lane();
+        let budget = budget();
+        let root = scopes();
+        let mut request = admission(&root, &budget, ResourceClass::Data);
+        request.cancellation_mode = NativeCancellationMode::DrainFuture;
+        if deadline {
+            request.deadline = Instant::now() + Duration::from_secs(1);
+        }
+        let (started, running) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let cleaned = Arc::new(AtomicBool::new(false));
+        let cleanup = Arc::clone(&cleaned);
+        let task = lane
+            .spawn(
+                request,
+                move |_| async move {
+                    let handle = tokio::runtime::Handle::current();
+                    // The resolved Delta kernel executor synchronously receives from an async
+                    // task on this same runtime. Runtime shutdown used to destroy its sender.
+                    tokio::task::spawn_blocking(move || {
+                        let (sender, receiver) = mpsc::channel();
+                        handle.spawn(async move {
+                            started.send(()).unwrap();
+                            released.await.unwrap();
+                            sender.send(9_u64).unwrap();
+                        });
+                        receiver
+                            .recv()
+                            .expect("kernel async dependency remains alive")
+                    })
+                    .await
+                    .map_err(|_| "kernel worker panicked")
+                },
+                NativeLaneCleanup {
+                    before_join: move || async move {
+                        cleanup.store(true, Ordering::Release);
+                        Ok::<(), &'static str>(())
+                    },
+                    after_join: |_| Ok::<(), &'static str>(()),
+                },
+            )
+            .await
+            .unwrap();
+        running.await.unwrap();
+        if !deadline {
+            root.cancel();
+        }
+        root.cancelled().await;
+        assert_eq!(budget.observation().used.running_jobs, 1);
+        assert!(!cleaned.load(Ordering::Acquire));
+        release.send(()).unwrap();
+        let result = task.wait().await.unwrap();
+        if deadline {
+            assert!(matches!(result, Err(NativeLaneError::Deadline)));
+        } else {
+            assert!(matches!(result, Err(NativeLaneError::Cancelled)));
+        }
+        assert!(cleaned.load(Ordering::Acquire));
+        assert_eq!(budget.observation().used.running_jobs, 0);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
