@@ -486,9 +486,9 @@ impl Drop for RunningSupervisor {
         {
             let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
         }
-        // The accepted-work drain alone may take 30 seconds. Allow the ordinary
-        // supervisor stop/join sequence to finish even while unwinding a failed assertion.
-        let deadline = Instant::now() + Duration::from_secs(45);
+        // Accepted queries and started native publication have separate bounded drains.
+        // Preserve the normal joined teardown allowance while unwinding a failed assertion.
+        let deadline = Instant::now() + PROCESS_DEADLINE;
         while Instant::now() < deadline {
             if self.child.try_wait().ok().flatten().is_some() {
                 self.report_failed_preparation();

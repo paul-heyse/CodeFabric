@@ -72,6 +72,9 @@ const ABANDONED_ADAPTER_KILL_GRACE: Duration = Duration::from_secs(5);
 const ABANDONED_ADAPTER_EXIT_POLL: Duration = Duration::from_millis(25);
 const DAEMON_CONTROL_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const DAEMON_ACCEPTED_WORK_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
+// Source publication joins started native writes after accepted-query drain. Its finite
+// 120-second operation interval needs separate headroom from ordinary control I/O.
+const DAEMON_WORKSPACE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(150);
 const SUPERVISOR_RENDEZVOUS_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const SUPERVISOR_RENDEZVOUS_HANDLE_TIMEOUT: Duration = Duration::from_secs(6);
 const SUPERVISOR_RENDEZVOUS_TASK_LIMIT: usize = 32;
@@ -2141,12 +2144,12 @@ async fn drain_shutdown_and_join_daemon(
     };
     let acknowledgement = daemon
         .control
-        .transact_with_timeout(&shutdown, DAEMON_ACCEPTED_WORK_DRAIN_TIMEOUT)
+        .transact_with_timeout(&shutdown, DAEMON_WORKSPACE_SHUTDOWN_TIMEOUT)
         .await?;
     if !acknowledgement.accepted || acknowledgement.code != "SHUTDOWN_ACCEPTED" {
         return Err(SupervisorError::Control(acknowledgement.code));
     }
-    let status = tokio::time::timeout(DAEMON_ACCEPTED_WORK_DRAIN_TIMEOUT, daemon.child.wait())
+    let status = tokio::time::timeout(DAEMON_WORKSPACE_SHUTDOWN_TIMEOUT, daemon.child.wait())
         .await
         .map_err(|_| SupervisorError::Child("daemon joined-shutdown deadline exceeded".into()))?
         .map_err(|source| SupervisorError::Child(source.to_string()))?;

@@ -119,10 +119,11 @@ mod source_context;
 pub(super) mod syntax_cache;
 mod updates;
 
-// Started Delta writes must finish while their native runtime remains alive. Reserve bounded
-// time for that drain, leaving ten seconds within the supervisor's 30-second control phase
-// for protocol delivery and finalization. A failed join still retains the writer fence.
-pub(crate) const WORKSPACE_OPERATION_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
+// A started Delta write has no supported mid-write cancellation hook. Keep driving its native
+// runtime for the same finite interval admitted to publication, rather than treating it as a
+// disposable async task. The supervisor reserves an additional 30 seconds for control delivery
+// and finalization. A failed join still retains the writer fence.
+pub(crate) const WORKSPACE_OPERATION_DRAIN_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Joined owner retained by the daemon after one workspace reaches queryable authority.
 pub(crate) struct ProductionWorkspaceStartup {
