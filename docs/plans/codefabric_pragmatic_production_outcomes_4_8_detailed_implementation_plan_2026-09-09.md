@@ -1626,7 +1626,7 @@ unchanged-version reuse, selective persistence and update scheduling remain open
 
 **Acceptance:** syntax can become current while compiler facts remain explicitly pending; semantic convergence produces the expected successor; an old query continues to read its exact source/facts during multiple updates.
 
-**P04 parser continuation (2026-09-10; integration under validation).** The workspace resource
+**P04 parser continuation (2026-09-10; accepted checkpoint `55c69cdd`).** The workspace resource
 owner now retains Python/Rust runners by file and effective context. Native Tree-sitter edits are
 reconstructed from the exact old/new UTF-8 texts, including disjoint, Unicode and CRLF changes.
 The complete current CST is projected after native incremental parsing; a structurally unchanged
@@ -1653,7 +1653,7 @@ function-source scenario passes in 899.664 s; source/semantic race/restart passe
 overlap part of that duration, so it is not an isolated performance sample. STATUS records logs.
 Retained Cargo state, complete invalidation and shared scheduling remain open.
 
-**P04 checker continuation (2026-09-10; implementation under validation).** Production now retains
+**P04 checker continuation (2026-09-10; accepted checkpoint `1f590cdc`).** Production now retains
 one contained Pyrefly process beneath the workspace cancellation scope. The exact resolved context
 manifest selects native checker compatibility; fresh full inventories and their support evidence
 are still validated for every run. A stable read-only Python input-view mount exposes atomically
@@ -1674,9 +1674,11 @@ source-only call-target edits/restoration with native reuse counters, plus modul
 changes with independent clean-query comparisons. The current canonical manifest includes the
 module map, so adding/removing a module selects a new context rather than retaining an incompatible
 one. An initial test incorrectly expected reuse across that change; the corrected corpus preserves
-the existing context authority. All three focused cleanup/ownership cases pass. Final installed
-native acceptance is still pending;
-this does not finish P04 or shared cost-aware scheduling.
+the existing context authority. All three focused cleanup/ownership cases pass. The final installed
+eight-state corpus passes in 1528.600 s, comparing every update with an independent clean build.
+Both source-only mutations reuse the checker; module/configuration changes and unsupported
+configuration exercise retirement and fresh contexts. STATUS records the exact invocation/log.
+This does not finish P04, retained Cargo contexts or shared cost-aware scheduling.
 
 **Remaining implementation progression (E02/E04/E05/E12/E21/E22; P04).**
 

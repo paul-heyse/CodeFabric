@@ -49,8 +49,8 @@ of the cross-cutting packages in §3.3 of the detailed plan.
 ## P04 retained inputs and syntax — implementation in progress
 
 P03's related-context integration is committed in `75687368`. P04's immutable-input pin reuse and
-workspace-owned syntax checkpoint is committed in `55c69cdd`. The working tree now integrates a
-retained Pyrefly service; its acceptance is in progress. P04 remains open: retained Cargo contexts,
+workspace-owned syntax checkpoint is committed in `55c69cdd`. The retained Pyrefly service is
+committed in `1f590cdc` and now passes the installed eight-state clean/update corpus. P04 remains open: retained Cargo contexts,
 complete invalidation/topology and shared update scheduling still follow. P05–P14 remain open.
 
 Exact source bytes and line indexes now declare identities over their producer revision, workspace,
@@ -126,9 +126,12 @@ queries. The final cleanup/ownership selection passes all three cases in 0.238 s
 (`/tmp/codefabric-p04-pyrefly-cleanup-focused.log`), including symlink-safe private-output removal.
 Default/featureless checks pass in `/tmp/codefabric-p04-pyrefly-root-final.log`; final affected
 Clippy is clean in `/tmp/codefabric-p04-pyrefly-cache-clippy-v4.jsonl`, including the extracted
-context-transition assertion helper. The final installed corpus is running in
-`/tmp/codefabric-p04-pyrefly-retained-final-native.log`; source-only generation 2 records one
-process start, one reuse and two completed generations. Whole-corpus acceptance remains pending. The expanded eight-state context corpus now has an 1800-second nextest bound
+context-transition assertion helper. The final installed corpus passes in 1528.600 s
+(`/tmp/codefabric-p04-pyrefly-retained-final-native.log`, nextest run
+`3388436d-bb08-463b-8788-1133a11685bc`). Both source-only call-target changes reuse the native
+checker; module creation/deletion, Python version/platform and unsupported configuration follow
+their expected retirement paths. All seven updates agree with separate clean query states.
+Source-only generation 2 records one process start, one reuse and two completed generations. The expanded eight-state context corpus now has an 1800-second nextest bound
 and 2100-second product-wrapper bound: the first one-file semantic pass alone spends 60.974 s in
 relational execution/Delta writes, while the kernel sample reports 245 ms of provider-group CPU. The
 initial failed invocation had a 900-second bound. These are observed
