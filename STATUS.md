@@ -393,6 +393,36 @@ The detailed plan §6B records the decision, assumptions and fuller immutable-im
 Runtime image capture/leased ownership, external-root admission, safe Cargo retention and the
 remaining P04/P05 scope stay open.
 
+**Native watch backend ownership (2026-09-11; focused native/application checkpoint).**
+The selected notify reference §30, “Shutdown and resource lifecycle,” correctly identifies
+`Debouncer::stop()` as joining the debounce thread. Exact notify 8.2.0 source inspection shows that
+both polling and Linux inotify discard their separate worker `JoinHandle`; a debounce join alone
+cannot join either backend. A scoped `third_party/notify` patch retains these handles, propagates
+spawn failures and supplies construction-only `Config::with_join_on_drop(true)`. CodeFabric opts
+in on its existing blocking watch owner. Polling stop wakes manual and timed waits; Linux cleanup
+handles an already closed event loop before joining. Upstream/default drop behavior remains
+nonblocking, and other platform backends retain their existing behavior.
+
+A callback-drop acknowledgement was considered but would run before final thread-local destruction
+and would not provide a native thread join. The selected extension uses `JoinHandle::join` directly;
+callbacks must finish, and may not drop their own joined watcher. It adds no watcher service, task
+registry or polling implementation. The root patch keeps notify at 8.2.0, records the original
+source/checksum/license and changes only that lock source; incidental Windows dependency
+re-selection was removed. Locked metadata still has one root workspace member. A real backend test
+holds thread-local destruction while shutdown is pending, and covers manual/timed polling and Linux
+inotify. Existing native/polling topology and cancellation tests qualify the application consumer.
+All-target checking passes in 1m24s. All **three focused cases pass in 8.554 s** (run
+`5511ba6c-80c6-430c-8989-f5c3121fc08d`; `/tmp/codefabric-p04-notify-join-focused.log`): the real
+thread-exit test covers all three modes, and both existing owned topology/recovery cases release
+all charged state after cancellation and join. All-target Clippy completes in 1m27s with the
+existing warnings; two test-style advisories were corrected. Featureless checking, locked single-
+member metadata, source diff review and three-document navigation pass. No full-suite, doctest
+or other-platform result is claimed. This closes the identified Linux/poll backend join gap;
+full platform recovery, event completeness, external roots and remaining P04/P05 acceptance stay
+open. The next ownership correction preserves native control admission while workspace producers
+finish cancellation/activation cleanup; the runtime-case failure above exposed premature parent
+scope cancellation.
+
 **Recursive inclusion continuation (2026-09-11).** The existing capture and watch walks now observe
 configuration in every admitted directory before enumerating its children. Native gix submodule
 declarations and Python search/site-package roots select descendants through recursive pruned

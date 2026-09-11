@@ -9,6 +9,9 @@ use std::time::{Duration, Instant};
 use notify_debouncer_full::notify::{
     Config, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode,
 };
+
+#[cfg(all(test, target_os = "linux"))]
+mod backend_join_tests;
 use notify_debouncer_full::{
     DebounceEventResult, Debouncer, NoCache, RecommendedCache, new_debouncer_opt,
 };
@@ -487,7 +490,9 @@ impl WorkspaceObservation {
                 events,
             );
         };
-        let config = Config::default().with_follow_symlinks(false);
+        let config = Config::default()
+            .with_follow_symlinks(false)
+            .with_join_on_drop(true);
         let watcher = match profile {
             SourceWatchProfile::Native => WatchBackend::Native(
                 new_debouncer_opt(
@@ -596,7 +601,8 @@ impl WorkspaceWatchControl {
     }
 }
 
-/// The owning blocking operation calls native stop and joins the debouncer thread.
+/// The owning blocking operation joins the debouncer and the selected Linux/poll backend.
+/// Other platform backend joining remains outside the qualified Linux deployment profile.
 enum WatchBackend {
     Native(Debouncer<RecommendedWatcher, RecommendedCache>),
     Poll(Debouncer<PollWatcher, NoCache>),

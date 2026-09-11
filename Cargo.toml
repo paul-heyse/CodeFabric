@@ -258,3 +258,7 @@ debug = "full"
 inherits = "release"
 debug = "full"
 strip = "none"
+
+# Retain backend thread ownership behind an explicit construction option; upstream defaults stay intact.
+[patch.crates-io]
+notify = { path = "third_party/notify" }
