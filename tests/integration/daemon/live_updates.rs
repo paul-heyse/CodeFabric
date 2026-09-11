@@ -2974,6 +2974,12 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
         Some("hold_semantic_update_publication"),
     );
     install_separate_git_metadata(&fixture);
+    let root = Path::new(&fixture.workspace.root_path_display);
+    fs::write(
+        root.join(".gitmodules"),
+        "[submodule \"vendor\"]\npath = target/vendor\n",
+    )
+    .unwrap();
     let git_attributes = fixture.state.join("observed-git/info/attributes");
     fs::write(&git_attributes, "*.py codefabric-input=initial\n").unwrap();
     fs::write(fixture.state.join("observed-git/info/exclude"), "*.py\n").unwrap();
@@ -2992,12 +2998,18 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
                 b"sample.py".as_bstr(),
             );
         }
+        index.dangerously_push_entry(
+            Default::default(),
+            gix::hash::ObjectId::from_hex(&[b'4'; 40]).unwrap(),
+            gix::index::entry::Flags::from_stage(gix::index::entry::Stage::Unconflicted),
+            gix::index::entry::Mode::COMMIT,
+            b"target/vendor".as_bstr(),
+        );
         index.sort_entries();
         gix::index::File::from_state(index, fixture.state.join("observed-git/index"))
             .write(Default::default())
             .unwrap();
     }
-    let root = Path::new(&fixture.workspace.root_path_display);
     let configuration = fs::read_to_string(&fixture.config_path).unwrap().replace(
         "[static_config]",
         "[static_config]\nsource_watch_profile = \"poll\"",
@@ -3064,10 +3076,12 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
                 .copied()
         })
         .collect::<BTreeSet<_>>();
-    assert_eq!(observed_stages, BTreeSet::from([2, 3]));
-    fs::create_dir_all(root.join("new/nested")).unwrap();
+    assert_eq!(observed_stages, BTreeSet::from([0, 2, 3]));
+    assert_eq!(submodule_observation(&fixture), (false, false));
+    fs::create_dir_all(root.join("target/vendor")).unwrap();
+    gix::init(root.join("target/vendor")).unwrap();
     fs::write(
-        root.join("new/nested/added.py"),
+        root.join("target/vendor/added.py"),
         "def polled():\n    return 2\n",
     )
     .unwrap();
@@ -3093,7 +3107,7 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
                 .iter()
                 .zip(binary("source_bytes").iter())
                 .any(|(path, bytes)| {
-                    path == Some(b"new/nested/added.py".as_slice())
+                    path == Some(b"target/vendor/added.py".as_slice())
                         && bytes == Some(b"def polled():\n    return 2\n".as_slice())
                 })
         });
@@ -3113,6 +3127,8 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
         "unchanged nonempty index-stage rows retain their exact version"
     );
     let updated_path_pin = metadata_pin("source.git_path_context");
+    assert_eq!(submodule_observation(&fixture), (true, true));
+    let boundary_pin = metadata_pin("source.git_submodule_boundary");
     assert_eq!(
         names,
         BTreeSet::from(["original".to_owned(), "polled".to_owned()])
@@ -3157,6 +3173,7 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
         thread::sleep(Duration::from_millis(100));
     }
     let (metadata_updated, names) = query("poll-git-metadata-updated");
+    assert_eq!(boundary_pin, metadata_pin("source.git_submodule_boundary"));
     assert_eq!(initial_stage_pin, metadata_pin("source.git_index_stage"));
     assert_eq!(
         updated_path_pin,
@@ -3183,8 +3200,40 @@ fn explicit_poll_profile_publishes_nested_source_changes_and_reopens_exactly() {
         metadata_updated["source_generation"]
     );
     assert!(selected_attribute());
+    assert_eq!(submodule_observation(&fixture), (true, true));
+    assert_eq!(boundary_pin, metadata_pin("source.git_submodule_boundary"));
     assert_eq!(initial_stage_pin, metadata_pin("source.git_index_stage"));
     supervisor.stop();
+}
+
+fn submodule_observation(fixture: &ProductionFixture) -> (bool, bool) {
+    let selected = all_activation_control_rows(fixture)
+        .into_iter()
+        .max_by_key(|row| row.row().ordinal.get())
+        .unwrap();
+    let batches = selected_relation_batches(&selected, "source.git_submodule_boundary");
+    assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
+    let batch = batches.iter().find(|batch| batch.num_rows() > 0).unwrap();
+    let bytes = |name| {
+        batch
+            .column_by_name(name)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow_array::BinaryArray>()
+            .unwrap()
+    };
+    assert_eq!(bytes("relative_path").value(0), b"target/vendor");
+    assert_eq!(bytes("name").value(0), b"vendor");
+    let flag = |name| {
+        batch
+            .column_by_name(name)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow_array::BooleanArray>()
+            .unwrap()
+            .value(0)
+    };
+    (flag("captured_sources"), flag("repository_observed"))
 }
 
 fn install_separate_git_metadata(fixture: &ProductionFixture) {

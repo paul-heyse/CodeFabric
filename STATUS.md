@@ -168,6 +168,29 @@ pass. All-target Clippy completes with the warning backlog and function-size adv
 private-field/redundant-closure diagnostics are corrected and included in the final focused build.
 Native checks overlapped this installed run, so its duration is not an isolated performance sample.
 
+The selected submodule continuation uses native gix `submodule::File::from_bytes` over bounded
+`.gitmodules` bytes, without historical fallback, URL loading, initialization or fetch. Root-declared
+paths share capture/watch inclusion and may select a subtree beneath ordinary build/cache pruning;
+`.git` and escaping paths remain excluded. Parent gitlink stages 0–3 join the existing detached
+index-stage relation, and `source.git_submodule_boundary` records declaration status, missing inputs,
+observed repository boundaries and captured source presence. Conflicting names/paths and index stages
+remain metadata; neither commit IDs nor Git filters choose source bytes. Directory membership uses
+the existing ancestor set instead of rescanning every input for each boundary.
+
+Seven focused inclusion/inventory/native/poll checks pass in **4.271 s**
+(`/tmp/codefabric-p04-submodule-final-focused.log`), including declaration removal, conflicted gitlinks,
+invalid paths, missing submodules and joined watch replacement. The installed polling/source/metadata/
+reopen case passes in **203.856 s**, run `4d9901e3-d61f-40d3-bd78-945640a8c11c`
+(`/tmp/codefabric-p04-submodule-installed.log`; isolated target, installed providers and delegated
+user-systemd scope). A declared `target/vendor` boundary changes from missing to captured without a
+query census, its Python declaration appears publicly, and unchanged nonempty gitlink/boundary pins
+survive metadata-only publication and exact reopen. This source-first fixture deliberately keeps
+semantic publication pending; it does not certify full dependency semantics. Physical external roots
+and recursive declaration selection beneath independently pruned nested repositories still remain.
+All-target Clippy completes with the existing warning backlog and function-size/default-constructor
+advisories; featureless checking and document navigation pass
+(`/tmp/codefabric-p04-submodule-{clippy,featureless}*`).
+
 The resumed inclusion slice uses one capture/watch policy. Captured root `pyrefly.toml` and
 `[tool.pyrefly]` search/site-package candidates can select subtrees beneath normally pruned
 `.venv`/build directories, with ancestor observation, sibling pruning, no-follow source capture

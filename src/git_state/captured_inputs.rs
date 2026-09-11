@@ -6,6 +6,9 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::path::Path;
 use std::time::Instant;
 
+mod submodules;
+pub(crate) use submodules::GitSubmoduleBoundary;
+
 use gix::bstr::ByteSlice as _;
 use serde::Serialize;
 
@@ -44,6 +47,7 @@ pub(crate) struct GitPathContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct CapturedGitInputs {
     pub paths: Vec<GitPathContext>,
+    pub submodules: Vec<GitSubmoduleBoundary>,
     pub digest: [u8; 32],
 }
 
@@ -97,6 +101,8 @@ pub(crate) fn capture(
             repositories.insert(directory.clone());
         }
     }
+    let policy = crate::source_inclusion::SourceInclusionPolicy::capture_watch(root);
+    let mut submodules = Vec::new();
     let mut groups = BTreeMap::<Vec<u8>, Vec<&SourceInventoryRecord>>::new();
     for record in records {
         let path = &record.path.raw_relative_path_bytes;
@@ -122,6 +128,9 @@ pub(crate) fn capture(
         }
     }
     let mut paths = Vec::new();
+    for repository in &repositories {
+        groups.entry(repository.clone()).or_default();
+    }
     for (prefix, members) in groups {
         check_progress(started, limits, cancellation)?;
         let directory = root.join(Path::new(std::ffi::OsStr::from_bytes(&prefix)));
@@ -139,6 +148,29 @@ pub(crate) fn capture(
         let index = loaded_index.as_ref().filter(|index| {
             index.entries().len() as u64 <= limits.maximum_file_count.saturating_mul(4)
         });
+        let boundaries = submodules::capture(
+            &directory,
+            &prefix,
+            index.map(|index| -> &gix::index::State { index }),
+            &directories,
+            &repositories,
+            &policy,
+            cancellation,
+        );
+        check_progress(started, limits, cancellation)?;
+        retained.try_grow(ResourceAmounts {
+            memory_bytes: boundaries
+                .iter()
+                .map(|boundary| {
+                    512 + boundary.repository_root.len()
+                        + boundary.path.as_ref().map_or(0, Vec::len)
+                        + boundary.name.as_ref().map_or(0, Vec::len)
+                        + boundary.stages.len() * 128
+                })
+                .sum::<usize>() as u64,
+            ..ResourceAmounts::default()
+        })?;
+        submodules.extend(boundaries);
         let mut attributes = repository
             .as_ref()
             .ok()
@@ -259,11 +291,12 @@ pub(crate) fn capture(
     let mut digest = DigestWriter(crate::integrity::IntegrityHasher::new());
     digest
         .0
-        .update(b"codefabric.captured-git-input-context.v1\0");
-    serde_json::to_writer(&mut digest, &paths)
+        .update(b"codefabric.captured-git-input-context.v2\0");
+    serde_json::to_writer(&mut digest, &(&paths, &submodules))
         .expect("detached metadata serialization is infallible");
     Ok(retained.into_charged_value(CapturedGitInputs {
         paths,
+        submodules,
         digest: digest.0.finalize(),
     }))
 }

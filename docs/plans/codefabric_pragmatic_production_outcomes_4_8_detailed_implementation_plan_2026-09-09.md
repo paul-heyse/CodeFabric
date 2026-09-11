@@ -1644,6 +1644,31 @@ directory outside captured source (85.998 s). This is exact identity/correctness
 cost evidence, not representative end-to-end performance or complete Git inclusion acceptance.
 STATUS records commands/configuration and limits; P04/P14 still own full workload measurement.
 
+**Selected submodule continuation (2026-09-11; accepted installed checkpoint).**
+
+The selected submodule continuation uses native gix `submodule::File::from_bytes` over bounded
+`.gitmodules` bytes, without historical fallback, URL loading, initialization or fetch. Root-declared
+paths share capture/watch inclusion and may select a subtree beneath ordinary build/cache pruning;
+`.git` and escaping paths remain excluded. Parent gitlink stages 0–3 join the existing detached
+index-stage relation, and `source.git_submodule_boundary` records declaration status, missing inputs,
+observed repository boundaries and captured source presence. Conflicting names/paths and index stages
+remain metadata; neither commit IDs nor Git filters choose source bytes. Directory membership uses
+the existing ancestor set instead of rescanning every input for each boundary.
+
+Seven focused inclusion/inventory/native/poll checks pass in **4.271 s**
+(`/tmp/codefabric-p04-submodule-final-focused.log`), including declaration removal, conflicted gitlinks,
+invalid paths, missing submodules and joined watch replacement. The installed polling/source/metadata/
+reopen case passes in **203.856 s**, run `4d9901e3-d61f-40d3-bd78-945640a8c11c`
+(`/tmp/codefabric-p04-submodule-installed.log`; isolated target, installed providers and delegated
+user-systemd scope). A declared `target/vendor` boundary changes from missing to captured without a
+query census, its Python declaration appears publicly, and unchanged nonempty gitlink/boundary pins
+survive metadata-only publication and exact reopen. This source-first fixture deliberately keeps
+semantic publication pending; it does not certify full dependency semantics. Physical external roots
+and recursive declaration selection beneath independently pruned nested repositories still remain.
+All-target Clippy completes with the existing warning backlog and function-size/default-constructor
+advisories; featureless checking and document navigation pass
+(`/tmp/codefabric-p04-submodule-{clippy,featureless}*`).
+
 **Remaining implementation progression (E06/E10; P01/P04).**
 
 1. Derive source inventory and watch topology from one captured inclusion policy. Watch selected
@@ -2886,9 +2911,11 @@ interpret this partial run as complete qualification or require full green befor
 
 The remaining **P04** progression is:
 
-1. Extend the shared capture/watch inclusion policy to physical external roots and explicit selected
-   submodule boundaries. Admitted nested/linked Git index/exclude/attributes/conflict stages now
-   have persisted metadata, live observation and installed acceptance. Preserve authoritative bytes,
+1. Extend the shared capture/watch inclusion policy to physical external roots and recursive
+   declaration chains beneath independently pruned nested repositories. Root-declared submodules,
+   gitlink conflict stages and absent-to-captured boundaries now pass installed polling/reopen.
+   Admitted nested/linked Git index/exclude/attributes/conflict stages also have persisted metadata,
+   live observation and installed acceptance. Preserve authoritative bytes,
    bounded recovery topology and metadata-only observation boundaries (§6A/E06/E10).
 2. Complete positive/negative dependency and tool validity, including the broader linker/runtime
    image and external roots. Persisted compiler/sysroot and C-driver/libgcc observations now extend

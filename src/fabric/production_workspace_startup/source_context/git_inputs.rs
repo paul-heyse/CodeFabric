@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use arrow_array::{BinaryArray, StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array};
+use arrow_array::{
+    BinaryArray, BooleanArray, StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
+};
 
 use super::{ProductionWorkspaceStartupError, input_observations};
 use crate::fabric::epoch_runtime::FabricSchemaRole;
@@ -34,14 +36,24 @@ pub(super) fn install(
             )
         }),
     ));
-    let stage_identity = identity(relation_digest(
-        b"stages\0",
-        context.paths.iter().flat_map(|row| {
-            row.stages
-                .iter()
-                .map(move |stage| (&row.path, &row.repository_root, stage))
-        }),
-    ));
+    let stages = || {
+        context
+            .paths
+            .iter()
+            .flat_map(|row| {
+                row.stages
+                    .iter()
+                    .map(move |stage| (&row.path, &row.repository_root, stage))
+            })
+            .chain(context.submodules.iter().flat_map(|row| {
+                row.path.iter().flat_map(move |path| {
+                    row.stages
+                        .iter()
+                        .map(move |stage| (path, &row.repository_root, stage))
+                })
+            }))
+    };
+    let stage_identity = identity(relation_digest(b"stages\0", stages()));
     let attribute_identity = identity(relation_digest(
         b"attributes\0",
         context.paths.iter().flat_map(|row| {
@@ -87,11 +99,6 @@ pub(super) fn install(
         ],
         path_identity,
     )?;
-    let stages = || {
-        paths
-            .iter()
-            .flat_map(|row| row.stages.iter().map(move |stage| (row, stage)))
-    };
     input_observations::register_immutable(
         builder,
         FabricSchemaRole::Source,
@@ -101,42 +108,42 @@ pub(super) fn install(
                 "relative_path",
                 false,
                 Arc::new(BinaryArray::from_iter(
-                    (stages().map(|(row, _)| row.path.as_slice())).map(Some),
+                    (stages().map(|(path, _, _)| path.as_slice())).map(Some),
                 )),
             ),
             (
                 "repository_root",
                 false,
                 Arc::new(BinaryArray::from_iter(
-                    (stages().map(|(row, _)| row.repository_root.as_slice())).map(Some),
+                    (stages().map(|(_, root, _)| root.as_slice())).map(Some),
                 )),
             ),
             (
                 "stage",
                 false,
                 Arc::new(UInt8Array::from_iter_values(
-                    stages().map(|(_, stage)| stage.stage),
+                    stages().map(|(_, _, stage)| stage.stage),
                 )),
             ),
             (
                 "mode",
                 false,
                 Arc::new(UInt32Array::from_iter_values(
-                    stages().map(|(_, stage)| stage.mode),
+                    stages().map(|(_, _, stage)| stage.mode),
                 )),
             ),
             (
                 "flags",
                 false,
                 Arc::new(UInt32Array::from_iter_values(
-                    stages().map(|(_, stage)| stage.flags),
+                    stages().map(|(_, _, stage)| stage.flags),
                 )),
             ),
             (
                 "object_id",
                 false,
                 Arc::new(BinaryArray::from_iter(
-                    (stages().map(|(_, stage)| stage.object_id.as_slice())).map(Some),
+                    (stages().map(|(_, _, stage)| stage.object_id.as_slice())).map(Some),
                 )),
             ),
         ],
@@ -210,5 +217,68 @@ pub(super) fn install(
             ),
         ],
         attribute_identity,
+    )?;
+    let boundaries = &context.submodules;
+    input_observations::register_immutable(
+        builder,
+        FabricSchemaRole::Source,
+        "git_submodule_boundary",
+        vec![
+            (
+                "repository_root",
+                false,
+                Arc::new(BinaryArray::from_iter_values(
+                    boundaries.iter().map(|row| row.repository_root.as_slice()),
+                )),
+            ),
+            (
+                "relative_path",
+                true,
+                Arc::new(BinaryArray::from_iter(
+                    boundaries.iter().map(|row| row.path.as_deref()),
+                )),
+            ),
+            (
+                "name",
+                true,
+                Arc::new(BinaryArray::from_iter(
+                    boundaries.iter().map(|row| row.name.as_deref()),
+                )),
+            ),
+            (
+                "configuration_status",
+                false,
+                Arc::new(StringArray::from_iter_values(
+                    boundaries.iter().map(|row| row.configuration_status),
+                )),
+            ),
+            (
+                "captured_sources",
+                false,
+                Arc::new(BooleanArray::from_iter(
+                    boundaries.iter().map(|row| Some(row.captured_sources)),
+                )),
+            ),
+            (
+                "repository_observed",
+                false,
+                Arc::new(BooleanArray::from_iter(
+                    boundaries.iter().map(|row| Some(row.repository_observed)),
+                )),
+            ),
+        ],
+        identity(relation_digest(
+            b"submodule-boundaries\0",
+            boundaries.iter().map(|row| {
+                (
+                    &row.repository_root,
+                    &row.path,
+                    &row.name,
+                    row.configuration_status,
+                    row.captured_sources,
+                    row.repository_observed,
+                )
+            }),
+        )),
     )
 }

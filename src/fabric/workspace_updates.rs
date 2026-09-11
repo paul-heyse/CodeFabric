@@ -938,13 +938,50 @@ mod tests {
 
     #[tokio::test]
     async fn selected_dependency_topology_observes_edits_and_configuration_reselection() {
+        selected_root_topology(
+            "pyrefly.toml",
+            "site-package-path=['.venv/lib/site-packages']\n",
+            "site-package-path=[]\n",
+            SourceWatchProfile::Native,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn selected_submodule_native_topology_observes_inputs_and_retracts_declarations() {
+        selected_root_topology(
+            ".gitmodules",
+            "[submodule \"vendor\"]\npath = .venv/lib/site-packages\n",
+            "",
+            SourceWatchProfile::Native,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn selected_submodule_poll_topology_observes_inputs_and_retracts_declarations() {
+        selected_root_topology(
+            ".gitmodules",
+            "[submodule \"vendor\"]\npath = .venv/lib/site-packages\n",
+            "",
+            SourceWatchProfile::Poll,
+        )
+        .await;
+    }
+
+    async fn selected_root_topology(
+        config_name: &str,
+        initial: &str,
+        replacement: &str,
+        profile: SourceWatchProfile,
+    ) {
         use std::fs;
         let fixture = tempfile::tempdir().unwrap();
         let root = fixture.path().join("source");
         fs::create_dir_all(root.join(".venv/lib/site-packages/pkg")).unwrap();
         fs::create_dir_all(root.join(".venv/bin")).unwrap();
-        let config = root.join("pyrefly.toml");
-        fs::write(&config, "site-package-path=['.venv/lib/site-packages']\n").unwrap();
+        let config = root.join(config_name);
+        fs::write(&config, initial).unwrap();
         let (observed, mut receiver) = WorkspaceObservation::new();
         let budget = crate::provider_types::source_fixture_budget([2; 16]);
         let watch = observed
@@ -952,7 +989,7 @@ mod tests {
                 &root,
                 &budget,
                 &crate::cancellation::Cancellation::default(),
-                SourceWatchProfile::Native,
+                profile,
             )
             .unwrap();
         assert!(
@@ -976,7 +1013,7 @@ mod tests {
         .await
         .unwrap();
         let topology = observed.topology_revision.load(Ordering::Acquire);
-        fs::write(&config, "site-package-path=[]\n").unwrap();
+        fs::write(&config, replacement).unwrap();
         tokio::time::timeout(Duration::from_secs(5), async {
             while observed.topology_revision.load(Ordering::Acquire) == topology {
                 receiver.recv().await.unwrap();
@@ -990,7 +1027,7 @@ mod tests {
                 &root,
                 &budget,
                 &crate::cancellation::Cancellation::default(),
-                SourceWatchProfile::Native,
+                profile,
             )
             .unwrap();
         assert!(!replacement.registered_paths.contains(&root.join(".venv")));

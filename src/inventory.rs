@@ -1475,6 +1475,91 @@ mod tests {
 
     #[test]
     #[cfg(feature = "daemon")]
+    fn selected_submodule_boundaries_keep_conflicted_gitlinks_and_retract_pruned_inputs() {
+        use gix::bstr::ByteSlice as _;
+        let (_directory, mut store, workspace, path) = fixture();
+        let repository = gix::init(&path).unwrap();
+        fs::create_dir_all(path.join(".venv/vendor")).unwrap();
+        gix::init(path.join(".venv/vendor")).unwrap();
+        fs::create_dir_all(path.join(".venv/sibling")).unwrap();
+        fs::write(path.join(".venv/vendor/selected.py"), "selected = 1\n").unwrap();
+        fs::write(path.join(".venv/sibling/excluded.py"), "excluded = 1\n").unwrap();
+        fs::write(path.join(".gitmodules"), "[submodule \"vendor\"]\npath = .venv/vendor\n[submodule \"missing\"]\npath = missing\n[submodule \"escape\"]\npath = ../outside\n").unwrap();
+        let mut index = gix::index::State::new(gix::hash::Kind::Sha1);
+        for (stage, hex) in [
+            (gix::index::entry::Stage::Ours, b'2'),
+            (gix::index::entry::Stage::Theirs, b'3'),
+        ] {
+            index.dangerously_push_entry(
+                Default::default(),
+                gix::hash::ObjectId::from_hex(&[hex; 40]).unwrap(),
+                gix::index::entry::Flags::from_stage(stage),
+                gix::index::entry::Mode::COMMIT,
+                b".venv/vendor".as_bstr(),
+            );
+        }
+        index.sort_entries();
+        gix::index::File::from_state(index, repository.index_path())
+            .write(Default::default())
+            .unwrap();
+        let root = open_workspace_root(&mut store, workspace).unwrap();
+        let mut walker = InventoryWalker::new(InventoryLimits::default());
+        let first = walker
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
+            .unwrap();
+        assert!(
+            first
+                .records
+                .iter()
+                .any(|record| record.path.raw_relative_path_bytes == b".venv/vendor/selected.py")
+        );
+        assert!(!first.records.iter().any(|record| {
+            record
+                .path
+                .raw_relative_path_bytes
+                .starts_with(b".venv/sibling")
+        }));
+        let boundaries = &first.git_context.as_ref().unwrap().submodules;
+        let vendor = boundaries
+            .iter()
+            .find(|boundary| boundary.name.as_deref() == Some(b"vendor"))
+            .unwrap();
+        assert_eq!(vendor.path.as_deref(), Some(b".venv/vendor".as_slice()));
+        assert!(vendor.captured_sources && vendor.repository_observed);
+        assert_eq!(
+            vendor
+                .stages
+                .iter()
+                .map(|stage| stage.stage)
+                .collect::<Vec<_>>(),
+            [2, 3]
+        );
+        assert_eq!(vendor.stages[0].object_id, vec![0x22; 20]);
+        assert_eq!(vendor.stages[1].object_id, vec![0x33; 20]);
+        let missing = boundaries
+            .iter()
+            .find(|boundary| boundary.name.as_deref() == Some(b"missing"))
+            .unwrap();
+        assert!(!missing.captured_sources && !missing.repository_observed);
+        let escape = boundaries
+            .iter()
+            .find(|boundary| boundary.name.as_deref() == Some(b"escape"))
+            .unwrap();
+        assert!(escape.path.is_none());
+        assert_eq!(escape.configuration_status, "invalid_path");
+        fs::remove_file(path.join(".gitmodules")).unwrap();
+        let removed = walker
+            .walk_and_persist(&root, &mut store, 0, &Cancellation::default())
+            .unwrap();
+        assert!(
+            removed.records.is_empty(),
+            "declaration removal retracts the pruned source subtree"
+        );
+        assert_ne!(first.git_context_digest(), removed.git_context_digest());
+    }
+
+    #[test]
+    #[cfg(feature = "daemon")]
     fn captured_configuration_selects_pruned_dependencies_and_removal_retracts_them() {
         let (_directory, mut store, workspace, path) = fixture();
         fs::create_dir_all(path.join(".venv/lib/site-packages/pkg")).unwrap();

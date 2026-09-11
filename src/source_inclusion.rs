@@ -11,7 +11,8 @@ pub(crate) struct SourceInclusionPolicy {
 
 impl SourceInclusionPolicy {
     #[cfg(feature = "daemon")]
-    pub(crate) const CONFIGURATIONS: [&'static str; 2] = ["pyrefly.toml", "pyproject.toml"];
+    pub(crate) const CONFIGURATIONS: [&'static str; 3] =
+        ["pyrefly.toml", "pyproject.toml", ".gitmodules"];
     #[cfg(feature = "daemon")]
     pub(crate) const MAXIMUM_CONFIGURATION_BYTES: u64 = 1024 * 1024;
 
@@ -25,6 +26,14 @@ impl SourceInclusionPolicy {
             policy
                 .configuration_digests
                 .push((name, crate::integrity::digest_bytes(&bytes)));
+            if name == ".gitmodules" {
+                if let Ok(modules) = declared_submodules(&bytes) {
+                    policy
+                        .selected_roots
+                        .extend(modules.into_iter().filter_map(|module| module.path));
+                }
+                continue;
+            }
             let Some(document) = std::str::from_utf8(&bytes)
                 .ok()
                 .and_then(|text| toml::from_str::<toml::Value>(text).ok())
@@ -141,18 +150,47 @@ fn excluded_directory(name: &[u8]) -> bool {
 
 #[cfg(feature = "daemon")]
 fn relative_root(path: &str) -> Option<Vec<u8>> {
-    if path.starts_with('/') {
+    relative_root_bytes(path.as_bytes())
+}
+
+#[cfg(feature = "daemon")]
+pub(crate) fn relative_root_bytes(path: &[u8]) -> Option<Vec<u8>> {
+    if path.starts_with(b"/") || path.contains(&0) {
         return None;
     }
     let mut parts = Vec::new();
-    for component in path.split('/') {
+    for component in path.split(|byte| *byte == b'/') {
         match component {
-            "" | "." => {}
-            ".." | ".git" => return None,
+            b"" | b"." => {}
+            b".." | b".git" => return None,
             part => parts.push(part),
         }
     }
-    (!parts.is_empty()).then(|| parts.join("/").into_bytes())
+    (!parts.is_empty()).then(|| parts.join(&b'/'))
+}
+
+/// Declared paths only; no URL, fetch, update command, activation override or historical fallback.
+#[cfg(feature = "daemon")]
+pub(crate) struct DeclaredSubmodule {
+    pub name: Vec<u8>,
+    pub path: Option<Vec<u8>>,
+}
+
+#[cfg(feature = "daemon")]
+pub(crate) fn declared_submodules(bytes: &[u8]) -> Result<Vec<DeclaredSubmodule>, String> {
+    use gix::bstr::ByteSlice as _;
+    let modules = gix::submodule::File::from_bytes(bytes, None, &gix::config::File::default())
+        .map_err(|error| error.to_string())?;
+    Ok(modules
+        .names()
+        .map(|name| DeclaredSubmodule {
+            name: name.to_owned().into(),
+            path: modules
+                .path(name)
+                .ok()
+                .and_then(|path| relative_root_bytes(path.as_bstr().as_bytes())),
+        })
+        .collect())
 }
 
 #[cfg(all(test, feature = "daemon"))]
