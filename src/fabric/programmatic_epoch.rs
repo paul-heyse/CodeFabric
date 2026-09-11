@@ -1572,7 +1572,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn materialized_empty_inputs_reuse_only_exact_empty_versions_and_preserve_reopen() {
+    async fn materialized_inputs_reuse_exact_nonempty_and_empty_versions_and_preserve_reopen() {
         let id = ProgrammaticRelationId::new("facts.input_values");
         let (_first_root, first) = prepare_reuse_input(61, materialized_values(vec![]), None).await;
         let (second_root, second) =
@@ -1606,6 +1606,47 @@ mod tests {
             &populated.relation_publication().table_version_map()[&id]
         );
         assert_eq!(positive_rows(&populated).await, [3, 3]);
+        let (same_root, same) =
+            prepare_reuse_input(66, materialized_values(vec![3, 3]), Some(&populated)).await;
+        assert_eq!(
+            &populated.relation_publication().table_version_map()[&id],
+            &same.relation_publication().table_version_map()[&id]
+        );
+        assert!(
+            !relation_layout(&same_root)
+                .root()
+                .to_file_path()
+                .unwrap()
+                .join(
+                    populated.relation_publication().table_version_map()[&id]
+                        .canonical_root()
+                        .to_file_path()
+                        .unwrap()
+                        .file_name()
+                        .unwrap()
+                )
+                .exists(),
+            "identical nonempty input does not create another physical table"
+        );
+        let reopened_nonempty = ProgrammaticFabricEpochBuilder::try_new(
+            *same.identity(),
+            FabricEpochRuntimeConfig::default(),
+        )
+        .unwrap()
+        .reopen(Arc::clone(same.table_version_set()))
+        .await
+        .unwrap();
+        let (_after_nonempty_root, after_nonempty) = prepare_reuse_input(
+            67,
+            materialized_values(vec![3, 3]),
+            Some(&reopened_nonempty),
+        )
+        .await;
+        assert_eq!(
+            &same.relation_publication().table_version_map()[&id],
+            &after_nonempty.relation_publication().table_version_map()[&id]
+        );
+        assert_eq!(positive_rows(&after_nonempty).await, [3, 3]);
         let (_deleted_root, deleted) =
             prepare_reuse_input(64, materialized_values(vec![]), Some(&populated)).await;
         assert_ne!(

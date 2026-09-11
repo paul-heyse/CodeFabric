@@ -73,8 +73,10 @@ plan corpus. Exact reopen preserves IDs, facts and source disclosure rules.
 P04 now retains workspace-owned Tree-sitter/Ruff, contained Pyrefly and immutable Rust toolchain
 inputs; observes pruned native/poll source topology and selected Git metadata; reuses exact source/
 line and empty Arrow pins; bounds Delta writes; and detects selected provider executable replacement
-through live work and restart. Broader dependency validity, Cargo target/fact reuse, shared native
-CPU scheduling, full inclusion/topology, first-release edit coverage and sustained operation remain.
+through live work and restart. Native CPU allocations and independent context dispatch now have
+owned lifetimes; recursive source/Git inclusion passes installed polling and reopen. Broader
+dependency validity, Cargo target/fact reuse, priority/backlog integration, external roots,
+first-release edit coverage and sustained operation remain.
 The current checkpoint is detailed below; older dated entries retain attributable history and do
 not select an obsolete P02/P03 continuation.
 
@@ -252,8 +254,71 @@ No containment fallback or relaxed capability evidence is introduced. The concur
 32 retained parent descriptors, actual contained process-tree cleanup and borrowed worker failure
 joins all pass: 3/3 in 0.166 s, run `7ae7d3d5-6200-4ec5-957c-8b720728e634`
 (`/tmp/codefabric-p04-context-descriptors-focused.log`). A direct child-transfer check also preserves
-policy bytes and null stdin. Installed mixed/multi-target qualification is being rerun in
-`/tmp/codefabric-p04-context-workers-installed-v2.log`; this continuation remains in validation.
+policy bytes and null stdin. At `cbe32b72`, the installed mixed raw-path/edit/clean/reopen case
+passes in **554.842 s** (run `1c460b30-0355-40e6-b556-12126eb61b36`,
+`/tmp/codefabric-p04-context-workers-installed-v2.log`). The multi-target case instead exposes
+competing publication of the same immutable input view, then reaches its former 120-second
+scenario bound. The correction retains private staging and atomic directory publication: a
+concurrent winner must have the same manifest and verified input bytes. Losing stages restore only
+directory permissions for removal; shared immutable dependency inodes remain read-only. Native
+contexts remain concurrent. Eight simultaneous publishers pass with one retained view, separate
+run outputs and no leaked stages. The multi-target scenario now has a finite 600-second bound.
+Its next run completes native work (peak 30 allocated slots, zero remaining), then reaches the
+separate 120-second semantic fixture wait during Delta publication. That fixture now explicitly
+waits up to 360 seconds for the durable semantic successor, preserving ordinary readiness/query
+deadlines. Current installed qualification is `/tmp/codefabric-p04-context-reuse-installed.log`.
+
+**Recursive inclusion continuation (2026-09-11).** The existing capture and watch walks now observe
+configuration in every admitted directory before enumerating its children. Native gix submodule
+declarations and Python search/site-package roots select descendants through recursive pruned
+chains while preserving byte-native paths, sibling pruning and `.git` exclusion. The immutable
+completed policy includes positive and negative configuration observations and is shared with Git
+boundary capture. Its final source fence follows metadata capture. Watch callbacks use the completed
+policy without filesystem reads; edits during installation retain a reconciliation obligation.
+Configuration reads use no-follow parent traversal and nonblocking opens, so FIFOs cannot hold the
+capture/watch owner indefinitely. Physical external roots remain open.
+
+Seventeen focused policy/inventory/native/poll/secure-read checks pass in 4.273 s (run
+`b8475e5e-23c4-4cf9-aafc-1383dde29820`,
+`/tmp/codefabric-p04-recursive-inclusion-final-focused.log`). An initial installed recursive case
+correctly captured nested source but exposed the root-only policy reconstructed by Git metadata;
+the completed-policy correction now passes the installed explicit-poll/public-source/metadata/reopen
+case in **203.999 s**, including the deep selected submodule. Run
+`76c9b3bc-98c2-4257-8950-901c8f4d5d39`,
+`/tmp/codefabric-p04-recursive-publication-installed-final.log`, finishes with seven passes and the
+multi-target fixture-clock failure described above. Configuration uses the
+isolated root target, installed native provider binaries and delegated user-systemd scope. Semantic
+publication is deliberately held in the polling case, so it does not qualify complete external or
+recursive dependency semantics.
+
+**Nonempty materialized input reuse (2026-09-11; accepted installed source consumer).** A private
+read-only `MemTable` wrapper now derives complete content identities with native Arrow IPC and a
+streaming BLAKE3 sink. It retains native schema validation/projection/scans and blocks insertion or
+mutable partition access. Exact descriptor equality and selected Delta pin validation remain the
+reuse boundary; unknown arbitrary providers/transformations stay ineligible. IPC limitations retain
+ordinary writes, and schema/dictionary/null/value/multiplicity changes cannot reuse a stale input.
+This extends materialized input reuse without declaring complete owner-level replacement or retention.
+
+Eighteen focused Arrow/Delta/native/poll/secure-read tests pass in **4.277 s**, run
+`a2a7a84e-a17e-45e8-87ce-8ae9bcd36300` (`/tmp/codefabric-p04-materialized-reuse-focused.log`). They
+include exact nonempty/empty pins, no redundant physical table, changed/deleted data, retained old
+facts, mixed-vector reopen and rejected mutation. All-target checking passes in 1m25s
+(`/tmp/codefabric-p04-materialized-reuse-check.log`). Installed public source-line queries,
+disclosure limits and exact reopen pass in **125.141 s**, run
+`ae80c694-c1c3-4424-bd08-d1a6cc8acf9d` (`/tmp/codefabric-p04-context-reuse-installed.log`).
+That run completes multi-target publication, retains the independent successful targets and reports
+the broken target; it then fails an obsolete shared-helper expectation that an unresolved semantic
+subject rejects the whole request. The correct current contract is an accepted request with a failed
+query block and no rows/pages for that block. A diagnostic follow-up confirms exactly that behavior;
+the helper correction and complete multi-target query scenario are being qualified separately.
+Two-step call validation also replaces the retired unsupported-distance expectation.
+
+All-target Clippy completes in 3m13s with the existing warning backlog
+(`/tmp/codefabric-p04-input-owners-clippy.{jsonl,stderr}`); its two changed-line documentation/length
+findings were corrected without behavior changes. Featureless checking passes in 0.14 s
+(`/tmp/codefabric-p04-input-owners-featureless.log`). Both handoff documents pass navigation. Focused
+spelling flags only the pre-existing escaped Latin-1 `caf\\xe9` test bytes in `live_updates.rs`.
+No full-suite, doctest or representative-performance result is claimed.
 
 The resumed inclusion slice uses one capture/watch policy. Captured root `pyrefly.toml` and
 `[tool.pyrefly]` search/site-package candidates can select subtrees beneath normally pruned
@@ -2571,8 +2636,10 @@ Current execution order:
 
 1. Continue **P04**: complete captured source/Git/external inclusion and recovery topology; complete
    positive/negative/tool/sysroot/linker/runtime dependency validity and owner manifests; establish
-   native Cargo unit/fact census before retaining target outputs; allocate shared native CPU shares
-   and bounded fair context backlog; extend nonempty owner reuse and remaining retention ownership.
+   actual Cargo invocation/fact census before retaining target outputs; finish priority/backlog
+   integration around the delivered shared CPU allocations and concurrent context workers; extend
+   nonempty owner reuse and remaining retention ownership. Native unit-graph capture, recursive
+   admitted-root inclusion and immutable input publication ownership are already implemented.
 2. Complete **P05**: assemble the first-release external/config/negative/deletion/race corpus with
    independent clean comparisons, restart and leased old source/facts. P03's initial query boundary
    is delivered; the first useful release is still open.

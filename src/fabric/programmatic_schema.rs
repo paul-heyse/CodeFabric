@@ -48,6 +48,8 @@ use crate::schema_contract::{
     SchemaContractError, SchemaRole,
 };
 
+mod materialized;
+
 /// Stable identity of a relation installed in the candidate catalog.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ProgrammaticRelationId(Arc<str>);
@@ -512,8 +514,8 @@ impl std::fmt::Debug for ProviderInput {
 }
 
 impl ProviderInput {
-    /// Consume materialized Arrow storage batches. Empty data has a complete immutable
-    /// content identity, independent of producer coverage, which remains a separate relation.
+    /// Consume materialized Arrow storage batches behind a read-only native provider. Complete
+    /// content identities are independent of coverage, which remains a separate relation.
     /// Native `MemTable` validation still rejects absent partitions or incompatible schemas.
     pub(crate) fn try_from_arrow(
         relation_id: ProgrammaticRelationId,
@@ -526,7 +528,14 @@ impl ProviderInput {
             .flatten()
             .all(|batch| batch.num_rows() == 0);
         let schema = Arc::clone(contract.storage_schema());
-        let provider = MemTable::try_new(Arc::clone(&schema), partitions)?;
+        let provider = materialized::ImmutableArrowTable::try_new(Arc::clone(&schema), partitions)?;
+        let identity = if empty {
+            Some(crate::integrity::digest_bytes(
+                b"codefabric.materialized-empty-arrow-input.v1\0",
+            ))
+        } else {
+            provider.content_identity()
+        };
         let provider: Arc<dyn TableProvider> = if empty {
             // EmptyTable has no mutable batch store or insert path. This is an exact observed
             // zero-row input, not an estimate or a claim that a provider's coverage is complete.
@@ -535,12 +544,8 @@ impl ProviderInput {
             Arc::new(provider)
         };
         let mut input = Self::new(relation_id, table_reference, contract, provider);
-        if empty {
-            // The exact Delta reuse path separately compares the entire executable descriptor.
-            input.immutable_input_identity = Some(crate::integrity::digest_bytes(
-                b"codefabric.materialized-empty-arrow-input.v1\0",
-            ));
-        }
+        // The exact Delta reuse path also compares the complete executable descriptor.
+        input.immutable_input_identity = identity;
         Ok(input)
     }
 
@@ -4758,7 +4763,7 @@ mod tests {
         )
         .unwrap();
         let nonempty = make(vec![vec![RecordBatch::new_empty(schema)], vec![batch]]).unwrap();
-        assert!(nonempty.immutable_input_identity.is_none());
+        assert!(nonempty.immutable_input_identity.is_some());
         assert_eq!(
             context
                 .read_table(nonempty.provider)
