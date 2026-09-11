@@ -2773,6 +2773,14 @@ production acceptance above.
 
 ## 10. Package execution handoff
 
+The resumed P04 ownership correction authenticates queued Shutdown while all owned cleanup advances,
+then acknowledges completed joins. Four signed-control cases pass, including real admission-TTL
+expiry during cleanup and rejected-control cleanup failure. The former full-3 poll/update/reopen
+failure now passes in 149.458 s, run `520afa6c-7eb1-472e-b72a-76d5b450fa1d`. Together with the R05
+native lifetime repairs, this supersedes the earlier unqualified shutdown diagnosis; broader P13
+failure/owner coverage remains open. Git input classification is being integrated after the accepted
+shared inclusion checkpoint `d08a1e6c`.
+
 **P04 execution resumed on 2026-09-11; P05 follows.** The user explicitly deferred further pursuit
 of a 100% test result. Retain the implemented remediation fixes and use affected feature checks.
 The isolated run at `50d86d82` was stopped by request after 1,181 passes, eight failures and one

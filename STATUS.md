@@ -88,6 +88,17 @@ Earlier historical uv reconciliation entries below no longer prescribe a CLI ver
 
 ## P04 retained inputs and syntax — partial, active
 
+The resumed ownership slice authenticates Shutdown concurrently with query/workspace cleanup and
+acknowledges only after successful joins. A rejected control record also drives owned cleanup;
+query-task join errors no longer bypass it. Four signed-control regressions pass in 30.025 s,
+including cleanup beyond the real record TTL. The previously failing installed poll/nested-source/
+reopen/shutdown case passes in 149.458 s (run `520afa6c-7eb1-472e-b72a-76d5b450fa1d`). Logs:
+`/tmp/codefabric-p04-shutdown-admission-{focused,installed}.log`. This resolves the distinct full-3
+control-admission ordering defect without extending command validity or changing query deadlines.
+The initial inclusion checkpoint is `d08a1e6c`; default and featureless `just root-check` pass
+(`/tmp/codefabric-p04-inclusion-check.log`). Git classification integration is in progress and
+has not yet been qualified.
+
 The resumed inclusion slice uses one capture/watch policy. Captured root `pyrefly.toml` and
 `[tool.pyrefly]` search/site-package candidates can select subtrees beneath normally pruned
 `.venv`/build directories, with ancestor observation, sibling pruning, no-follow source capture

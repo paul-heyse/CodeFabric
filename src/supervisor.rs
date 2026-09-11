@@ -2136,9 +2136,9 @@ async fn drain_shutdown_and_join_daemon(
 ) -> Result<(), SupervisorError> {
     retire_all_launches_for_shutdown(launches, &daemon.control).await?;
     daemon.control.drain_accepted_work().await?;
-    // Shutdown is queued only after the authenticated drain acknowledgement. The daemon closes
-    // query admission and drains workspace publication before reading and acknowledging this
-    // second record; both stages have the explicit finite shutdown allowance.
+    // Shutdown follows the authenticated drain acknowledgement. The daemon authenticates this
+    // short-lived record while query/workspace cleanup runs, then acknowledges successful joins.
+    // Accepted cleanup has its own finite allowance; it does not extend record admission validity.
     let shutdown = DaemonControlRequest::Shutdown {
         request_id: request_id("shutdown")?,
     };
@@ -4976,6 +4976,155 @@ mod tests {
             .unwrap();
         task.await.unwrap().unwrap();
         assert!(control.is_available());
+    }
+
+    #[tokio::test]
+    async fn shutdown_authenticates_before_cleanup_outlives_record_admission() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let key = DaemonControlKey([0x7a; 32]);
+        let hello = DaemonControlRecord::new(
+            DaemonControlRequest::Hello(DaemonControlHello {
+                request_id: "hello:joined-shutdown".to_owned(),
+                control_key: key.clone(),
+                supervisor_generation: 9,
+                daemon_generation: 7,
+                supervisor_pid: std::process::id(),
+                supervisor_uid: rustix::process::geteuid().as_raw(),
+            }),
+            &key,
+            [0x22; 16],
+            7,
+            9,
+            1,
+        )
+        .unwrap();
+        let mut state = DaemonControlReadState::from_hello(&hello).unwrap();
+        let record = DaemonControlRecord::new(
+            DaemonControlRequest::Shutdown {
+                request_id: "shutdown:joined-cleanup".to_owned(),
+            },
+            &key,
+            [0x22; 16],
+            7,
+            9,
+            2,
+        )
+        .unwrap();
+        write_line(&mut client, &record, CONTROL_MAX_BYTES)
+            .await
+            .unwrap();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            crate::daemon::await_shutdown_after_drain(&mut server, &mut state, async {
+                started_tx.send(()).unwrap();
+                release_rx.await.unwrap();
+                Ok(())
+            })
+            .await
+        });
+        started_rx.await.unwrap();
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(20),
+                read_line::<DaemonControlAcknowledgement>(&mut client, CONTROL_MAX_BYTES),
+            )
+            .await
+            .is_err(),
+            "shutdown acknowledgement must wait for joined cleanup"
+        );
+        // Exercise the real authentication interval without changing the product TTL or clock.
+        let remaining_ms = record
+            .header
+            .expires_at_unix_ms
+            .saturating_sub(unix_millis().unwrap());
+        tokio::time::sleep(Duration::from_millis(
+            u64::try_from(remaining_ms.max(0)).unwrap() + 10,
+        ))
+        .await;
+        assert!(
+            !task.is_finished(),
+            "cleanup must remain owned until released"
+        );
+        release_tx.send(()).unwrap();
+        let acknowledgement: DaemonControlAcknowledgement = tokio::time::timeout(
+            Duration::from_secs(2),
+            read_line(&mut client, CONTROL_MAX_BYTES),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(acknowledgement.accepted);
+        assert_eq!(acknowledgement.code, "SHUTDOWN_ACCEPTED");
+        assert!(acknowledgement.issued_at_unix_ms >= record.header.expires_at_unix_ms);
+        acknowledgement
+            .validate(&key, &record, unix_millis().unwrap())
+            .unwrap();
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn rejected_shutdown_control_still_joins_cleanup_and_preserves_both_errors() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let key = DaemonControlKey([0x7b; 32]);
+        let hello = DaemonControlRecord::new(
+            DaemonControlRequest::Hello(DaemonControlHello {
+                request_id: "hello:rejected-shutdown".to_owned(),
+                control_key: key.clone(),
+                supervisor_generation: 9,
+                daemon_generation: 7,
+                supervisor_pid: std::process::id(),
+                supervisor_uid: rustix::process::geteuid().as_raw(),
+            }),
+            &key,
+            [0x22; 16],
+            7,
+            9,
+            1,
+        )
+        .unwrap();
+        let mut state = DaemonControlReadState::from_hello(&hello).unwrap();
+        let mut record = DaemonControlRecord::new(
+            DaemonControlRequest::Shutdown {
+                request_id: "shutdown:already-expired".to_owned(),
+            },
+            &key,
+            [0x22; 16],
+            7,
+            9,
+            2,
+        )
+        .unwrap();
+        record.header.issued_at_unix_ms = 1;
+        record.header.expires_at_unix_ms = 2;
+        record.header.content_integrity = record.expected_integrity(&key).unwrap();
+        write_line(&mut client, &record, CONTROL_MAX_BYTES)
+            .await
+            .unwrap();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            crate::daemon::await_shutdown_after_drain(&mut server, &mut state, async {
+                started_tx.send(()).unwrap();
+                release_rx.await.unwrap();
+                Err(crate::daemon::DaemonError::Serving(
+                    "injected cleanup failure".to_owned(),
+                ))
+            })
+            .await
+        });
+        started_rx.await.unwrap();
+        assert!(
+            !task.is_finished(),
+            "control rejection must still join owned cleanup"
+        );
+        release_tx.send(()).unwrap();
+        let error = task.await.unwrap().unwrap_err().to_string();
+        assert!(
+            error.contains("CONTROL_RECORD_EXPIRED_OR_INVALID"),
+            "{error}"
+        );
+        assert!(error.contains("injected cleanup failure"), "{error}");
     }
 
     #[tokio::test]

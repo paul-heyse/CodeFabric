@@ -42,7 +42,13 @@ expire before authentication. Authenticate promptly while driving cleanup and ac
 after cleanup succeeds; retain signature, sequence, generation and expiry checks. The namespace/
 stub case was interrupted and is not an additional functional failure.
 
-Unapplied drafts in `target/nextest-remediation/2026-09-11/staged-followup/` have no compiler or
+The shutdown ownership draft has since been integrated during resumed P04: authentication and
+owned cleanup advance concurrently, and acknowledgement follows successful joins. All four focused
+signed-control cases and the formerly failing installed poll/update/reopen case pass (30.025 s and
+149.458 s respectively; `/tmp/codefabric-p04-shutdown-admission-{focused,installed}.log`). Remaining
+fixture clock drafts are deferred. This does not close R06 or change the partial full-3 counts.
+
+Other unapplied drafts in `target/nextest-remediation/2026-09-11/staged-followup/` have no compiler or
 behavioral acceptance. Integrate the ownership correction when touching P04 lifecycle; fixture
 clock drafts are deferred. Do not copy staged files wholesale over later product changes.
 

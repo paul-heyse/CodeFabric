@@ -1523,38 +1523,46 @@ async fn serve_writer_fenced_v2(
             result = &mut control_future => (result, false),
             result = &mut query_task => {
                 let result = result
-                    .map_err(|error| DaemonError::Serving(format!("query server join: {error}")))?
-                    .map_err(|error| DaemonError::Serving(format!("query server: {error}")));
+                    .map_err(|error| DaemonError::Serving(format!("query server join: {error}")))
+                    .and_then(|result| {
+                        result.map_err(|error| DaemonError::Serving(format!("query server: {error}")))
+                    });
                 (result.map(|()| false), true)
             }
         }
     };
     let _ = query_shutdown_tx.send(true);
-    let query_join = if query_already_joined {
-        Ok(())
-    } else {
-        query_task
+    let cleanup = async {
+        let query_join = if query_already_joined {
+            Ok(())
+        } else {
+            query_task
+                .await
+                .map_err(|error| DaemonError::Serving(format!("query server join: {error}")))
+                .and_then(|result| {
+                    result.map_err(|error| DaemonError::Serving(format!("query server: {error}")))
+                })
+        };
+        let query_retire = query_socket.retire().map_err(DaemonError::from);
+        let task_drain = daemon_task_scope
+            .cancel_and_join(WORKSPACE_OPERATION_DRAIN_TIMEOUT)
             .await
-            .map_err(|error| DaemonError::Serving(format!("query server join: {error}")))?
-            .map_err(|error| DaemonError::Serving(format!("query server: {error}")))
+            .map_err(|error| DaemonError::Serving(format!("daemon task drain: {error}")));
+        query_join.and(query_retire).and(task_drain)
     };
-    let query_retire = query_socket.retire().map_err(DaemonError::from);
-    let primary = serve_result
-        .and_then(|drained| query_join.map(|()| drained))
-        .and_then(|drained| query_retire.map(|()| drained));
-    let task_drain = daemon_task_scope
-        .cancel_and_join(WORKSPACE_OPERATION_DRAIN_TIMEOUT)
-        .await
-        .map_err(|error| DaemonError::Serving(format!("daemon task drain: {error}")));
-    let primary = primary.and_then(|drained| task_drain.map(|()| drained));
-    let primary = match primary {
-        Ok(true) => await_shutdown_after_drain(&mut control, &mut control_state)
+    let primary = match serve_result {
+        Ok(true) => await_shutdown_after_drain(&mut control, &mut control_state, cleanup)
             .await
             .map(|()| true),
-        Ok(false) => Err(DaemonError::Serving(
+        Ok(false) => cleanup.await.and(Err(DaemonError::Serving(
             "controlled daemon exited without an authenticated drain".into(),
-        )),
-        Err(error) => Err(error),
+        ))),
+        Err(primary) => match cleanup.await {
+            Ok(()) => Err(primary),
+            Err(cleanup) => Err(DaemonError::Serving(format!(
+                "{primary}; controlled cleanup also failed: {cleanup}"
+            ))),
+        },
     };
     match primary {
         Ok(drained) => finish_writer_fenced_v2(startup, workspace, drained, None).await,
@@ -1643,41 +1651,51 @@ async fn serve_daemon_control(
     }
 }
 
-async fn await_shutdown_after_drain(
+/// Authenticate the next shutdown command while cleanup advances, then acknowledge its join.
+pub(crate) async fn await_shutdown_after_drain(
     stream: &mut UnixStream,
     state: &mut DaemonControlReadState,
+    cleanup: impl std::future::Future<Output = Result<(), DaemonError>>,
 ) -> Result<(), DaemonError> {
-    loop {
-        let accepted = read_daemon_control(stream, state).await?;
-        let header = accepted.header;
-        let request = accepted.request;
-        let request_id = request.request_id().to_owned();
-        match request {
-            DaemonControlRequest::Shutdown { .. } => {
-                acknowledge_control(
-                    stream,
-                    state,
-                    &header,
-                    &request_id,
-                    true,
-                    "SHUTDOWN_ACCEPTED",
-                )
-                .await?;
-                return Ok(());
+    let receive = async {
+        loop {
+            let accepted = read_daemon_control(stream, state).await?;
+            if matches!(accepted.request, DaemonControlRequest::Shutdown { .. }) {
+                return Ok::<_, DaemonError>(accepted);
             }
-            _ => {
-                acknowledge_control(
-                    stream,
-                    state,
-                    &header,
-                    &request_id,
-                    false,
-                    "DAEMON_DRAINING",
-                )
-                .await?;
-            }
+            acknowledge_control(
+                stream,
+                state,
+                &accepted.header,
+                accepted.request.request_id(),
+                false,
+                "DAEMON_DRAINING",
+            )
+            .await?;
         }
-    }
+    };
+    // The record's short authentication lifetime governs admission, not the duration of
+    // accepted workspace cleanup. join! also keeps cleanup owned when receive rejects a record.
+    let (received, cleaned) = tokio::join!(receive, cleanup);
+    let accepted = match (received, cleaned) {
+        (Ok(accepted), Ok(())) => accepted,
+        (Err(control), Err(cleanup)) => {
+            return Err(DaemonError::Serving(format!(
+                "{control}; controlled cleanup also failed: {cleanup}"
+            )));
+        }
+        (Err(error), Ok(())) | (Ok(_), Err(error)) => return Err(error),
+    };
+    acknowledge_control(
+        stream,
+        state,
+        &accepted.header,
+        accepted.request.request_id(),
+        true,
+        "SHUTDOWN_ACCEPTED",
+    )
+    .await?;
+    Ok(())
 }
 
 fn daemon_random32() -> Result<[u8; 32], DaemonError> {
