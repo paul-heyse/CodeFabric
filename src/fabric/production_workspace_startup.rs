@@ -127,6 +127,37 @@ mod updates;
 // and finalization. A failed join still retains the writer fence.
 pub(crate) const WORKSPACE_OPERATION_DRAIN_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Producers stop first. Native storage/control remains admitted while their owned work drains.
+#[derive(Clone)]
+pub(in crate::fabric) struct WorkspaceTaskScopes {
+    lifetime: StructuredCancellationScope,
+    operations: StructuredCancellationScope,
+}
+
+impl WorkspaceTaskScopes {
+    pub(in crate::fabric) fn new(
+        lifetime: StructuredCancellationScope,
+    ) -> Result<Self, crate::cancellation::StructuredTaskError> {
+        let operations = lifetime.child("workspace-operations")?;
+        Ok(Self {
+            lifetime,
+            operations,
+        })
+    }
+
+    pub(in crate::fabric) fn operations(&self) -> &StructuredCancellationScope {
+        &self.operations
+    }
+
+    pub(in crate::fabric) async fn drain_operations(
+        &self,
+    ) -> Result<(), crate::cancellation::StructuredTaskError> {
+        self.operations
+            .cancel_and_join(WORKSPACE_OPERATION_DRAIN_TIMEOUT)
+            .await
+    }
+}
+
 /// Joined owner retained by the daemon after one workspace reaches queryable authority.
 pub(crate) struct ProductionWorkspaceStartup {
     command_runtime: Arc<FabricCommandRuntime>,
@@ -134,7 +165,7 @@ pub(crate) struct ProductionWorkspaceStartup {
     selected_epoch: EpochId,
     fresh_activation: bool,
     resources: ProductionWorkspaceResources,
-    task_scope: StructuredCancellationScope,
+    tasks: WorkspaceTaskScopes,
 }
 
 /// Bounded assurance interruption admitted only by the daemon's debug-build configuration.
@@ -159,13 +190,22 @@ impl ProductionWorkspaceStartup {
         self.fresh_activation
     }
 
+    pub(crate) async fn drain_operations(&self) -> Result<(), ProductionWorkspaceStartupError> {
+        self.tasks
+            .drain_operations()
+            .await
+            .map_err(|error| step("workspace-operation-join", error))
+    }
+
     pub(crate) async fn shutdown(self) -> Result<(), ProductionWorkspaceStartupError> {
         // A failed native join must not release the writer lease in-process. In that case
         // FabricCommandRuntime's fail-closed Drop keeps the OS fence until process teardown.
-        self.task_scope
+        self.drain_operations().await?;
+        self.tasks
+            .lifetime
             .cancel_and_join(WORKSPACE_OPERATION_DRAIN_TIMEOUT)
             .await
-            .map_err(|error| step("workspace-operation-join", error))?;
+            .map_err(|error| step("workspace-lifetime-join", error))?;
         self.admission
             .close_for_shutdown()
             .map_err(|error| step("workspace-admission-shutdown", error))?;
@@ -1399,6 +1439,9 @@ pub(crate) async fn start_production_workspace(
     let state_root = state_root.to_owned();
     let operational_database = operational_database.to_owned();
     let record = record.clone();
+    let tasks = WorkspaceTaskScopes::new(task_scope.clone())
+        .map_err(|error| step("workspace-operation-scope", error))?;
+    let compose_tasks = tasks.clone();
     let startup_scope = task_scope
         .child_control("workspace-startup")
         .map_err(|error| step("startup-operation-scope", error))?;
@@ -1421,17 +1464,27 @@ pub(crate) async fn start_production_workspace(
                     assurance_fault,
                     workspace_resources,
                     watch_profile,
-                    task_scope,
+                    compose_tasks,
                 )
                 .await
             },
         )
         .await
         .map_err(|error| step("startup-operation-start", error))?;
-    operation
+    let outcome = operation
         .wait()
         .await
-        .map_err(|error| step("startup-operation-join", error))?
+        .map_err(|error| step("startup-operation-join", error))
+        .and_then(std::convert::identity);
+    if let Err(primary) = outcome {
+        // Startup errors also stop producers before the daemon closes native storage scopes.
+        // A failed drain remains owned; the caller's final root drain cannot claim success.
+        return match tasks.drain_operations().await {
+            Ok(()) => Err(primary),
+            Err(join) => Err(step("startup-producer-drain", format!("{primary}; {join}"))),
+        };
+    }
+    outcome
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1446,7 +1499,7 @@ async fn compose_production_workspace(
     assurance_fault: Option<ProductionWorkspaceStartupAssuranceFault>,
     workspace_resources: ProductionWorkspaceResources,
     watch_profile: crate::daemon::SourceWatchProfile,
-    task_scope: StructuredCancellationScope,
+    tasks: WorkspaceTaskScopes,
 ) -> Result<ProductionWorkspaceStartup, ProductionWorkspaceStartupError> {
     let workspace_id = WorkspaceId::from_bytes(record.workspace_id);
     if slot.workspace_id() != workspace_id || writer_lease.workspace_id() != workspace_id {
@@ -1455,11 +1508,12 @@ async fn compose_production_workspace(
             "slot or writer lease was substituted",
         ));
     }
+    let task_scope = tasks.lifetime.clone();
     workspace_resources
         .pyrefly_cache()
         .lock()
         .map_err(|error| step("pyrefly-cache-owner", error))?
-        .bind(&task_scope)
+        .bind(tasks.operations())
         .map_err(|error| step("pyrefly-cache-lifetime", error))?;
     let (observation, updates) = super::workspace_updates::WorkspaceObservation::new();
     let observation = Arc::new(observation);
@@ -1469,7 +1523,7 @@ async fn compose_production_workspace(
             source_root,
             workspace_resources.budget(),
             watch_profile,
-            &task_scope,
+            tasks.operations(),
         )
         .await
         .map_err(|error| step("source-watch-install", error))?;
@@ -1555,7 +1609,7 @@ async fn compose_production_workspace(
                     writer_lease.fence(),
                     PublicationWork {
                         resources: &workspace_resources,
-                        scope: &task_scope,
+                        scope: tasks.operations(),
                         // Readiness requires a durable current source selection. The same
                         // owned update coordinator resumes its pending semantic successor.
                         stage: PublicationStage::Source,
@@ -1784,7 +1838,8 @@ async fn compose_production_workspace(
         principal: principal_id,
         authorization,
     };
-    if let Err(error) = Box::pin(update_owner.start(observation, updates, watch, &task_scope)).await
+    if let Err(error) =
+        Box::pin(update_owner.start(observation, updates, watch, tasks.operations())).await
     {
         return Err(shutdown_after_startup_error(command_runtime, error).await);
     }
@@ -1794,7 +1849,7 @@ async fn compose_production_workspace(
         selected_epoch,
         fresh_activation,
         resources: workspace_resources,
-        task_scope,
+        tasks,
     })
 }
 

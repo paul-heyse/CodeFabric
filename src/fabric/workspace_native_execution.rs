@@ -552,6 +552,69 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn workspace_producer_drain_keeps_native_control_available_for_its_final_write() {
+        let fixture = Fixture::new(4);
+        let tasks = super::super::production_workspace_startup::WorkspaceTaskScopes::new(
+            fixture.scope.clone(),
+        )
+        .unwrap();
+        let cancelled = tasks.operations().clone();
+        let executor = fixture.executor.clone();
+        let target = Path::from_absolute_path(fixture.control.join("final-record")).unwrap();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let producer = tasks
+            .operations()
+            .spawn_async_owned(
+                "publication",
+                crate::cancellation::TaskCancellationMode::Cooperative,
+                (),
+                async move {
+                    ready_tx.send(()).unwrap();
+                    cancelled.cancelled().await;
+                    // This is the native control admission needed by a publication that was
+                    // already in flight when its producer received the stop signal.
+                    executor
+                        .run_draining_mutation(
+                            "final-control-record",
+                            ResourceClass::Control,
+                            Some(deadline()),
+                            move |_, store| async move {
+                                store
+                                    .put_opts(
+                                        &target,
+                                        b"joined-final-record".to_vec().into(),
+                                        PutOptions::default(),
+                                    )
+                                    .await?;
+                                Ok::<(), object_store::Error>(())
+                            },
+                        )
+                        .await
+                },
+            )
+            .await
+            .unwrap();
+        ready_rx.await.unwrap();
+        tasks.drain_operations().await.unwrap();
+        producer.wait().await.unwrap().unwrap();
+        assert!(
+            !fixture.scope.is_cancelled(),
+            "native lifetime is still admitted after producers join"
+        );
+        assert_eq!(
+            std::fs::read(fixture.control.join("final-record")).unwrap(),
+            b"joined-final-record"
+        );
+        assert_eq!(fixture.budget.observation().used.running_jobs, 0);
+        fixture
+            .scope
+            .cancel_and_join(Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert!(!fixture.store.observe().unwrap().mutation_active);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn bounded_mutation_reconciles_failed_write_and_releases_lease() {
         let fixture = Fixture::new(4);
         // Serving reads run on this long-lived host runtime before the short

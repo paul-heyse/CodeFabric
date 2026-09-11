@@ -1544,6 +1544,13 @@ async fn serve_writer_fenced_v2(
                 })
         };
         let query_retire = query_socket.retire().map_err(DaemonError::from);
+        // Source cancellation may still need an activation append/readback. Drain those
+        // producers while the sibling native control scopes remain admitted, then retire
+        // the daemon lifetime. A failed producer join retains its native owners and fence.
+        workspace
+            .drain_operations()
+            .await
+            .map_err(|error| DaemonError::Serving(format!("workspace drain: {error}")))?;
         let task_drain = daemon_task_scope
             .cancel_and_join(WORKSPACE_OPERATION_DRAIN_TIMEOUT)
             .await

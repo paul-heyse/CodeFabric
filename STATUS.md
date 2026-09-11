@@ -423,6 +423,36 @@ open. The next ownership correction preserves native control admission while wor
 finish cancellation/activation cleanup; the runtime-case failure above exposed premature parent
 scope cancellation.
 
+**Producer-first native shutdown (2026-09-11; qualified slice).**
+The runtime-witness installed failure exposed a concrete ordering problem: controlled daemon
+cleanup cancelled the parent task scope before workspace publication finished, which closed
+`daemon/native-control` before a final activation append/readback could be admitted. Workspace
+admission then still had an in-flight activation when final shutdown attempted to close it.
+
+Workspace task ownership now separates producer operations from the enclosing native lifetime,
+using sibling scopes in the existing bounded registry. Watches, retained checker state, fresh
+source preparation and the update coordinator use the operations scope; durable activation/control
+uses the enclosing lifetime. Controlled shutdown drains producers before cancelling the daemon
+lifetime, and direct workspace shutdown preserves the same order. Startup-error handling also
+joins its producer scope before returning to parent cleanup. A failed producer drain keeps the
+native owners and writer fence held; shutdown does not fabricate an idle admission transition.
+The alternative of allowing new tasks in a cancelled scope would weaken the shared cancellation
+contract, so it is not used. Rust daemon reference §27.2, “Select pattern,” and the exact existing
+structured-task/native-execution APIs ground the ordering; native writes retain draining ownership.
+
+The focused regression starts a final real native control write only after its producer receives
+cancellation, then checks durable bytes, joined resource release and the still-admitted parent
+lifetime. All five focused drain/mutation/sibling cases pass in 0.051 s, run
+`23cba02d-a6f2-4d69-a09f-6b29a57c271b`
+(`/tmp/codefabric-p04-native-drain-order-focused.log`). The installed mixed Python/Rust case that
+stops during Delta publication, joins workspace owners, restarts and queries reopened state passes
+in **302.026 s**, run `1cff4113-7ab8-409c-b7e7-4012078aff06`
+(`/tmp/codefabric-p04-native-drain-order-installed.log`; isolated remediation target, installed
+providers, delegated user-systemd scope). All-target Clippy completes with existing warnings in
+1m30s (`/tmp/codefabric-p04-native-drain-order-clippy.{jsonl,stderr}`). This does not prove every
+earlier native-executor failure repaired or close P04/P05; full runtime capture, external roots,
+Cargo retention and the remaining progression stay open.
+
 **Recursive inclusion continuation (2026-09-11).** The existing capture and watch walks now observe
 configuration in every admitted directory before enumerating its children. Native gix submodule
 declarations and Python search/site-package roots select descendants through recursive pruned
