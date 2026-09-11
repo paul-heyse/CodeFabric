@@ -14,6 +14,8 @@ pub(crate) const RUSTC_PUBLIC_RELEASE: &str = "1.100.0-nightly";
 pub(crate) const RUSTC_TOOLCHAIN: &str = "nightly-2026-08-18";
 /// Version of the application relation contract, independent of rustc's API version.
 pub(crate) const RUSTC_RELATION_PROTOCOL_VERSION: u16 = 1;
+/// Optional extractor feature; gate new fields because stream digests re-encode messages.
+pub(crate) const RUSTC_INVOCATION_CENSUS_FEATURE: u64 = 0x0004_0000_0000_0000;
 /// Exact Arrow public type and IPC metadata universe shared with the stable daemon.
 pub(crate) const ARROW_TYPE_UNIVERSE: &str =
     "arrow-array@59.2.0|arrow-schema@59.2.0|arrow-ipc@59.2.0|metadata-v5";

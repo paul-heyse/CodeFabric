@@ -225,10 +225,12 @@ fn public_query(
     );
     let status = modern_structured(modern_step(&report, "status"));
     let source = &status["source_observations"][0];
-    assert_eq!(source["runnable_pending"], false, "{phase}: {source}");
-    assert_eq!(
-        source["selected_source_generation"],
-        result["source_generation"]
+    // This later status read may observe a new periodic census request. Freshness belongs
+    // to the admitted query above; an independent observation cannot retroactively stale it.
+    assert!(
+        source["selected_source_generation"].as_u64().unwrap()
+            >= result["source_generation"].as_u64().unwrap(),
+        "{phase}: source generation moved backwards: {source}"
     );
     let bytes = STANDARD
         .decode(modern_step(&report, "page")[0]["blob"].as_str().unwrap())
@@ -2025,6 +2027,161 @@ fn cargo_build_script_observation(
 }
 
 // Native Cargo discovery is independently checked here; it is not compiler/fact completeness.
+fn assert_cargo_invocation_census(
+    fixture: &ProductionFixture,
+    selected: &PersistedActivationControlRow,
+) {
+    use arrow_array::{BinaryArray, BooleanArray, Decimal128Array, StringArray};
+    use std::os::unix::ffi::OsStrExt as _;
+    let root = Path::new(&fixture.workspace.root_path_display);
+    let runs = selected_relation_batches(selected, "source.rustc_invocation");
+    let mut units = BTreeMap::new();
+    for batch in &runs {
+        let text = |name| {
+            batch
+                .column_by_name(name)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+        };
+        let paths = batch
+            .column_by_name("source_path")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        let present = batch
+            .column_by_name("census_present")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .unwrap();
+        let directories = batch
+            .column_by_name("working_directory")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            assert!(present.value(row));
+            assert_eq!(text("terminal_state").value(row), "complete");
+            let absolute = Path::new(std::ffi::OsStr::from_bytes(directories.value(row)))
+                .join(std::ffi::OsStr::from_bytes(paths.value(row)));
+            let relative = absolute
+                .strip_prefix("/workspace")
+                .unwrap()
+                .as_os_str()
+                .as_bytes();
+            assert!([b"src/lib.rs".as_slice(), b"custom/configure.rs"].contains(&relative));
+            let bytes = fs::read(root.join(std::ffi::OsStr::from_bytes(relative))).unwrap();
+            assert_eq!(
+                text("source_content_digest").value(row),
+                format!("b3:{}", blake3::hash(&bytes).to_hex())
+            );
+            assert!(
+                units
+                    .insert(
+                        text("compilation_unit_id").value(row).to_owned(),
+                        relative.to_vec()
+                    )
+                    .is_none()
+            );
+        }
+    }
+    assert_eq!(
+        units.len(),
+        2,
+        "build-script execution is not a third compiler invocation"
+    );
+    let arguments = selected_relation_batches(selected, "source.rustc_invocation_argument");
+    let mut by_unit = BTreeMap::<String, BTreeMap<i128, Vec<u8>>>::new();
+    for batch in &arguments {
+        let ids = batch
+            .column_by_name("compilation_unit_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let ordinals = batch
+            .column_by_name("ordinal")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Decimal128Array>()
+            .unwrap();
+        let values = batch
+            .column_by_name("argument")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            assert!(units.contains_key(ids.value(row)));
+            assert!(
+                by_unit
+                    .entry(ids.value(row).to_owned())
+                    .or_default()
+                    .insert(ordinals.value(row), values.value(row).to_vec())
+                    .is_none()
+            );
+        }
+    }
+    assert_eq!(by_unit.len(), 2);
+    for (unit, arguments) in &by_unit {
+        assert!(arguments.keys().copied().eq(0..arguments.len() as i128));
+        let values = arguments.values().map(Vec::as_slice).collect::<Vec<_>>();
+        assert!(values.contains(&b"--crate-name".as_slice()));
+        if units[unit] == b"src/lib.rs" {
+            let source = fs::read(root.join("custom/configure.rs")).unwrap();
+            let selects = source
+                .windows(b"cargo::rustc-cfg=selected".len())
+                .any(|window| window == b"cargo::rustc-cfg=selected");
+            assert_eq!(
+                values
+                    .windows(2)
+                    .any(|pair| pair == [b"--cfg".as_slice(), b"selected"]),
+                selects
+            );
+        }
+    }
+    let produced = selected_relation_batches(selected, "source.rustc_produced_relation");
+    let mut fact_units = BTreeSet::new();
+    for batch in &produced {
+        let ids = batch
+            .column_by_name("compilation_unit_id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        let coverage = batch
+            .column_by_name("owner_coverage")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            assert!(units.contains_key(ids.value(row)));
+            assert_eq!(coverage.value(row), "complete");
+            fact_units.insert(ids.value(row).to_owned());
+        }
+    }
+    assert_eq!(fact_units, units.keys().cloned().collect());
+    let environment = selected_relation_batches(selected, "source.rustc_invocation_environment");
+    assert!(environment.iter().any(|batch| batch.num_rows() > 0));
+    for batch in &environment {
+        assert!(batch.column_by_name("value").is_none());
+        let digests = batch
+            .column_by_name("value_digest")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            assert!(digests.value(row).starts_with("b3:"));
+        }
+    }
+}
+
 fn cargo_build_unit_graph_observation(
     fixture: &ProductionFixture,
 ) -> (
@@ -2038,6 +2195,7 @@ fn cargo_build_unit_graph_observation(
         .max_by_key(|row| row.row().ordinal.get())
         .unwrap();
     let graphs = selected_relation_batches(&selected, "source.cargo_unit_graph");
+    assert_cargo_invocation_census(fixture, &selected);
     assert_eq!(graphs.iter().map(RecordBatch::num_rows).sum::<usize>(), 1);
     let graph: serde_json::Value = serde_json::from_slice(
         graphs

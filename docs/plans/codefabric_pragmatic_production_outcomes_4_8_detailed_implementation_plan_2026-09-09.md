@@ -2044,6 +2044,49 @@ and delegated user-systemd scope. All-target Clippy completes in 3m25s with the 
 backlog (`/tmp/codefabric-p04-priority-clippy.{jsonl,stderr}`). These results precede the subsequent
 compiler invocation-census changes and do not qualify the full suite, doctests or performance.
 
+**Actual compiler invocation census (2026-09-11; native qualification delivered, full installed
+edit/reopen qualification pending).** The wrapper negotiates an optional census feature before
+sending a new typed Protobuf field: stream checksums re-encode messages, so silently sending fields
+to an older Prost peer would not preserve stream integrity. Older senders retain explicit absent
+census scope. Native argument order/bytes, compiler path, working directory, source path/content
+identity and environment names/value digests are retained in charged application-owned values after
+complete stream validation and launcher qualification. Environment values are never census fields.
+Four typed `source.rustc_*` relations preserve invocation, argument, environment and produced-relation
+observations with current workspace/generation/context/run/unit provenance, terminal/owner coverage,
+family counts and IPC/schema identities. Relative compiler paths remain relative to their recorded
+working directory. These observations do not authorize replay or retained facts.
+
+Library grounding: Protobuf §26, “Schema evolution and binary compatibility,” and Rust gRPC §9,
+“prost runtime — message contract and hot-path semantics”; exact selected Prost 0.14.4 and Tonic
+0.14.6 generated/runtime sources. Native `Message::encoded_len` checks the complete envelope against
+the existing frame bound. The ordinary generator reconciles the whole descriptor projection and
+checks the existing compatibility baseline; no public query field or method changes.
+
+The extractor passes strict all-target check/Clippy, all **23 tests**, and rebuilt executable identity.
+`just proto-repro-check` passes, including **28 Python cases** and reproducible descriptor/binding
+generation; `just tooling-test tooling/proto/test_generate.py` passes **250 tests in 3.26 s**.
+The correctly delegated root selection passes all **24 focused cases**, including old/new feature
+negotiation and real successful/failed compilations with charged census ownership. The initial
+delegation omission and an incorrect absolute-path fixture assumption were corrected; neither
+changes production capture behavior. Logs: `/tmp/codefabric-p04-invocation-*.log`; root run
+`00586b43-502e-4629-8efd-c935dad7d32b` uses the isolated target, rebuilt installed providers
+and delegated user-systemd scope (24 passed and the installed status race below).
+
+The installed build-script case passes the initial independently expected two compiler units,
+source-content identities, ordered arguments, selected cfg and produced facts, then fails at a
+later status read in **199.652 s**: a periodic rescan arrived after its query had returned CURRENT.
+The shared helper now keeps the query's own freshness assertion and checks that the later status
+generation never moves backward. A later status read may truthfully report new pending work.
+Complete edit/independent-clean/exact-reopen qualification remains pending this correction.
+All-target Clippy completes in 2m05s with the existing warnings and census schema/helper length
+advisories (`/tmp/codefabric-p04-invocation-clippy.{jsonl,stderr}`). No full-suite result is claimed.
+
+Actual Cargo artifact/build-script-output observations and their joins to expected units/facts,
+retained private outputs, complete dependency/runtime validity, and safe replay/admission remain.
+Cargo's selected-nightly “External tools” reference distinguishes `compiler-artifact.fresh` from
+execution; `build-script-executed` can also report cached output. The next slice preserves those
+semantics and the joined capture/receipt boundary before considering retained output reuse.
+
 **Remaining implementation progression (E02/E04/E05/E12/E21/E22; P04).**
 
 1. Extend the delivered workspace-owned parser/checker/toolchain caches to retained Cargo unit/fact

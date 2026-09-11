@@ -1,5 +1,8 @@
 //! Daemon-hosted validation and flow control for the compiler-wrapper protocol.
 
+mod invocation;
+pub use invocation::RustcInvocationObservation;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::future::Future;
@@ -322,6 +325,8 @@ pub struct AcceptedRustcCompilation {
     pub admission: RustcRunAdmission,
     pub control: RustcCompilationControl,
     pub owners: crate::resource_budget::ChargedSlice<AcceptedRustcOwner>,
+    /// Absent for peers without the negotiated census feature; absence is not completeness.
+    pub invocation: Option<crate::resource_budget::ChargedValue<RustcInvocationObservation>>,
     trust_binding: RustCompilationProtocolBinding,
 }
 
@@ -746,6 +751,7 @@ impl AcceptedRustcCompilation {
             admission,
             control,
             owners: crate::resource_budget::ChargedSlice::for_test(owners),
+            invocation: None,
             trust_binding,
         }
     }
@@ -1333,10 +1339,18 @@ impl RunValidator {
             .allocation
             .retain_measured_vec(owners, |_| 0)
             .map_err(provider_contract_status)?;
+        let invocation = invocation::take(&mut self.begin)
+            .map(|value| {
+                self.allocation
+                    .retain_value(value.retained_bytes()?, value)
+                    .map_err(provider_contract_status)
+            })
+            .transpose()?;
         Ok(AcceptedRustcCompilation {
             admission: self.admission,
             control,
             owners,
+            invocation,
             trust_binding: self.trust_binding,
         })
     }
@@ -1420,6 +1434,7 @@ fn validate_begin(
     begin: &CompilationBegin,
 ) -> Result<(), Status> {
     validate_job_admission(job, admission)?;
+    invocation::validate(begin)?;
     let target = begin
         .target
         .as_ref()
@@ -2533,6 +2548,7 @@ mod tests {
             context_manifest_digest: admission.context_manifest_digest.clone(),
             resource_profile_id: admission.resource_profile_id.clone(),
             toolchain_identity_digest: policy.toolchain_identity_digest.clone(),
+            invocation_census: None,
         };
         (policy, admission, begin)
     }
@@ -3269,6 +3285,43 @@ mod tests {
             validate_accepted_relation(&corrupt).unwrap_err().code(),
             tonic::Code::InvalidArgument
         );
+    }
+
+    #[tokio::test]
+    async fn invocation_census_feature_is_optional_for_older_peers() {
+        let feature = crate::rustc_relation_schema::RUSTC_INVOCATION_CENSUS_FEATURE;
+        for supported in [0, feature] {
+            let (mut policy, admission, _) = fixture();
+            policy.supported_feature_bits = supported;
+            let binding = trust_binding(&policy, &admission);
+            let job = provider_job(&policy, &admission, &[RustcRelation::MirBody]);
+            let (service, _) = RustcObservationService::new(
+                job,
+                policy.clone(),
+                admission.clone(),
+                binding,
+                task_scope(),
+            )
+            .unwrap();
+            for requested in [0, feature] {
+                let ack = service
+                    .handshake(Request::new(ExtractorHello {
+                        protocol_major: 1,
+                        protocol_minor: 0,
+                        required_feature_bits: 0,
+                        optional_feature_bits: requested,
+                        extractor_build: policy.extractor_build.clone(),
+                        rustc_version: policy.rustc_version.clone(),
+                        rustc_commit: policy.rustc_commit.clone(),
+                        toolchain_identity_digest: policy.toolchain_identity_digest.clone(),
+                        resource_profile_id: admission.resource_profile_id.clone(),
+                    }))
+                    .await
+                    .unwrap()
+                    .into_inner();
+                assert_eq!(ack.negotiated_feature_bits, supported & requested);
+            }
+        }
     }
 
     #[tokio::test]

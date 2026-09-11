@@ -1,7 +1,7 @@
 {
   "authority": "one exact grpc_tools.protoc invocation emits the sole FDS and candidate Python outputs; only adapter-owned cpgd.v2 bindings are committed, and the same FDS drives tonic_prost_build::Builder::compile_fds",
-  "descriptor_sha256": "591de8ba0f88c26999817fc53b629179ebc9de4c6492befa5e81ae89ec006d02",
-  "generated_sha256": "57689fa6a0acea157da6ad272bdc9c511104e8c359509200bee125994b05137e",
+  "descriptor_sha256": "44cc73670027e1b2bca74c69f2df33295a6a3de5f0b932e5f2c0ec0f844cf7db",
+  "generated_sha256": "f27f1c2ab5b87ebc6929d094c2076d2897225c95a23551502f1feb1249798502",
   "python": {
     "grpcio": "1.83.0",
     "grpcio-tools": "1.83.0",
@@ -24,9 +24,9 @@
   },
   "schema": 5,
   "sources": {
-    "contracts/rpc/cpg_query_service.proto": "b3:cb86ce16e9558c70ff42adb44b42af728e8bdddc093aaf7e5ba8614bcf1d90b3",
+    "contracts/rpc/cpg_query_service.proto": "b3:e7d25174f05758bc31d44dabf054223ad3504dbbde36172737cc5894276c8e30",
     "contracts/rpc/provider_control.proto": "b3:a01417da9b27ddeea75e369900d1ef3f2f8f0e705c03f5e2bd54ef8174007107",
     "contracts/rpc/pyrefly_sidecar.proto": "b3:c486f453e8ef05e6cfa9731fdeb930fd1d232278aa1750ffc94fcafab84b07f3",
-    "contracts/rpc/rustc_extractor.proto": "b3:ba4a19c3607747b95a8fbc75fe327cf4108fcf3c1424f5a7003bf42d6894276d"
+    "contracts/rpc/rustc_extractor.proto": "b3:dbcd5f171ef6c29ee9da5d0c9433d72f810e657181b7ab8733aa0c49111a1db7"
   }
 }

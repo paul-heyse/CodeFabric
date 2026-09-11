@@ -26,6 +26,8 @@ async fn contained_cargo_retains_structured_diagnostics_without_mir() {
 
 async fn contained_cargo_observations(compile_failure: bool) {
     let mut harness = lifecycle_harness();
+    harness.protocol_policy.supported_feature_bits =
+        crate::rustc_relation_schema::RUSTC_INVOCATION_CENSUS_FEATURE;
     let workspace = harness.inputs.workspace_view.clone();
     let dependencies = harness.inputs.dependency_view.clone();
     fs::create_dir(workspace.join("src")).unwrap();
@@ -329,6 +331,27 @@ async fn contained_cargo_observations(compile_failure: bool) {
         result.result().gaps().first()
     );
     assert_native_diagnostic_details(&result, diagnostic_source, compile_failure);
+    for compilation in result.compilations() {
+        let census = compilation
+            .accepted()
+            .invocation
+            .as_ref()
+            .expect("negotiated native invocation census");
+        assert!(census.compiler_path.ends_with(b"toolchain/bin/rustc"));
+        assert_eq!(census.source_path, b"src/lib.rs");
+        assert_eq!(census.working_directory, b"/workspace");
+        assert_eq!(
+            census.source_content_digest,
+            digest(b"pub mod other;\npub fn caller() -> u32 { other::caller() }\n")
+        );
+        assert!(
+            census
+                .arguments
+                .iter()
+                .any(|argument| argument == b"--crate-name")
+        );
+        assert!(census.reservation().amounts().memory_bytes > 0);
+    }
     if compile_failure {
         assert_eq!(result.result().terminal(), ProviderTerminalStatus::Failed);
         assert!(

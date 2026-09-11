@@ -3,8 +3,8 @@
 // version: 1.0
 // compatible_suite_major: 1
 // status: released
-// canonical_digest: b3:2f2c24a2877be95dfd1d3acc7d83354838696af2aaac13c99bde83ab743f6c62
-// digest_projection: proto-descriptor-v1
+// canonical_digest: b3:b942c843eac80cde62e4098a2dde7ccde8eaff48300225f2a8ffd72fb16a8101
+// digest_projection: proto-descriptor-v2
 syntax = "proto3";
 
 package codefabric.rustc.v1;
@@ -102,6 +102,24 @@ message CompilationBegin {
   string context_manifest_digest = 17;
   string resource_profile_id = 18;
   string toolchain_identity_digest = 19;
+  // Sent only when the invocation-census feature is negotiated. Absence means unknown.
+  RustcInvocationCensus invocation_census = 20;
+}
+
+// Observed inputs of this wrapper invocation, not a replay authorization. Paths and argv
+// preserve native bytes. Environment values are digested, never transported as credentials.
+message RustcInvocationCensus {
+  bytes compiler_path = 1;
+  bytes working_directory = 2;
+  bytes source_path = 3;
+  string source_content_digest = 4;
+  repeated bytes arguments = 5;
+  repeated RustcEnvironmentObservation environment = 6;
+}
+
+message RustcEnvironmentObservation {
+  bytes name = 1;
+  string value_digest = 2;
 }
 
 message CompilationAccepted {

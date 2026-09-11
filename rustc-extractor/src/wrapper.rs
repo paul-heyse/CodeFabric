@@ -36,6 +36,7 @@ use crate::protocol::generated::codefabric::rustc::v1::rustc_extractor_client::R
 use crate::protocol::generated::codefabric::rustc::v1::{
     CompilationBegin, CompilationEnd, CompilerOwnerKey, ExtractionEvent, ExtractorHello,
     OwnerBegin, OwnerEnd, OwnerRelationIpcFrame, PackageTargetIdentity, RejectionRuleErrorCode,
+    RustcEnvironmentObservation, RustcInvocationCensus,
 };
 use crate::relation_ipc_contract::relation_wire_identity;
 use crate::relation_ipc_proto::{
@@ -621,6 +622,9 @@ fn send_event(
     events: &mut Vec<ExtractionEvent>,
 ) -> Result<(), String> {
     let event = ExtractionEvent { event: Some(event) };
+    if event.encoded_len() > MAX_FRAME_BYTES {
+        return Err("compiler observation exceeds the negotiated frame bound".to_owned());
+    }
     sender
         .blocking_send(event.clone())
         .map_err(|_| "daemon event stream is closed".to_owned())?;
@@ -786,6 +790,36 @@ fn owner_source_span(owner: &OwnedRustcOwner) -> Option<(&Path, u64, u64)> {
     Some((Path::new(OsStr::from_bytes(path)), *start, *end))
 }
 
+fn invocation_census(
+    compiler: &OsStr,
+    arguments: &[OsString],
+    source: &Path,
+    source_bytes: &[u8],
+) -> Result<RustcInvocationCensus, String> {
+    let mut environment = env::vars_os()
+        .map(|(name, value)| RustcEnvironmentObservation {
+            name: name.as_bytes().to_vec(),
+            value_digest: b3(value.as_bytes()),
+        })
+        .collect::<Vec<_>>();
+    environment.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(RustcInvocationCensus {
+        compiler_path: compiler.as_bytes().to_vec(),
+        working_directory: env::current_dir()
+            .map_err(|error| format!("cannot observe compiler working directory: {error}"))?
+            .as_os_str()
+            .as_bytes()
+            .to_vec(),
+        source_path: source.as_os_str().as_bytes().to_vec(),
+        source_content_digest: b3(source_bytes),
+        arguments: arguments
+            .iter()
+            .map(|argument| argument.as_bytes().to_vec())
+            .collect(),
+        environment,
+    })
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_protocol(
     runtime: &Runtime,
@@ -837,7 +871,7 @@ fn run_protocol(
             ]
         )
     );
-    let begin = CompilationBegin {
+    let mut begin = CompilationBegin {
         provider_run_id: environment.provider_run_id.clone(),
         compilation_unit_id: compilation_unit_id.clone(),
         workspace_id: environment.workspace_id.clone(),
@@ -857,6 +891,7 @@ fn run_protocol(
         context_manifest_digest: environment.context_manifest_digest.clone(),
         resource_profile_id: environment.resource_profile_id.clone(),
         toolchain_identity_digest: b3(identity_bytes),
+        invocation_census: None,
     };
 
     let socket = environment.endpoint.clone();
@@ -864,7 +899,7 @@ fn run_protocol(
     let (monitor_sender, monitor_receiver) = std::sync::mpsc::channel();
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancelled_monitor = Arc::clone(&cancelled);
-    let deadline = runtime.block_on(async move {
+    let (deadline, census_negotiated) = runtime.block_on(async move {
         let channel = Endpoint::from_static("http://[::]:50051")
             .connect_with_connector(service_fn(move |_| {
                 let socket = socket.clone();
@@ -879,7 +914,7 @@ fn run_protocol(
             protocol_major: 1,
             protocol_minor: 0,
             required_feature_bits: 0,
-            optional_feature_bits: 0,
+            optional_feature_bits: crate::rustc_relation_schema::RUSTC_INVOCATION_CENSUS_FEATURE,
             extractor_build: identity.extractor.clone(),
             rustc_version: identity.rustc_release.clone(),
             rustc_commit: identity.rustc_commit_hash.clone(),
@@ -941,8 +976,22 @@ fn run_protocol(
                 }
             }
         });
-        Ok::<i64, String>(acknowledgement.provider_deadline_unix_ms)
+        Ok::<_, String>((
+            acknowledgement.provider_deadline_unix_ms,
+            acknowledgement.negotiated_feature_bits
+                & crate::rustc_relation_schema::RUSTC_INVOCATION_CENSUS_FEATURE
+                != 0,
+        ))
     })?;
+
+    if census_negotiated {
+        begin.invocation_census = Some(invocation_census(
+            real_rustc,
+            arguments,
+            &source,
+            &source_bytes,
+        )?);
+    }
 
     let mut events = Vec::new();
     send_event(
@@ -1247,6 +1296,44 @@ pub(crate) fn run(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn invocation_census_retains_argument_order_native_bytes_and_only_environment_digests() {
+        use prost::Message as _;
+        use std::ffi::{OsStr, OsString};
+        use std::os::unix::ffi::OsStringExt as _;
+        use std::path::Path;
+        let arguments = vec![
+            OsString::from("--cfg"),
+            OsString::from_vec(b"raw-\xff".to_vec()),
+        ];
+        let census = super::invocation_census(
+            OsStr::new("/dependencies/rustc"),
+            &arguments,
+            Path::new("src/lib.rs"),
+            b"pub fn f() {}",
+        )
+        .unwrap();
+        assert_eq!(
+            census.arguments,
+            vec![b"--cfg".to_vec(), b"raw-\xff".to_vec()]
+        );
+        assert_eq!(census.source_content_digest, super::b3(b"pub fn f() {}"));
+        let path = std::env::var_os("PATH").unwrap();
+        let observed = census
+            .environment
+            .iter()
+            .find(|entry| entry.name == b"PATH")
+            .unwrap();
+        assert_eq!(
+            observed.value_digest,
+            super::b3(std::os::unix::ffi::OsStrExt::as_bytes(path.as_os_str()))
+        );
+        assert_eq!(
+            super::RustcInvocationCensus::decode(census.encode_to_vec().as_slice()).unwrap(),
+            census
+        );
+    }
+
     #[test]
     fn compiler_linkage_selection_retains_every_repeated_and_combined_crate_type() {
         let arguments = [

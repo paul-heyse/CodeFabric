@@ -3,7 +3,7 @@
 // version: 2.0
 // compatible_suite_major: 2
 // status: released
-// canonical_digest: b3:b970dec1bf345bd3df0abd6da76e275a65eab5bce56406419f66ebe4ed29bbb3
+// canonical_digest: b3:b942c843eac80cde62e4098a2dde7ccde8eaff48300225f2a8ffd72fb16a8101
 // digest_projection: proto-descriptor-v2
 syntax = "proto3";
 

@@ -51,6 +51,7 @@ use crate::workspace_registry::WorkspaceRecord;
 use super::inputs::ProviderInputs;
 use super::{CompiledSemanticRelease, ProductionWorkspaceStartupError, digest16, lower_hex, step};
 
+mod invocations;
 mod targets;
 pub(in crate::fabric) mod toolchain_cache;
 pub(in crate::fabric) mod unit_graph;
@@ -180,7 +181,8 @@ impl RustcOutcome {
             &self.unselected_graphs,
             workspace,
             generation,
-        )
+        )?;
+        invocations::install(builder, &self.runs)
     }
 }
 
@@ -743,7 +745,8 @@ fn prepare_and_run(
                         .unwrap_or_default()
                         .into(),
                     toolchain_identity_digest: frame_digest(digest_bytes(TOOLCHAIN_IDENTITY)),
-                    supported_feature_bits: 0,
+                    supported_feature_bits:
+                        crate::rustc_relation_schema::RUSTC_INVOCATION_CENSUS_FEATURE,
                     provider_deadline_unix_ms: i64::try_from(
                         SystemTime::now()
                             .duration_since(UNIX_EPOCH)
