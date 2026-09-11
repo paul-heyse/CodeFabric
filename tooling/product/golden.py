@@ -22,6 +22,7 @@ CASES = {
     "mixed-publication-shutdown": "live_updates::mixed_semantic_publication_shutdown_joins_workspace_owners",
     "client-timeout-shutdown": "live_updates::timed_out_client_during_publication_drains_and_reopens_exactly",
     "provider-deployment-live": "live_updates::provider_deployment::selected_provider_redeployment_fences_delayed_facts_and_reconciles_reopen",
+    "sysroot-deployment-live": "live_updates::provider_deployment::selected_sysroot_changes_publish_without_source_edits_and_survive_restart",
     "rust-failure": "pragmatic_rust_target_failure_retains_other_targets",
     "first-release-queries": (
         "first_release::pragmatic_plan_corpus_first_four_forms_and_independent_expectations_survive_reopen"
@@ -161,7 +162,9 @@ def main(argv=None) -> int:
                     },
                     900,
                 ),
-                **dict.fromkeys({"staged-live", "python-live"}, 1200),
+                **dict.fromkeys(
+                    {"staged-live", "python-live", "sysroot-deployment-live"}, 1200
+                ),
                 "function-source-live": 1500,
                 "python-context-live": 2100,
                 "processing-pages": 2100,

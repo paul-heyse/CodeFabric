@@ -1540,7 +1540,7 @@ public forms and exact reopen pass in 113.704 s (run `c363235c-e4e6-45b6-8bcd-e5
 STATUS records the isolated native configuration and logs. Further physical external roots and the
 remaining §6A–§6C boundaries below remain open.
 
-**Resumed Git input slice (2026-09-11; accepted installed checkpoint).** Native gix index and
+**Resumed Git input slice (`4092ce08`, 2026-09-11; accepted installed checkpoint).** Native gix index and
 attribute stacks now observe the authoritative bounded source census, including every conflict
 stage, ignored/tracked classification and byte-safe attribute value/match provenance. Repository
 handles remain worker-local and isolated; no Git helper, source filter or repository mutation runs.
@@ -1709,6 +1709,27 @@ native tool/library changes, all legacy schema migrations or representative perf
 
 **Remaining implementation progression (E07–E11/E15/E22; P02/P04).**
 
+**Selected compiler observation continuation (2026-09-11; accepted installed checkpoint).**
+The persisted deployment witness now includes selected Rust compiler/sysroot members, directory
+membership and negative tool paths, plus C-driver/libgcc selection. Capture and census share Rust
+eligibility and compare the expanded witness through the existing publication fences. Cache eviction
+or restart cannot erase that selected baseline. Metadata triggers invalidation; captured tool bytes
+retain context authority. Tool selection uses bounded inline Tokio process I/O and cancellation with
+process-group termination and child joins (daemon library reference §27.2, Select pattern; selected
+Tokio `process::Child::kill`/`wait` semantics). The observer applies the same `/usr` C-driver boundary
+as actual capture before executing a selection command. Eight focused cases pass in 0.259 s;
+featureless checking and 234 tooling tests pass. The first installed private-sysroot run reaches
+correct background replacement and all four forms, but its comparison incorrectly requires Rust
+IDs to survive changed captured tool/context inputs. The corrected fixture checks expected facts
+and changed Rust contexts independently, and exact equality for unchanged reopen. The corrected
+installed case passes in 530.833 s (run `3ed5d8b9-2613-4d52-8cc6-7e65d3330631`), including
+background replacement with unchanged source bytes, two immutable toolchain captures, changed-tool
+restart and unchanged exact reopen through all four public forms. Final all-target checking passes;
+Clippy completes with warnings, including a fixture-length advisory. STATUS records configuration
+and logs. Capture/observation share the compiler-root selection and entry bound. The sandbox's
+live read-only `/usr` image is a distinct remaining validity/capture boundary;
+selected compiler observation does not establish complete native runtime closure.
+
 1. Capture positive and negative semantic dependencies as inputs to existing owner/context validity:
    resolved imports/exports, ordered search roots, absent module candidates, type/member/call inputs,
    build configuration, proc-macro/generated inputs and selected native tools. An import that was
@@ -1868,6 +1889,16 @@ Clippy and all 48 wrapper tests pass; STATUS retains logs/configuration and the 
    corpus is the baseline; an affected-file list is not proof of a native rechecked closure.
 3. For Rust, allow compatible Cargo units to reuse private target state while exact captured input
    identity remains the admission check. Keep output directories out of the source watch topology.
+   First run the selected nightly's native `cargo check --unit-graph -Z unstable-options` with
+   the same contained configuration, package/target/features/profile selection as compilation.
+   Its versioned JSON distinguishes compiler units, build-script execution and unit dependencies;
+   `cargo metadata` alone does not represent feature resolution by unit. A local four-unit probe
+   on 2026-09-11 confirms separate build/check/run-custom-build modes and effective profiles with
+   the selected nightly; this is API evidence, not product integration. Retain actual wrapper
+   argument/environment inputs with the unit/owner census before attempting replay. The existing
+   invocation digest alone cannot reconstruct a Cargo `Fresh` unit's extraction command. Join
+   expected units, actual compilation/artifact events and produced owners explicitly; absent fresh
+   facts remain incomplete until valid retained-fact admission or owned compiler replay is proved.
    Schedule independent contexts using allocated CPU slots; account Cargo/rustc parallelism and
    Pyrefly's pool together. The current fixed 16-thread checker setting becomes a context allocation
    from the shared scheduler, with broad useful defaults preserved.
@@ -2832,9 +2863,10 @@ The remaining **P04** progression is:
    submodule boundaries. Admitted nested/linked Git index/exclude/attributes/conflict stages now
    have persisted metadata, live observation and installed acceptance. Preserve authoritative bytes,
    bounded recovery topology and metadata-only observation boundaries (§6A/E06/E10).
-2. Complete positive/negative dependency and tool validity, including selected sysroot, linker,
-   runtime libraries and external roots. Extend persisted input validity beyond the two provider
-   executables so cache eviction/reopen cannot hide tool-only changes. Add complete owner manifests
+2. Complete positive/negative dependency and tool validity, including the broader linker/runtime
+   image and external roots. Persisted compiler/sysroot and C-driver/libgcc observations now extend
+   the provider-executable baseline and pass installed replacement/reopen (§6B); the sandbox's live
+   read-only `/usr` image still needs an explicit capture/validity boundary. Add complete owner manifests
    and conservative replacement/fences before finer reuse (§6B/E07/E11/E22).
 3. Establish the actual Cargo unit/effective-command and produced-fact census before retaining
    private target outputs. A native Cargo `Fresh` result can skip the extractor wrapper and produce

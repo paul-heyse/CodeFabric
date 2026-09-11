@@ -567,8 +567,6 @@ fn build_fresh_native_source(
     } = work;
     crate::process_memory::admit(crate::resource_budget::ResourceClass::Data)
         .map_err(|error| step("source-memory-headroom", error))?;
-    let provider_deployment = super::provider_deployment::observation_digest()
-        .map_err(|error| step("provider-deployment-observation", error))?;
     let workspace_root = state_root
         .join("fabric")
         .join(lower_hex(&record.workspace_id));
@@ -598,6 +596,18 @@ fn build_fresh_native_source(
     )?;
     prepared_inputs.detach_writer(operational_database.to_owned(), Arc::clone(&writer));
     drop(capture_writer);
+    let provider_deployment = super::provider_deployment::observation_digest(
+        prepared_inputs
+            .capture()?
+            .inventory()
+            .inventory()
+            .records
+            .iter()
+            .any(|record| record.path.raw_relative_path_bytes.ends_with(b".rs")),
+        workspace_resources.budget(),
+        &cancellation,
+    )
+    .map_err(|error| step("provider-deployment-observation", error))?;
     costs.inputs(
         prepared_inputs.capture()?.images().len(),
         prepared_inputs
@@ -1092,11 +1102,11 @@ async fn build_fresh_candidate(
         .native_execution(task_scope)
         .map_err(|error| step("candidate-publish-executor", error))?
         .run_draining_mutation(
-                "candidate-publish",
-                crate::resource_budget::ResourceClass::Data,
-                // Source/semantic publication is workspace-owned background work. A caller's
-                // freshness timeout must not abandon a valid, still-advancing full CPG build.
-                None,
+            "candidate-publish",
+            crate::resource_budget::ResourceClass::Data,
+            // Source/semantic publication is workspace-owned background work. A caller's
+            // freshness timeout must not abandon a valid, still-advancing full CPG build.
+            None,
             move |cancellation, _| async move {
                 publish_fresh_candidate(
                     source,

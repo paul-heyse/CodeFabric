@@ -205,6 +205,15 @@ slow-timeout = { period = "60s", terminate-after = 10 }
 filter = 'test(selected_provider_redeployment_fences_delayed_facts_and_reconciles_reopen)'
 slow-timeout = { period = "60s", terminate-after = 10 }
 
+# Private sysroot addition/replacement, three mixed semantic publications and exact reopen.
+[[profile.default.overrides]]
+filter = 'test(selected_sysroot_changes_publish_without_source_edits_and_survive_restart)'
+slow-timeout = { period = "60s", terminate-after = 15 }
+
+[[profile.ci.overrides]]
+filter = 'test(selected_sysroot_changes_publish_without_source_edits_and_survive_restart)'
+slow-timeout = { period = "60s", terminate-after = 15 }
+
 # One complete site-packages publication followed by exact reopen and four public forms.
 [[profile.default.overrides]]
 filter = 'test(captured_python_site_packages_survive_public_queries_and_reopen)'

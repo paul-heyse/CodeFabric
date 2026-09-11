@@ -186,7 +186,7 @@ impl SourceUpdateOwner {
                     .map_err(|error| step("source-census-root", error))?;
                 let inventory = crate::inventory::InventoryWalker::new_governed(
                     crate::inventory::InventoryLimits::default(),
-                    budget,
+                    budget.clone(),
                 )
                 .walk_selected_with_fence(
                     &root,
@@ -201,8 +201,19 @@ impl SourceUpdateOwner {
                     Err(crate::inventory::InventoryError::SourceChanged) => return Ok(None),
                     Err(error) => return Err(step("source-census", error)),
                 };
-                let deployment = crate::fabric::provider_deployment::observation_digest()
-                    .map_err(|error| step("provider-deployment-observation", error))?;
+                drop(root);
+                drop(store);
+                drop(_writer);
+                let deployment = crate::fabric::provider_deployment::observation_digest(
+                    inventory
+                        .inventory()
+                        .records
+                        .iter()
+                        .any(|record| record.path.raw_relative_path_bytes.ends_with(b".rs")),
+                    &budget,
+                    &cancellation,
+                )
+                .map_err(|error| step("provider-deployment-observation", error))?;
                 Ok(Some(SourceCensus {
                     digest: inventory.inventory().digest,
                     git_context: inventory.inventory().git_context_digest(),

@@ -203,7 +203,7 @@ pub(super) fn run(
             return Ok(outcome);
         }
     };
-    let targets = match selected_toolchain() {
+    let targets = match selected_toolchain(cancellation) {
         Ok((_, host)) => targets::resolve_host(targets, &host),
         Err(_) => targets, // Preserve requested scope; each semantic preparation reports its failure.
     };
@@ -797,10 +797,12 @@ impl ToolchainInputs {
     }
 }
 
-fn selected_toolchain() -> Result<(PathBuf, String), ProductionWorkspaceStartupError> {
-    let selected = std::process::Command::new("rustup")
-        .args(["which", "--toolchain", RUSTC_TOOLCHAIN, "rustc"])
-        .output()
+fn selected_toolchain(
+    cancellation: &Cancellation,
+) -> Result<(PathBuf, String), ProductionWorkspaceStartupError> {
+    let mut command = std::process::Command::new("rustup");
+    command.args(["which", "--toolchain", RUSTC_TOOLCHAIN, "rustc"]);
+    let selected = crate::fabric::provider_deployment::command_output(command, cancellation)
         .map_err(|error| step("rust-toolchain-location", error))?;
     if !selected.status.success() {
         return Err(step(
@@ -813,9 +815,9 @@ fn selected_toolchain() -> Result<(PathBuf, String), ProductionWorkspaceStartupE
             .map_err(|error| step("rust-toolchain-location", error))?
             .trim(),
     );
-    let version = std::process::Command::new(&rustc)
-        .arg("-vV")
-        .output()
+    let mut command = std::process::Command::new(&rustc);
+    command.arg("-vV");
+    let version = crate::fabric::provider_deployment::command_output(command, cancellation)
         .map_err(|error| step("rust-toolchain-version", error))?;
     let version =
         String::from_utf8(version.stdout).map_err(|error| step("rust-toolchain-version", error))?;
@@ -854,7 +856,7 @@ fn select_toolchain_inputs(
             "cancelled before deployment selection",
         ));
     }
-    let (root, host) = selected_toolchain()?;
+    let (root, host) = selected_toolchain(cancellation)?;
     let root =
         std::fs::canonicalize(root).map_err(|error| step("rust-toolchain-location", error))?;
     let extractor = crate::fabric::provider_deployment::ProviderExecutable::RustcExtractor
@@ -894,7 +896,7 @@ fn toolchain_inputs(
     ));
     let mut bytes = 0;
     let mut witnesses = Vec::new();
-    for path in ["bin/cargo", "bin/rustc", "lib"] {
+    for path in crate::fabric::provider_deployment::COMPILER_INPUT_ROOTS {
         collect_toolchain(
             root,
             &root.join(path),
@@ -959,10 +961,9 @@ fn host_c_compiler_inputs(
             file_id: "toolchain:host-c-compiler".to_owned(),
             digest: digest_bytes(&captured),
         });
-        let libraries = std::process::Command::new(&compiler)
-            .env_clear()
-            .arg("-print-libgcc-file-name")
-            .output()
+        let mut command = std::process::Command::new(&compiler);
+        command.env_clear().arg("-print-libgcc-file-name");
+        let libraries = crate::fabric::provider_deployment::command_output(command, cancellation)
             .map_err(|error| step("rust-host-linker-search", error))?;
         if !libraries.status.success() {
             return Err(step(
@@ -1031,7 +1032,7 @@ fn collect_toolchain(
         ));
     }
     let metadata = std::fs::metadata(&exact).map_err(|error| step("rust-toolchain-file", error))?;
-    if witnesses.len() >= 100_000 {
+    if witnesses.len() >= crate::fabric::provider_deployment::MAX_COMPILER_INPUT_ENTRIES {
         return Err(step(
             "rust-toolchain-size",
             "toolchain entry budget exceeded",
@@ -1072,7 +1073,9 @@ fn collect_toolchain(
             )?;
         }
     } else if metadata.is_file() {
-        if metadata.len() > MAX_TOOLCHAIN_BYTES.saturating_sub(*bytes) || entries.len() >= 100_000 {
+        if metadata.len() > MAX_TOOLCHAIN_BYTES.saturating_sub(*bytes)
+            || entries.len() >= crate::fabric::provider_deployment::MAX_COMPILER_INPUT_ENTRIES
+        {
             return Err(step(
                 "rust-toolchain-size",
                 "toolchain input budget exceeded",

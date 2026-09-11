@@ -5,6 +5,11 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 
+mod tool_inputs;
+pub(in crate::fabric) use tool_inputs::{
+    COMPILER_INPUT_ROOTS, MAX_COMPILER_INPUT_ENTRIES, command_output,
+};
+
 #[derive(Clone, Copy)]
 pub(crate) enum ProviderExecutable {
     Pyrefly,
@@ -33,13 +38,24 @@ impl ProviderExecutable {
     }
 }
 
-/// A small, cache-independent witness survives in the selected source inventory relation.
-/// It observes only the two selected external provider executables, not an environment inventory.
-pub(crate) fn observation_digest() -> io::Result<[u8; 32]> {
-    observe_paths(&[
+/// A cache-independent witness survives in the selected source inventory relation. Only Rust
+/// input sets select the compiler/sysroot; unavailable tools do not prevent source publication.
+pub(crate) fn observation_digest(
+    has_rust: bool,
+    budget: &crate::resource_budget::ResourceBudget,
+    cancellation: &crate::cancellation::Cancellation,
+) -> io::Result<[u8; 32]> {
+    let providers = observe_paths(&[
         ProviderExecutable::Pyrefly.selected_path()?,
         ProviderExecutable::RustcExtractor.selected_path()?,
-    ])
+    ])?;
+    let mut hash = blake3::Hasher::new();
+    hash.update(b"codefabric.selected-native-input-observation.v2\0");
+    frame(&mut hash, &providers);
+    if has_rust {
+        tool_inputs::observe(&mut hash, budget, cancellation)?;
+    }
+    Ok(*hash.finalize().as_bytes())
 }
 
 fn frame(hash: &mut blake3::Hasher, bytes: &[u8]) {

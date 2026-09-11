@@ -98,7 +98,7 @@ control-admission ordering defect without extending command validity or changing
 The initial inclusion checkpoint is `d08a1e6c`; default and featureless `just root-check` pass
 (`/tmp/codefabric-p04-inclusion-check.log`).
 
-The Git input continuation captures detached index stages 0–3, ignore classification and native
+The Git input continuation (`4092ce08`) captures detached index stages 0–3, ignore classification and native
 attribute match provenance over the authoritative bounded source census. Nested/linked repositories
 use isolated worker-local gix handles; byte-safe paths and source bytes remain application-owned.
 Ignored source remains admitted, conflicted index entries never select an authoritative source blob,
@@ -118,6 +118,31 @@ Tooling tests pass 232/232; featureless checking passes and all-target Clippy co
 warnings. Flattened Arrow byte columns use native builders that accept unsized iterators; the raw
 Parquet fixture observes CodeFabric's reversible UInt8-to-Int16 storage mapping. Physical external
 roots, explicit submodule boundary metadata and broader validity/retention/scheduling remain in P04.
+
+The accepted tool-validity slice extends the persisted deployment observation to selected Rust compiler/sysroot
+members and the selected C driver/libgcc path. The census uses the same Rust input eligibility as
+capture, observes positive and negative tool inputs independently of retained byte caches, and
+releases the operational writer before tool observation. The existing source/candidate/activation
+checks consume the expanded witness. Tool discovery now uses inline Tokio process I/O with finite
+output/deadline bounds and explicit process-group kill/child join on cancellation or failure.
+An escaped C-driver selection is observed without executing it. Eight focused tests pass in 0.259 s
+(`/tmp/codefabric-p04-tool-observation-focused-v2.log`, run
+`207d06c8-e314-48a9-ab39-c6f65e76cb06`), and featureless checking passes. The first installed
+private-sysroot run reaches correct background replacement and four public forms, then fails its
+comparison at 357.101 s: changed captured sysroot bytes select a new Rust context and corresponding
+IDs. The fixture now verifies expected facts and context replacement separately, retaining exact
+equality for unchanged reopen. The corrected installed scenario passes in **530.833 s**, run
+`3ed5d8b9-2613-4d52-8cc6-7e65d3330631`
+(`/tmp/codefabric-p04-tool-observation-installed-v2.log`; isolated target, installed providers,
+delegated user-systemd scope and a private byte-copied sysroot). It checks background replacement
+without source/query triggers, two immutable captures, changed-tool restart and unchanged exact
+reopen through all four public forms. Capture and observation now share compiler roots and the
+entry bound. Final all-target checking passes; all-target Clippy completes with existing warnings
+and a fixture-length advisory. All 234 tooling tests pass, with focused format/lint and document
+navigation clean. These are behavioral checks, not isolated performance measurements; some checks
+overlapped the installed run. This does not close the live read-only
+`/usr` runtime boundary: native runtime capture/validity and external dependency closure still need
+work before broader retained Cargo admission.
 
 The resumed inclusion slice uses one capture/watch policy. Captured root `pyrefly.toml` and
 `[tool.pyrefly]` search/site-package candidates can select subtrees beneath normally pruned
