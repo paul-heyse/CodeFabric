@@ -19,14 +19,14 @@ const MAX_ENTRIES: usize = 4_000_000;
 const MAX_DEPTH: usize = 128;
 const MAX_DURATION: Duration = Duration::from_secs(120);
 
-pub(super) fn observe(
+pub(crate) fn observe(
     budget: &ResourceBudget,
     cancellation: &Cancellation,
 ) -> io::Result<[u8; 32]> {
     observe_root(Path::new("/usr"), budget, cancellation)
 }
 
-fn observe_root(
+pub(super) fn observe_root(
     root: &Path,
     budget: &ResourceBudget,
     cancellation: &Cancellation,
@@ -35,6 +35,7 @@ fn observe_root(
         budget,
         cancellation,
         started: Instant::now(),
+        duration: MAX_DURATION,
         entries: 0,
     };
     walk.check(0)?;
@@ -66,11 +67,12 @@ fn observe_root(
     Ok(*hash.finalize().as_bytes())
 }
 
-struct Walk<'a> {
-    budget: &'a ResourceBudget,
-    cancellation: &'a Cancellation,
-    started: Instant,
-    entries: usize,
+pub(super) struct Walk<'a> {
+    pub(super) budget: &'a ResourceBudget,
+    pub(super) cancellation: &'a Cancellation,
+    pub(super) started: Instant,
+    pub(super) duration: Duration,
+    pub(super) entries: usize,
 }
 
 impl Walk<'_> {
@@ -81,7 +83,9 @@ impl Walk<'_> {
                 "runtime observation cancelled",
             ));
         }
-        if self.entries >= MAX_ENTRIES || depth > MAX_DEPTH || self.started.elapsed() > MAX_DURATION
+        if self.entries >= MAX_ENTRIES
+            || depth > MAX_DEPTH
+            || self.started.elapsed() > self.duration
         {
             return Err(io::Error::other("runtime observation bound exceeded"));
         }
@@ -138,7 +142,7 @@ impl Walk<'_> {
         Ok(())
     }
 
-    fn names(
+    pub(super) fn names(
         &mut self,
         fd: impl AsFd,
     ) -> io::Result<(Vec<CString>, crate::resource_budget::ResourceReservation)> {
@@ -175,7 +179,7 @@ fn changed() -> io::Error {
     io::Error::other("native runtime changed during observation")
 }
 
-fn stamp(value: &Stat) -> [u8; 192] {
+pub(super) fn stamp(value: &Stat) -> [u8; 192] {
     // atime is deliberately excluded: observing/using a runtime must not invalidate it.
     // ctime catches same-size in-place writes even when the deployer restores mtime.
     let fields: [i128; 12] = [

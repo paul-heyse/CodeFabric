@@ -2920,6 +2920,36 @@ Preserve platform-specific truth: the implemented RSS/containment profile is Lin
    only add another platform's observer/containment profile when that deployment is selected and
    can be exercised. Public failures carry bounded useful reasons without internal paths/tokens.
 
+**Leased Linux runtime capture (2026-09-11; implementation under qualification).**
+The selected `/usr` mount is being replaced by a private immutable runtime image. The existing
+metadata census remains a deployment invalidation witness; a separate content digest now enters
+both semantic language contexts and the generated sandbox profile. Cold capture belongs to
+semantic preparation: initial source/syntax readiness retains explicit pending semantics and does
+not wait for copying the host runtime. The semantic successor selects its captured runtime context.
+This avoids treating metadata equality
+as captured-byte authority. The image captures raw directory names, regular-file bytes, relative
+and absolute symlink text, executable/read modes and modification times. It never follows links
+or opens FIFOs/devices/sockets. The sandbox keeps its existing absent `/etc`/host-root boundary;
+this does not silently expand provider filesystem access or create an environment-inventory graph.
+
+The implementation uses the selected rustix 1.1.4 descriptor-relative traversal, `ioctl_ficlone`
+for native copy-on-write extents where supported, bounded streaming copy/hash otherwise, and
+before/after source fences. Hard links to mutable host files are never used. The private per-user
+cache shares a captured image across daemons; ordinary Rust 1.98 `File::try_lock` and
+`try_lock_shared` supply process-released publication/eviction and image leases. A retained checker,
+compiler, candidate and cache may clone a lease, but only joined native child ownership releases
+the final provider holder. Failed process-group cleanup keeps that holder until daemon exit.
+
+The cache has broad finite limits (96 GiB per image, 192 GiB and eight images globally), physical
+headroom checks, bounded metadata/copy buffers and a cancellable ten-minute capture/lock deadline.
+Collection removes abandoned private staging and unleased predecessors; it cannot evict a pinned
+image. Cached image metadata is checked before reuse; modification is a reported integrity failure.
+The alternative of copying a whole runtime per candidate would multiply disk use without improving
+input identity or isolation. Host ownership/inode/access-time metadata is not portable runtime
+identity; captured files are application-owned with write and set-id bits removed. This closes a
+specific filesystem-input boundary once qualified, not universal native determinism or Cargo
+retained-fact validity. External roots, Cargo replay/retention, priority scheduling and P05 remain.
+
 **Producer-first native shutdown (2026-09-11; qualified slice).**
 The runtime-witness installed failure exposed a concrete ordering problem: controlled daemon
 cleanup cancelled the parent task scope before workspace publication finished, which closed

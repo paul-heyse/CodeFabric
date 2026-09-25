@@ -91,6 +91,8 @@ pub struct PythonContextDiscoveryRequest {
     pub pyrefly_bundle_digest: Option<[u8; 32]>,
     /// Observed native runtime compatibility, not captured content authority.
     pub runtime_observation: Option<[u8; 32]>,
+    /// Content identity of the daemon-leased immutable native runtime image.
+    pub runtime_image_digest: Option<[u8; 32]>,
     pub ruff_bundle_digest: [u8; 32],
     pub provider_bundle_version: String,
     pub search_scope: ContextSearchScope,
@@ -209,6 +211,9 @@ pub struct PythonAnalysisContextManifest {
     pub pyrefly_bundle_digest: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_observation: Option<[u8; 32]>,
+    /// Content identity of the daemon-leased immutable native runtime image.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_image_digest: Option<[u8; 32]>,
     pub ruff_bundle_digest: String,
     pub provider_bundle_version: String,
     pub platforms: Vec<String>,
@@ -746,6 +751,7 @@ fn assemble_manifest(
             unapplied_checker_settings: None,
             pyrefly_bundle_digest: request.pyrefly_bundle_digest.as_ref().map(digest_string),
             runtime_observation: request.runtime_observation,
+            runtime_image_digest: request.runtime_image_digest,
             ruff_bundle_digest: digest_string(&request.ruff_bundle_digest),
             provider_bundle_version: request.provider_bundle_version.clone(),
             platforms: Vec::new(),
@@ -781,6 +787,7 @@ fn validate_request(
         || request.platform_tag.is_empty()
         || request.provider_bundle_version.is_empty()
         || request.runtime_observation == Some([0; 32])
+        || request.runtime_image_digest == Some([0; 32])
         || !valid_relative_path(&request.project_root_path)
     {
         return Err(PythonContextDiscoveryError::terminal(
@@ -2006,6 +2013,16 @@ mod tests {
             selected.manifest.pyrefly_bundle_digest,
             changed.manifest.pyrefly_bundle_digest
         );
+        request.runtime_image_digest = Some([0x61; 32]);
+        let captured = discover_python_context(&request).unwrap();
+        assert_ne!(
+            captured.context.analysis_context_id,
+            changed.context.analysis_context_id
+        );
+        assert_eq!(captured.manifest.runtime_image_digest, Some([0x61; 32]));
+        request.runtime_image_digest = Some([0; 32]);
+        assert!(discover_python_context(&request).is_err());
+        request.runtime_image_digest = None;
         request.runtime_observation = Some([0; 32]);
         assert!(discover_python_context(&request).is_err());
     }
@@ -2040,6 +2057,7 @@ mod tests {
             typeshed_bundle_digest: Some([0x31; 32]),
             pyrefly_bundle_digest: Some([0x32; 32]),
             runtime_observation: None,
+            runtime_image_digest: None,
             ruff_bundle_digest: [0x33; 32],
             provider_bundle_version: "python-providers-v1".to_owned(),
             search_scope: ContextSearchScope {

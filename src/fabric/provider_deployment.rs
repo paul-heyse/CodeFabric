@@ -6,7 +6,7 @@ use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "linux")]
-mod runtime;
+use crate::provider_runtime::observation as runtime;
 mod tool_inputs;
 pub(in crate::fabric) use tool_inputs::{
     COMPILER_INPUT_ROOTS, MAX_COMPILER_INPUT_ENTRIES, command_output,

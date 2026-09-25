@@ -165,6 +165,7 @@ impl PyreflyCache {
         input_root: &Path,
         output_root: PathBuf,
         cpu: NativeCpuLease,
+        #[cfg(target_os = "linux")] runtime: &crate::provider_runtime::RuntimeImage,
     ) -> Result<PyreflyProviderRunResult, StartupPyreflyError> {
         if cpu.workers().get() != usize::from(job.ceilings().max_workers()) {
             return Err(PyreflyServiceError::Invalid(
@@ -218,6 +219,8 @@ impl PyreflyCache {
                 output_root.clone(),
                 scope,
                 activity.clone(),
+                #[cfg(target_os = "linux")]
+                runtime.clone(),
             )
             .await?;
             self.retained = Some(Retained {
@@ -286,6 +289,7 @@ async fn launch(
     output_root: PathBuf,
     scope: &StructuredCancellationScope,
     cpu: NativeCpuActivity,
+    runtime: crate::provider_runtime::RuntimeImage,
 ) -> Result<SupervisedPyreflyWorkspace, StartupPyreflyError> {
     use crate::provider_sandbox::{
         CompiledProviderSeccomp, GeneratedSandboxProfile, ProviderLaunchRequest,
@@ -305,6 +309,7 @@ async fn launch(
             .ok_or(PyreflyServiceError::TrustUnavailable)?,
         &output_root,
     )
+    .and_then(|profile| profile.with_runtime_image(runtime))
     .map_err(|_| PyreflyServiceError::TrustUnavailable)?;
     let policy =
         CompiledProviderSeccomp::compile().map_err(|_| PyreflyServiceError::TrustUnavailable)?;

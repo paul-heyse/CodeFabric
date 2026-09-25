@@ -72,6 +72,9 @@ struct Manifest {
     // context ID. It is not a claim that this process verified an immutable runtime image.
     #[serde(default)]
     runtime_observation: Option<[u8; 32]>,
+    // The daemon selects and leases this captured image through the actual process owner.
+    #[serde(default)]
+    runtime_image_digest: Option<[u8; 32]>,
     ruff_bundle_digest: String,
     provider_bundle_version: String,
     platforms: Vec<String>,
@@ -427,6 +430,7 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), PreparationError> {
         || manifest.platform_tag.is_empty()
         || manifest.provider_bundle_version.is_empty()
         || manifest.runtime_observation == Some([0; 32])
+        || manifest.runtime_image_digest == Some([0; 32])
         || manifest.configuration_policy_identity == [0; 32]
         || !valid_path(&manifest.configuration_namespace, true)
         || manifest.configuration_roots.is_empty()
@@ -690,15 +694,23 @@ mod tests {
                 .is_ok()
         );
         manifest["runtime_observation"] = serde_json::json!(vec![81; 32]);
+        manifest["runtime_image_digest"] = serde_json::json!(vec![97; 32]);
         let selected =
             SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
                 .unwrap();
         assert_eq!(selected.manifest.runtime_observation, Some([81; 32]));
+        assert_eq!(selected.manifest.runtime_image_digest, Some([97; 32]));
         for invalid in [
             serde_json::json!(vec![0; 32]),
             serde_json::json!(vec![81; 31]),
             serde_json::json!("claimed-digest"),
         ] {
+            manifest["runtime_image_digest"] = invalid.clone();
+            assert!(
+                SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())
+                    .is_err()
+            );
+            manifest["runtime_image_digest"] = serde_json::json!(vec![97; 32]);
             manifest["runtime_observation"] = invalid;
             assert!(
                 SelectedPyreflyPreparation::from_manifest(&serde_json::to_vec(&manifest).unwrap())

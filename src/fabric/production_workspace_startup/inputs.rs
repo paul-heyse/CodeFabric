@@ -40,6 +40,9 @@ pub(super) struct PreparedSourceInputs {
     capture: Option<InventoryCaptureBundle>,
     pub inventory: ChargedValue<ProviderSourceInventory>,
     pub(super) runtime_observation: Option<[u8; 32]>,
+    pub(super) runtime_image_digest: Option<[u8; 32]>,
+    #[cfg(target_os = "linux")]
+    pub(super) runtime_image: Option<crate::provider_runtime::RuntimeImage>,
     budget: ResourceBudget,
     cancellation: Cancellation,
 }
@@ -60,6 +63,9 @@ impl PreparedSourceInputs {
             capture: self.capture()?,
             inventory: &self.inventory,
             runtime_observation: self.runtime_observation,
+            runtime_image_digest: self.runtime_image_digest,
+            #[cfg(target_os = "linux")]
+            runtime_image: self.runtime_image.as_ref(),
             budget: &self.budget,
         })
     }
@@ -121,6 +127,9 @@ pub(super) struct ProviderInputs<'a> {
     capture: &'a InventoryCaptureBundle,
     pub inventory: &'a ChargedValue<ProviderSourceInventory>,
     pub(super) runtime_observation: Option<[u8; 32]>,
+    pub(super) runtime_image_digest: Option<[u8; 32]>,
+    #[cfg(target_os = "linux")]
+    pub(super) runtime_image: Option<&'a crate::provider_runtime::RuntimeImage>,
     budget: &'a ResourceBudget,
 }
 
@@ -263,6 +272,9 @@ pub(super) fn capture_inputs(
     };
     let mut owned = PreparedSourceInputs {
         runtime_observation: None,
+        runtime_image_digest: None,
+        #[cfg(target_os = "linux")]
+        runtime_image: None,
         store: CaptureStore::Capturing(store),
         image_store,
         capture: Some(capture),
@@ -494,6 +506,7 @@ pub(super) fn discover_python_inputs(
             default_python_version: "3.14".to_owned(),
         },
         runtime_observation: inputs.runtime_observation,
+        runtime_image_digest: inputs.runtime_image_digest,
         typeshed_bundle_digest: None,
         pyrefly_bundle_digest: None,
         ruff_bundle_digest: *blake3::hash(

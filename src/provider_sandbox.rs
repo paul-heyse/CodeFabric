@@ -794,6 +794,8 @@ fn probe_linux_run_cgroup_backend() -> (bool, bool) {
 /// Canonical profile bytes and the digest recorded in provider-run/snapshot provenance.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GeneratedSandboxProfile {
+    #[cfg(target_os = "linux")]
+    runtime_image: Option<crate::provider_runtime::RuntimeImage>,
     pub trust_profile: ProviderTrustProfile,
     pub mechanism: SandboxMechanism,
     pub bytes: Vec<u8>,
@@ -838,7 +840,14 @@ impl GeneratedSandboxProfile {
                 darwin_profile(&workspace_view, &dependency_root, &output_root).into_bytes()
             }
             (ProviderTrustProfile::UntrustedSandboxed, SandboxMechanism::LinuxBubblewrap) => {
-                linux_profile(&workspace_view, &dependency_root, &output_root).into_bytes()
+                linux_profile(
+                    &workspace_view,
+                    &dependency_root,
+                    &output_root,
+                    Path::new("/usr"),
+                    None,
+                )
+                .into_bytes()
             }
             (
                 ProviderTrustProfile::TrustedLocal | ProviderTrustProfile::ParsingOnly,
@@ -848,6 +857,8 @@ impl GeneratedSandboxProfile {
         };
         let sha256_digest = sha256_bytes(&bytes);
         Ok(Self {
+            #[cfg(target_os = "linux")]
+            runtime_image: None,
             trust_profile,
             mechanism,
             bytes,
@@ -856,6 +867,34 @@ impl GeneratedSandboxProfile {
             dependency_root,
             output_root,
         })
+    }
+
+    /// Bind the actual leased image into both launch arguments and profile provenance.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn with_runtime_image(
+        mut self,
+        image: crate::provider_runtime::RuntimeImage,
+    ) -> Result<Self, SandboxError> {
+        if self.mechanism != SandboxMechanism::LinuxBubblewrap
+            || self.trust_profile != ProviderTrustProfile::UntrustedSandboxed
+            || image.root().to_str().is_none()
+            || roots_overlap(image.root(), &self.output_root)
+        {
+            return Err(SandboxError::InvalidProfile(
+                "invalid captured runtime selection",
+            ));
+        }
+        self.bytes = linux_profile(
+            &self.workspace_view,
+            &self.dependency_root,
+            &self.output_root,
+            image.root(),
+            Some(image.digest()),
+        )
+        .into_bytes();
+        self.sha256_digest = sha256_bytes(&self.bytes);
+        self.runtime_image = Some(image);
+        Ok(self)
     }
 
     /// Materialize immutable profile bytes under the daemon-owned state root.
@@ -1147,6 +1186,8 @@ pub enum ProviderSandboxLaunchMaterial<'a> {
 /// created by the sole launcher after `process_group(0)` has been installed on the command.
 #[derive(Debug)]
 pub struct ProviderProcessGroupChild {
+    #[cfg(target_os = "linux")]
+    runtime_image: Option<crate::provider_runtime::RuntimeImage>,
     child: Child,
     process_group_id: rustix::process::Pid,
     trust_profile: ProviderTrustProfile,
@@ -1185,6 +1226,7 @@ impl ProviderProcessGroupChild {
             process_group_id,
             trust_profile,
             sandbox_profile_digest,
+            runtime_image: None,
             run_cgroup,
         })
     }
@@ -1337,6 +1379,17 @@ impl Drop for ProviderProcessGroupChild {
         // is a last-resort guard; the trust supervisor performs the graceful, receipted sequence.
         let _ = self.kill_group();
         let _ = self.child.wait();
+        #[cfg(target_os = "linux")]
+        if self.runtime_image.is_some()
+            && !self
+                .wait_group_empty(Duration::from_secs(5))
+                .unwrap_or(false)
+        {
+            // Failed native cleanup cannot turn a live input into an evictable cache entry.
+            // The OS releases the lock at daemon exit; ordinary successful joins release it now.
+            std::mem::forget(self.runtime_image.take());
+            tracing::warn!("runtime image lease retained after failed provider group join");
+        }
     }
 }
 
@@ -1513,6 +1566,10 @@ impl ProviderSandboxLauncher {
                 profile.trust_profile,
                 profile.sha256_digest.clone(),
             )
+            .map(|mut child| {
+                child.runtime_image = profile.runtime_image.clone();
+                child
+            })
         }
         #[cfg(not(target_os = "linux"))]
         ProviderProcessGroupChild::new(child, profile.trust_profile, profile.sha256_digest.clone())
@@ -1651,7 +1708,16 @@ fn linux_sandbox_arguments(profile: &GeneratedSandboxProfile, inherited_fd: &str
         "--seccomp".into(),
         inherited_fd.to_owned(),
         "--ro-bind".into(),
-        "/usr".into(),
+        profile.runtime_image.as_ref().map_or_else(
+            || "/usr".into(),
+            |image| {
+                image
+                    .root()
+                    .to_str()
+                    .expect("validated runtime path")
+                    .to_owned()
+            },
+        ),
         "/usr".into(),
         "--symlink".into(),
         "usr/bin".into(),
@@ -1685,9 +1751,20 @@ fn linux_sandbox_arguments(profile: &GeneratedSandboxProfile, inherited_fd: &str
     ]
 }
 
-fn linux_profile(view: &Path, dependencies: &Path, output: &Path) -> String {
+fn linux_profile(
+    view: &Path,
+    dependencies: &Path,
+    output: &Path,
+    root: &Path,
+    runtime_digest: Option<[u8; 32]>,
+) -> String {
+    let identity = runtime_digest
+        .map(|digest| format!("runtime_image=b3:{}\n", blake3::Hash::from(digest).to_hex()))
+        .unwrap_or_default();
     format!(
-        "mechanism=bubblewrap\nno_new_privs=true\nunshare=user,pid,ipc,uts,cgroup,net\nro_bind=/usr:/usr\nsymlink=usr/bin:/bin\nsymlink=usr/lib:/lib\nsymlink=usr/lib64:/lib64\nsymlink=usr/sbin:/sbin\nro_bind={}:/workspace\nro_bind={}:/dependencies\nbind={}:/output\ntmpfs=/tmp\ncap_drop=ALL\nseccomp=codefabric-provider-v1\ndie_with_parent=true\nnew_session=true\n",
+        "mechanism=bubblewrap\nno_new_privs=true\nunshare=user,pid,ipc,uts,cgroup,net\nro_bind={}:/usr\n{}symlink=usr/bin:/bin\nsymlink=usr/lib:/lib\nsymlink=usr/lib64:/lib64\nsymlink=usr/sbin:/sbin\nro_bind={}:/workspace\nro_bind={}:/dependencies\nbind={}:/output\ntmpfs=/tmp\ncap_drop=ALL\nseccomp=codefabric-provider-v1\ndie_with_parent=true\nnew_session=true\n",
+        root.display(),
+        identity,
         view.display(),
         dependencies.display(),
         output.display(),
@@ -2248,5 +2325,64 @@ mod tests {
             assert!(!untrusted.available);
             assert_ne!(untrusted.reason_code, "SANDBOX_PROVED");
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn captured_runtime_profile_and_actual_child_keep_the_same_image_lease_until_join() {
+        let (fixture, image, budget) = crate::provider_runtime::tests::image_fixture();
+        let view = fixture.path().join("view");
+        let dependencies = fixture.path().join("dependencies");
+        let output = fixture.path().join("output");
+        for path in [&view, &dependencies, &output] {
+            fs::create_dir(path).unwrap();
+        }
+        let profile = GeneratedSandboxProfile::generate(
+            ProviderTrustProfile::UntrustedSandboxed,
+            SandboxMechanism::LinuxBubblewrap,
+            &view,
+            &dependencies,
+            &output,
+        )
+        .unwrap()
+        .with_runtime_image(image.clone())
+        .unwrap();
+        let arguments = linux_sandbox_arguments(&profile, "3");
+        assert!(
+            arguments
+                .windows(3)
+                .any(|parts| parts == ["--ro-bind", image.root().to_str().unwrap(), "/usr"])
+        );
+        assert!(
+            String::from_utf8(profile.bytes.clone())
+                .unwrap()
+                .contains(&format!(
+                    "runtime_image=b3:{}",
+                    blake3::Hash::from(image.digest()).to_hex()
+                ))
+        );
+        let lease = fs::File::open(image.root().parent().unwrap().join("lease")).unwrap();
+        let child = Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut child = ProviderProcessGroupChild::new(
+            child,
+            None,
+            ProviderTrustProfile::TrustedLocal,
+            profile.sha256_digest.clone(),
+        )
+        .unwrap();
+        child.runtime_image = profile.runtime_image.clone();
+        drop((profile, image));
+        assert!(matches!(
+            lease.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        assert!(budget.observation().used.disk_bytes > 0);
+        drop(child); // Kills and joins the actual process group before releasing its inputs.
+        lease.try_lock().unwrap();
+        assert_eq!(budget.observation().used.disk_bytes, 0);
     }
 }

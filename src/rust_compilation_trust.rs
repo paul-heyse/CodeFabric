@@ -3895,6 +3895,7 @@ mod tests {
             .collect();
         RustContextDiscoveryRequest {
             runtime_observation: None,
+            runtime_image_digest: None,
             workspace_id: crate::identity::encode_public_id(
                 crate::identity::IdentityDomain::Workspace,
                 None,

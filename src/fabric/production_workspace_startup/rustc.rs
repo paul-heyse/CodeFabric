@@ -429,6 +429,7 @@ fn prepare_and_run(
     let selection = initial_selection(&files, target, toolchain, workers)?;
     let product = discover_rust_context(&RustContextDiscoveryRequest {
         runtime_observation: inputs.runtime_observation,
+        runtime_image_digest: inputs.runtime_image_digest,
         workspace_id: workspace_id.clone(),
         source_generation: inventory.source_generation(),
         provider_bundle_version: "codefabric-rust-compiler-v1".into(),
@@ -547,7 +548,7 @@ fn prepare_and_run(
     let metadata_paths =
         RustCompilationPrivatePaths::prepare(&view.output_root, &format!("metadata-{attempt}"))
             .map_err(|error| step("rust-metadata-output", error))?;
-    let metadata_profile = profile(&compilation_inputs, &metadata_paths)?;
+    let metadata_profile = profile(&compilation_inputs, &metadata_paths, inputs)?;
     let metadata_plan = compile_rust_metadata_launch_plan(
         &policy,
         &capabilities,
@@ -596,7 +597,7 @@ fn prepare_and_run(
     let graph_paths =
         RustCompilationPrivatePaths::prepare(&view.output_root, &format!("unit-graph-{attempt}"))
             .map_err(|error| step("rust-unit-graph-output", error))?;
-    let graph_profile = profile(&compilation_inputs, &graph_paths)?;
+    let graph_profile = profile(&compilation_inputs, &graph_paths, inputs)?;
     let graph_plan = crate::rust_compilation_trust::compile_rust_unit_graph_launch_plan(
         &policy,
         &capabilities,
@@ -714,7 +715,7 @@ fn prepare_and_run(
     let paths =
         RustCompilationPrivatePaths::prepare(&view.output_root, &format!("compiler-{attempt}"))
             .map_err(|error| step("rust-output", error))?;
-    let profile = profile(&compilation_inputs, &paths)?;
+    let profile = profile(&compilation_inputs, &paths, inputs)?;
     let admission = RustcRunAdmission {
         provider_run_id: request.context.provider_run_id.clone(),
         workspace_id,
@@ -800,15 +801,26 @@ fn public_id(
 fn profile(
     inputs: &RustCompilationInputs,
     paths: &RustCompilationPrivatePaths,
+    source: &ProviderInputs<'_>,
 ) -> Result<GeneratedSandboxProfile, ProductionWorkspaceStartupError> {
-    GeneratedSandboxProfile::generate(
+    let profile = GeneratedSandboxProfile::generate(
         ProviderTrustProfile::UntrustedSandboxed,
         SandboxMechanism::LinuxBubblewrap,
         &inputs.workspace_view,
         &inputs.dependency_view,
         &paths.run_root,
     )
-    .map_err(|error| step("rust-sandbox-profile", error))
+    .map_err(|error| step("rust-sandbox-profile", error))?;
+    #[cfg(target_os = "linux")]
+    let profile = profile
+        .with_runtime_image(
+            source
+                .runtime_image
+                .ok_or_else(|| step("rust-runtime-image", "captured runtime is absent"))?
+                .clone(),
+        )
+        .map_err(|error| step("rust-runtime-profile", error))?;
+    Ok(profile)
 }
 
 fn dependency(path: &str, bytes: Vec<u8>, executable: bool) -> DependencyInput {
@@ -1473,6 +1485,7 @@ mod tests {
         let selection = initial_selection(&files, &selected, toolchain, workers).unwrap();
         let product = discover_rust_context(&RustContextDiscoveryRequest {
             runtime_observation: None,
+            runtime_image_digest: None,
             workspace_id: format!("workspace:{:032x}", 1),
             source_generation: generation,
             provider_bundle_version: "codefabric-rust-compiler-v1".into(),

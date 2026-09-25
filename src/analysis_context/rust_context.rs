@@ -39,6 +39,8 @@ pub struct RustContextDiscoveryRequest {
     pub provider_bundle_version: String,
     /// Observed native runtime compatibility, not captured content authority.
     pub runtime_observation: Option<[u8; 32]>,
+    /// Content identity of the daemon-leased immutable native runtime image.
+    pub runtime_image_digest: Option<[u8; 32]>,
     pub files: Vec<ContextFileInput>,
     pub search_scope: ContextSearchScope,
     pub selection: RustContextSelection,
@@ -83,6 +85,8 @@ pub struct RustContextDiscoveryProduct {
     pub settings: RustCompilationSettings,
     pub canonical_manifest: Vec<u8>,
     pub runtime_observation: Option<[u8; 32]>,
+    /// Content identity of the daemon-leased immutable native runtime image.
+    pub runtime_image_digest: Option<[u8; 32]>,
     pub lookup_evidence: Vec<ContextLookupEvidence>,
     pub remainders: Vec<RustContextRemainder>,
     pub source_generation: u64,
@@ -97,8 +101,12 @@ impl RustContextDiscoveryProduct {
     pub fn validate(&self) -> Result<(), RustContextDiscoveryError> {
         self.context.validate()?;
         self.search_scope.validate()?;
-        let canonical =
-            canonical_manifest(&self.search_scope, &self.settings, self.runtime_observation)?;
+        let canonical = canonical_manifest(
+            &self.search_scope,
+            &self.settings,
+            self.runtime_observation,
+            self.runtime_image_digest,
+        )?;
         if canonical != self.canonical_manifest
             || self.context.fingerprint_bytes()? != crate::integrity::digest_bytes(&canonical)
             || self.context.context_kind != AnalysisContextKind::Rust
@@ -222,6 +230,7 @@ pub fn discover_rust_context(
         &request.search_scope,
         &settings,
         request.runtime_observation,
+        request.runtime_image_digest,
     )?;
     let fingerprint = crate::integrity::digest_bytes(&canonical_manifest);
     let context = AnalysisContext::new_from_manifest_fingerprint(
@@ -238,6 +247,7 @@ pub fn discover_rust_context(
             settings,
             canonical_manifest,
             runtime_observation: request.runtime_observation,
+            runtime_image_digest: request.runtime_image_digest,
             lookup_evidence,
             remainders,
             source_generation: request.source_generation,
@@ -660,6 +670,7 @@ fn canonical_manifest(
     scope: &ContextSearchScope,
     settings: &RustCompilationSettings,
     runtime_observation: Option<[u8; 32]>,
+    runtime_image_digest: Option<[u8; 32]>,
 ) -> Result<Vec<u8>, RustContextDiscoveryError> {
     // Scope closure and generation belong to support evidence, not semantic environment identity.
     let mut value = serde_json::json!({"settings": settings, "namespace": scope.namespace,
@@ -671,6 +682,14 @@ fn canonical_manifest(
             ));
         }
         value["runtime_observation"] = serde_json::json!(witness);
+    }
+    if let Some(digest) = runtime_image_digest {
+        if digest == [0; 32] {
+            return Err(RustContextDiscoveryError::InvalidInput(
+                "empty runtime image digest",
+            ));
+        }
+        value["runtime_image_digest"] = serde_json::json!(digest);
     }
     crate::contracts::jcs::canonicalize_value(&value)
         .map_err(|error| RustContextDiscoveryError::Canonical(error.to_string()))
@@ -746,6 +765,22 @@ mod tests {
             selected.validate().is_err(),
             "runtime witness cannot drift under an existing context"
         );
+        request.runtime_image_digest = Some([0x61; 32]);
+        let RustContextDiscoveryOutcome::Prepared(mut captured) =
+            discover_rust_context(&request).unwrap()
+        else {
+            panic!("prepared fixture");
+        };
+        captured.validate().unwrap();
+        assert_ne!(
+            captured.context.analysis_context_id,
+            repeated.context.analysis_context_id
+        );
+        captured.runtime_image_digest = Some([0x62; 32]);
+        assert!(captured.validate().is_err());
+        request.runtime_image_digest = Some([0; 32]);
+        assert!(discover_rust_context(&request).is_err());
+        request.runtime_image_digest = None;
         request.runtime_observation = Some([0; 32]);
         assert!(discover_rust_context(&request).is_err());
     }
@@ -753,7 +788,7 @@ mod tests {
     fn request() -> RustContextDiscoveryRequest {
         RustContextDiscoveryRequest {
             workspace_id: encode_public_id(IdentityDomain::Workspace, None, [9; 16]).unwrap(),
-            source_generation: 5, runtime_observation: None, provider_bundle_version: "rust-providers-1".to_owned(),
+            source_generation: 5, runtime_observation: None, runtime_image_digest: None, provider_bundle_version: "rust-providers-1".to_owned(),
             files: vec![
                 input(b"Cargo.toml", b"[package]\nname='sample'\nversion='0.1.0'\nedition='2024'\n[lib]\npath='src/lib.rs'\n"),
                 input(b"src/lib.rs", b"pub fn value() -> u32 { 1 }\n"),

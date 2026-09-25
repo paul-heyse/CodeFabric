@@ -213,6 +213,10 @@ pub(super) fn run(
                 &input_root,
                 view.output_root,
                 cpu,
+                #[cfg(target_os = "linux")]
+                inputs
+                    .runtime_image
+                    .ok_or_else(|| step("pyrefly-runtime-image", "captured runtime is absent"))?,
             ),
     );
     match result {

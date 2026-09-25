@@ -77,6 +77,8 @@ pub(crate) mod provider_native_rust_syntax;
 pub mod provider_native_syntax;
 #[cfg(feature = "fact-generation")]
 pub mod provider_raw_kinds;
+#[cfg(all(feature = "daemon", target_os = "linux"))]
+pub(crate) mod provider_runtime;
 #[cfg(feature = "daemon")]
 pub mod provider_sandbox;
 #[cfg(feature = "fact-generation")]

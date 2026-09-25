@@ -652,6 +652,23 @@ fn build_fresh_native_source(
     .map_err(|error| step("provider-deployment-observation", error))?;
     let provider_deployment = deployment.digest;
     prepared_inputs.runtime_observation = deployment.runtime;
+    #[cfg(target_os = "linux")]
+    if stage == PublicationStage::Semantic
+        && prepared_inputs.capture()?.images().iter().any(|image| {
+            matches!(
+                image.language,
+                SourceLanguage::Python | SourceLanguage::Rust
+            )
+        })
+        && let Some(observed) = deployment.runtime
+    {
+        costs.start("runtime-image");
+        let image = workspace_resources
+            .runtime_image(observed, &cancellation)
+            .map_err(|error| step("provider-runtime-capture", error))?;
+        prepared_inputs.runtime_image_digest = Some(image.digest());
+        prepared_inputs.runtime_image = Some(image);
+    }
     costs.inputs(
         prepared_inputs.capture()?.images().len(),
         prepared_inputs

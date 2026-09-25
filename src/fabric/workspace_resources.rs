@@ -23,6 +23,8 @@ use crate::resource_budget::{
 #[derive(Clone)]
 pub(crate) struct ProductionWorkspaceResources {
     budget: ResourceBudget,
+    #[cfg(target_os = "linux")]
+    runtime_cache: Arc<std::sync::Mutex<crate::provider_runtime::RuntimeCache>>,
     operational_writer: Arc<std::sync::Mutex<()>>,
     syntax_cache:
         Arc<std::sync::Mutex<super::production_workspace_startup::syntax_cache::SyntaxCache>>,
@@ -127,6 +129,10 @@ impl ProductionWorkspaceResources {
         )
         .map_err(|error| error.to_string())?;
         Ok(Self {
+            #[cfg(target_os = "linux")]
+            runtime_cache: Arc::new(std::sync::Mutex::new(
+                crate::provider_runtime::RuntimeCache::default(),
+            )),
             operational_writer: Arc::new(std::sync::Mutex::new(())),
             syntax_cache: Arc::new(std::sync::Mutex::new(
                 super::production_workspace_startup::syntax_cache::SyntaxCache::new(budget.clone()),
@@ -185,6 +191,18 @@ impl ProductionWorkspaceResources {
         &self,
     ) -> &Arc<std::sync::Mutex<super::production_workspace_startup::rustc::unit_graph::Cache>> {
         &self.rust_unit_graph_cache
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(in crate::fabric) fn runtime_image(
+        &self,
+        observed: [u8; 32],
+        cancellation: &crate::cancellation::Cancellation,
+    ) -> std::io::Result<crate::provider_runtime::RuntimeImage> {
+        self.runtime_cache
+            .lock()
+            .map_err(|error| std::io::Error::other(error.to_string()))?
+            .acquire(observed, &self.budget, cancellation)
     }
 
     /// Serializes short operational writes; provider computation never retains this gate.
